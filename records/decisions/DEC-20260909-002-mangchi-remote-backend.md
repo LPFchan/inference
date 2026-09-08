@@ -95,6 +95,20 @@ To make remote load/unload behave like local load/unload, mangchi runs a small
 always-on control service (separate from any single vLLM process) that owns
 vLLM process lifecycle:
 
+**The residency manager lives on mangchi, not grimoire.** It must: only mangchi
+can spawn/kill vLLM processes on its own GPU, so the agent on mangchi is the
+single authority on what is actually running on the Thor. It holds the launch
+specs, tracks the resident set, enforces the memory budget, and runs LRU
+eviction/pinning. Grimoire stays dumb about it: its remote backend simply calls
+the agent's endpoints (`start_model` -> load, `stop_model` -> unload, health
+-> status) and does not track mangchi's memory or decide evictions. This keeps
+one source of truth per concern — grimoire is the registry/API front door,
+mangchi is the authority on its own device — and keeps residency state correct
+even if something other than grimoire drives mangchi directly. The rejected
+alternative (residency manager on grimoire, remotely spawning/killing over
+SSH/RPC) splits the truth across two machines and breaks when anything else
+touches the Thor.
+
 - `POST /models/<id>/load` -> start `vllm serve` for that model's checkpoint
   (with the NVFP4 + PLE-offload flags), return once `/v1` is healthy.
 - `POST /models/<id>/unload` -> stop that vLLM process gracefully.

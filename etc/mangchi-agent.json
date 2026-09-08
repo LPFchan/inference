@@ -1,0 +1,27 @@
+{
+  "models": {
+    "qwen3.8-27b-uncensored-nvfp4": {
+      "model_path": "/home/yeowool/models/nvfp4/qwen3.8-27b-uncensored",
+      "resident_gb": 30,
+      "port": 8001,
+      "pinned": false,
+      "serve_args": [
+        "--max-model-len", "32768",
+        "--gpu-memory-utilization", "0.92"
+      ]
+    },
+    "qwen3.8-flash-next-uncensored-nvfp4": {
+      "model_path": "/home/yeowool/models/nvfp4/qwen3.8-flash-next-uncensored",
+      "resident_gb": 80,
+      "port": 8002,
+      "pinned": false,
+      "env": {
+        "VLLM_PLE_CPU_OFFLOAD": "1"
+      },
+      "serve_args": [
+        "--max-model-len", "131072",
+        "--gpu-memory-utilization", "0.92"
+      ]
+    }
+  }
+}
