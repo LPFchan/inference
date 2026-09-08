@@ -27,7 +27,6 @@ ARG GRIMOIRE_LLAMA_CPP_REPO_URL=https://github.com/TheTom/llama-cpp-turboquant.g
 ARG GRIMOIRE_LLAMA_CPP_REF=feature/turboquant-kv-cache
 ARG GRIMOIRE_LLAMA_CPP_PINNED_SHA=407f3237bfb3eeaff61546797de3d8c1a96be748
 ARG GRIMOIRE_LLAMA_CPP_APPLY_PATCHES=1
-ARG GRIMOIRE_LLAMA_CPP_CUDA_GRAPHS=OFF
 # Comma-separated list of patch filenames in patches/atomic-llama-cpp/, applied in order.
 ARG GRIMOIRE_LLAMA_CPP_PATCH_FILE=0005-peft-trainable-token-replacements.patch,0006-mtmd-gemma4v-sequential-images.patch,0011-cuda-fa-temp-buffers-bypass-vmm-pool.patch
 # Bump to force rebuild of the build stage (e.g. after upstream force-push)
@@ -77,7 +76,6 @@ ARG GRIMOIRE_LLAMA_CPP_REPO_URL
 ARG GRIMOIRE_LLAMA_CPP_REF
 ARG GRIMOIRE_LLAMA_CPP_PINNED_SHA
 ARG GRIMOIRE_LLAMA_CPP_APPLY_PATCHES=1
-ARG GRIMOIRE_LLAMA_CPP_CUDA_GRAPHS=OFF
 # Comma-separated list of patch filenames in patches/atomic-llama-cpp/, applied in order.
 # Default ships PEFT token replacements, the Gemma4V multi-image mtmd fix,
 # Muse Glimmer support (llama.cpp PR #26841), and direct FA dequant scratch for
@@ -95,6 +93,12 @@ ARG GRIMOIRE_CMAKE_CUDA_ARCHITECTURES_MANGCHI=110
 # with GGML_CUDA_NO_VMM=ON to fall back to the legacy pool. Grimoire keeps VMM.
 ARG GRIMOIRE_CUDA_NO_VMM_GRIMOIRE=OFF
 ARG GRIMOIRE_CUDA_NO_VMM_MANGCHI=ON
+# Per-target CUDA graphs. Thor (mangchi) has weak ARM cores, so CPU-side kernel
+# launch overhead dominates; graphs are a large win there and don't conflict
+# with its FA path. Grimoire keeps graphs OFF because its direct FA dequant
+# scratch (patch 0011) requires it.
+ARG GRIMOIRE_CUDA_GRAPHS_GRIMOIRE=OFF
+ARG GRIMOIRE_CUDA_GRAPHS_MANGCHI=ON
 
 ENV CCACHE_DIR=/root/.ccache \
     CCACHE_COMPRESS=1 \
@@ -149,8 +153,10 @@ fi; \
     GRIMOIRE_CMAKE_CUDA_ARCHITECTURES=$(eval echo "\$$arch_var"); \
     novmm_var="GRIMOIRE_CUDA_NO_VMM_$target_upper"; \
     GGML_CUDA_NO_VMM=$(eval echo "\$$novmm_var"); \
-    echo "Target=$INFERENCE_TARGET CUDA arch=$GRIMOIRE_CMAKE_CUDA_ARCHITECTURES no_vmm=$GGML_CUDA_NO_VMM"; \
-    build_config="target=$INFERENCE_TARGET sha=$GRIMOIRE_LLAMA_CPP_PINNED_SHA apply_patches=$GRIMOIRE_LLAMA_CPP_APPLY_PATCHES cuda_graphs=$GRIMOIRE_LLAMA_CPP_CUDA_GRAPHS arch=$GRIMOIRE_CMAKE_CUDA_ARCHITECTURES no_vmm=$GGML_CUDA_NO_VMM patches=$patch_hash"; \
+    graphs_var="GRIMOIRE_CUDA_GRAPHS_$target_upper"; \
+    GGML_CUDA_GRAPHS=$(eval echo "\$$graphs_var"); \
+    echo "Target=$INFERENCE_TARGET CUDA arch=$GRIMOIRE_CMAKE_CUDA_ARCHITECTURES no_vmm=$GGML_CUDA_NO_VMM graphs=$GGML_CUDA_GRAPHS"; \
+    build_config="target=$INFERENCE_TARGET sha=$GRIMOIRE_LLAMA_CPP_PINNED_SHA apply_patches=$GRIMOIRE_LLAMA_CPP_APPLY_PATCHES cuda_graphs=$GGML_CUDA_GRAPHS arch=$GRIMOIRE_CMAKE_CUDA_ARCHITECTURES no_vmm=$GGML_CUDA_NO_VMM patches=$patch_hash"; \
     build_config_file=/app/.cache/llama-cpp-build/.atomic_build_config; \
     old_build_config=""; \
     if [ -f "$build_config_file" ]; then old_build_config=$(cat "$build_config_file"); fi; \
@@ -176,7 +182,7 @@ fi; \
         cmake -S /app/.cache/llama-cpp-src/repo -B /app/.cache/llama-cpp-build \
             -DGGML_CUDA=ON \
             -DGGML_CUDA_FA=ON \
-            -DGGML_CUDA_GRAPHS=${GRIMOIRE_LLAMA_CPP_CUDA_GRAPHS} \
+            -DGGML_CUDA_GRAPHS=${GGML_CUDA_GRAPHS} \
             -DGGML_CUDA_NO_VMM=${GGML_CUDA_NO_VMM} \
             -DGGML_NATIVE=OFF \
             -DGGML_BUILD_EXAMPLES=OFF \
