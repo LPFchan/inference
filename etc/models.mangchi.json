@@ -1,0 +1,36 @@
+{
+  "models": {
+    "qwen3.8-flash-next": {
+      "file": "gguf/Qwen3.8-Flash-Next-UD-IQ4_XS-00001-of-00003.gguf",
+      "mmproj": "gguf/mmproj-BF16.gguf",
+      "family": "qwen",
+      "capabilities": [
+        "completion",
+        "multimodal"
+      ],
+      "cost": {
+        "input": 0.33,
+        "output": 3.25,
+        "cache_read": 0.1
+      },
+      "ctx-size": 262144,
+      "predict": -1,
+      "parallel": 1,
+      "n-gpu-layers": 999,
+      "cache-type-k": "turbo4",
+      "cache-type-v": "turbo4",
+      "extra-args": [
+        "--flash-attn"
+      ]
+    }
+  },
+  "fixed": {},
+  "family_defaults": {
+    "qwen": {
+      "extra-args": [
+        "--chat-template-kwargs",
+        "{\"preserve_thinking\":true}"
+      ]
+    }
+  }
+}

@@ -1,14 +1,40 @@
 # syntax=docker/dockerfile:1.7
 
 # =============================================================================
-# Grimoire - Multi-GPU llama.cpp inference server
+# Inference - llama.cpp inference gateway (multi-target)
 # =============================================================================
+#
+# INFERENCE_TARGET selects the machine this image is built for:
+#   grimoire  - x86_64 multi-GPU box (default; CUDA 12.8, sm_86/89)
+#   mangchi   - Jetson AGX Thor, aarch64 single Blackwell GPU (sm_110, CUDA 13)
+#
+# The target switches the CUDA base image and CMAKE_CUDA_ARCHITECTURES so the
+# compiled llama-server matches the host GPU. Everything else (gateway, webui,
+# registry seeding) is target-agnostic; per-target model sets live in
+# etc/models.<target>.json. See DEC-20260908-001.
 
-ARG CUDA_BASE=nvidia/cuda:12.8.1-devel-ubuntu22.04
-ARG CUDA_RUNTIME=nvidia/cuda:12.8.1-runtime-ubuntu22.04
+ARG INFERENCE_TARGET=grimoire
+
+# Per-target CUDA base images. Must be set before the first FROM that uses them.
+ARG CUDA_BASE_GRIMOIRE=nvidia/cuda:12.8.1-devel-ubuntu22.04
+ARG CUDA_RUNTIME_GRIMOIRE=nvidia/cuda:12.8.1-runtime-ubuntu22.04
+ARG CUDA_BASE_MANGCHI=nvidia/cuda:13.0.1-devel-ubuntu24.04
+ARG CUDA_RUNTIME_MANGCHI=nvidia/cuda:13.0.1-runtime-ubuntu24.04
+
+# Intermediate stage picks the base image for the selected target.
+FROM ${CUDA_BASE_GRIMOIRE} AS base-select-grimoire
+FROM ${CUDA_BASE_MANGCHI} AS base-select-mangchi
+FROM base-select-${INFERENCE_TARGET} AS cuda-base
+
+FROM ${CUDA_RUNTIME_GRIMOIRE} AS runtime-select-grimoire
+FROM ${CUDA_RUNTIME_MANGCHI} AS runtime-select-mangchi
+FROM runtime-select-${INFERENCE_TARGET} AS cuda-runtime
+
+# Backwards-compatible ARGs retained for documentation; the active base image
+# now comes from the cuda-base / cuda-runtime stages above.
 ARG GRIMOIRE_LLAMA_CPP_REPO_URL=https://github.com/TheTom/llama-cpp-turboquant.git
 ARG GRIMOIRE_LLAMA_CPP_REF=feature/turboquant-kv-cache
-ARG GRIMOIRE_LLAMA_CPP_PINNED_SHA=2f2f32f5d9517518c9e860f30131acb09840a965
+ARG GRIMOIRE_LLAMA_CPP_PINNED_SHA=407f3237bfb3eeaff61546797de3d8c1a96be748
 ARG GRIMOIRE_LLAMA_CPP_APPLY_PATCHES=1
 ARG GRIMOIRE_LLAMA_CPP_CUDA_GRAPHS=OFF
 # Comma-separated list of patch filenames in patches/atomic-llama-cpp/, applied in order.
@@ -23,7 +49,7 @@ ARG CACHE_BUST=11
 # Build stage: Compile llama.cpp with CUDA + turbo4 cache + patches
 # =============================================================================
 
-FROM ${CUDA_BASE} AS build
+FROM cuda-base AS build
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -61,7 +87,11 @@ ARG GRIMOIRE_LLAMA_CPP_CUDA_GRAPHS=OFF
 # the current pinned llama.cpp SHA. Direct scratch requires CUDA graphs off.
 ARG GRIMOIRE_LLAMA_CPP_PATCH_FILE=0005-peft-trainable-token-replacements.patch,0006-mtmd-gemma4v-sequential-images.patch,0010-muse-glimmer-26841.patch,0011-cuda-fa-temp-buffers-bypass-vmm-pool.patch
 ARG CACHE_BUST
-ARG GRIMOIRE_CMAKE_CUDA_ARCHITECTURES=86;89
+ARG INFERENCE_TARGET=grimoire
+# Per-target CMAKE_CUDA_ARCHITECTURES. Thor (mangchi) is Blackwell sm_110;
+# the grimoire box targets sm_86/89. Default keeps grimoire behavior.
+ARG GRIMOIRE_CMAKE_CUDA_ARCHITECTURES_GRIMOIRE=86;89
+ARG GRIMOIRE_CMAKE_CUDA_ARCHITECTURES_MANGCHI=110
 
 ENV CCACHE_DIR=/root/.ccache \
     CCACHE_COMPRESS=1 \
@@ -110,7 +140,12 @@ fi; \
         if [ ! -f "$pp" ]; then echo "ERROR: patch not found: $pp"; exit 1; fi; \
         patch_hash="${patch_hash}$(sha256sum "$pp"); "; \
     done; \
-    build_config="sha=$GRIMOIRE_LLAMA_CPP_PINNED_SHA apply_patches=$GRIMOIRE_LLAMA_CPP_APPLY_PATCHES cuda_graphs=$GRIMOIRE_LLAMA_CPP_CUDA_GRAPHS arch=$GRIMOIRE_CMAKE_CUDA_ARCHITECTURES patches=$patch_hash"; \
+    # Resolve the CUDA arch for the selected target (suffix uppercased). \
+    target_upper=$(echo "$INFERENCE_TARGET" | tr '[:lower:]' '[:upper:]'); \
+    arch_var="GRIMOIRE_CMAKE_CUDA_ARCHITECTURES_$target_upper"; \
+    GRIMOIRE_CMAKE_CUDA_ARCHITECTURES=$(eval echo "\$$arch_var"); \
+    echo "Target=$INFERENCE_TARGET CUDA arch=$GRIMOIRE_CMAKE_CUDA_ARCHITECTURES"; \
+    build_config="target=$INFERENCE_TARGET sha=$GRIMOIRE_LLAMA_CPP_PINNED_SHA apply_patches=$GRIMOIRE_LLAMA_CPP_APPLY_PATCHES cuda_graphs=$GRIMOIRE_LLAMA_CPP_CUDA_GRAPHS arch=$GRIMOIRE_CMAKE_CUDA_ARCHITECTURES patches=$patch_hash"; \
     build_config_file=/app/.cache/llama-cpp-build/.atomic_build_config; \
     old_build_config=""; \
     if [ -f "$build_config_file" ]; then old_build_config=$(cat "$build_config_file"); fi; \
@@ -181,7 +216,7 @@ RUN mkdir -p /opt/grimoire-webui && cp -r /src/webui/build/. /opt/grimoire-webui
 # Runtime stage: Lean CUDA runtime + Python + gateway
 # =============================================================================
 
-FROM ${CUDA_RUNTIME} AS runtime
+FROM cuda-runtime AS runtime
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -223,7 +258,10 @@ COPY templates/ /templates/
 
 # Create registry and state directories
 RUN mkdir -p /etc/grimoire /var/lib/grimoire
-COPY etc/models.json /etc/grimoire/models.json
+# Seed the registry from the per-target model set. INFERENCE_TARGET selects
+# etc/models.<target>.json; see DEC-20260908-001.
+ARG INFERENCE_TARGET=grimoire
+COPY etc/models.\${INFERENCE_TARGET}.json /etc/grimoire/models.json
 
 # Tokenizer files are mounted at runtime via /models volume (see compose)
 # Tokenizers mounted at runtime via /models volume

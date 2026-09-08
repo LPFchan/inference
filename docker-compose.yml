@@ -1,7 +1,12 @@
 services:
   grimoire:
-    build: .
-    image: grimoire:local
+    build:
+      context: .
+      args:
+        # Target machine: grimoire (x86 multi-GPU) or mangchi (Jetson Thor).
+        # Selects CUDA base image, CUDA arch, and seeded model registry.
+        INFERENCE_TARGET: ${INFERENCE_TARGET:-grimoire}
+    image: inference:${INFERENCE_TARGET:-grimoire}
     container_name: grimoire
     mem_limit: 28g
     memswap_limit: 28g
@@ -50,13 +55,10 @@ services:
       - LLAMA_ARG_CACHE_RAM=4096
       - LD_LIBRARY_PATH=/opt/atomic:/opt/grimoire-llama-cpp/lib:/opt/grimoire-llama-cpp/lib64
       - GRIMOIRE_TURBOQUANT_LIB_DIR=/opt/atomic
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+    # GPU access comes from `runtime: nvidia` above, which works on both the
+    # x86 grimoire box and Jetson Thor (mangchi). The Jetson container toolkit
+    # does not support `--gpus` / deploy device reservations, so we rely on the
+    # runtime alone. See DEC-20260908-001.
 
   # The dashboard, lifted out of the chat webui into its own site. Static files
   # only — it reads everything from the gateway's /stats endpoints in the
