@@ -43,7 +43,7 @@ class DropInBlockerTests(unittest.TestCase):
         errors at load, the model simply never starts, and the endpoints it
         backs return 503 with no obvious cause.
         """
-        data = json.loads((ROOT / "etc" / "models.json").read_text())
+        data = json.loads((ROOT / "etc" / "models.grimoire.json").read_text())
         models = data["models"]
         pinned = data.get("fixed", {})
 
@@ -929,7 +929,7 @@ class DropInBlockerTests(unittest.TestCase):
         one advertises image input the backend cannot serve, so requests fail
         only once an image is actually sent.
         """
-        data = json.loads((ROOT / "etc" / "models.json").read_text())
+        data = json.loads((ROOT / "etc" / "models.grimoire.json").read_text())
         for name, cfg in data["models"].items():
             declares_images = bool({"multimodal", "vision"} & set(cfg.get("capabilities") or []))
             carries_projector = bool(cfg.get("mmproj"))

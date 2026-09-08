@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class Qwen38RegistryTests(unittest.TestCase):
     def test_reasoning_aliases_use_cpu_vision_237568_and_ubatch_128(self):
-        models = json.loads((ROOT / "etc" / "models.json").read_text())["models"]
+        models = json.loads((ROOT / "etc" / "models.grimoire.json").read_text())["models"]
 
         self.assertNotIn("qwen3.8-27B", models)
         for effort in ("low", "medium", "xhigh"):
@@ -29,7 +29,7 @@ class Qwen38RegistryTests(unittest.TestCase):
             )
 
     def test_uncensored_aliases_inherit_reasoning_profiles_with_matching_companions(self):
-        models = json.loads((ROOT / "etc" / "models.json").read_text())["models"]
+        models = json.loads((ROOT / "etc" / "models.grimoire.json").read_text())["models"]
 
         for effort in ("low", "medium", "xhigh"):
             base = models[f"qwen3.8-27B-{effort}"]

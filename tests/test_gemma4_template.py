@@ -11,7 +11,7 @@ OFFICIAL_SHA256 = "ae53464bf3be25802b3a5b37def7fd89667067d7577049b3b2d74c4d8de4c
 
 class Gemma4TemplateTests(unittest.TestCase):
     def test_registry_uses_pinned_canonical_template_for_gemma4_family(self):
-        registry = json.loads((ROOT / "etc" / "models.json").read_text())
+        registry = json.loads((ROOT / "etc" / "models.grimoire.json").read_text())
 
         self.assertEqual(
             registry["family_defaults"]["gemma4"]["chat-template-file"],

@@ -21,6 +21,18 @@ ARG CUDA_RUNTIME_GRIMOIRE=nvidia/cuda:12.8.1-runtime-ubuntu22.04
 ARG CUDA_BASE_MANGCHI=nvidia/cuda:13.0.1-devel-ubuntu24.04
 ARG CUDA_RUNTIME_MANGCHI=nvidia/cuda:13.0.1-runtime-ubuntu24.04
 
+# Shared llama.cpp build configuration. These are global (before the first FROM)
+# so every stage's bare `ARG X` re-declaration inherits the value below.
+ARG GRIMOIRE_LLAMA_CPP_REPO_URL=https://github.com/TheTom/llama-cpp-turboquant.git
+ARG GRIMOIRE_LLAMA_CPP_REF=feature/turboquant-kv-cache
+ARG GRIMOIRE_LLAMA_CPP_PINNED_SHA=407f3237bfb3eeaff61546797de3d8c1a96be748
+ARG GRIMOIRE_LLAMA_CPP_APPLY_PATCHES=1
+ARG GRIMOIRE_LLAMA_CPP_CUDA_GRAPHS=OFF
+# Comma-separated list of patch filenames in patches/atomic-llama-cpp/, applied in order.
+ARG GRIMOIRE_LLAMA_CPP_PATCH_FILE=0005-peft-trainable-token-replacements.patch,0006-mtmd-gemma4v-sequential-images.patch,0011-cuda-fa-temp-buffers-bypass-vmm-pool.patch
+# Bump to force rebuild of the build stage (e.g. after upstream force-push)
+ARG CACHE_BUST=11
+
 # Intermediate stage picks the base image for the selected target.
 FROM ${CUDA_BASE_GRIMOIRE} AS base-select-grimoire
 FROM ${CUDA_BASE_MANGCHI} AS base-select-mangchi
@@ -29,21 +41,6 @@ FROM base-select-${INFERENCE_TARGET} AS cuda-base
 FROM ${CUDA_RUNTIME_GRIMOIRE} AS runtime-select-grimoire
 FROM ${CUDA_RUNTIME_MANGCHI} AS runtime-select-mangchi
 FROM runtime-select-${INFERENCE_TARGET} AS cuda-runtime
-
-# Backwards-compatible ARGs retained for documentation; the active base image
-# now comes from the cuda-base / cuda-runtime stages above.
-ARG GRIMOIRE_LLAMA_CPP_REPO_URL=https://github.com/TheTom/llama-cpp-turboquant.git
-ARG GRIMOIRE_LLAMA_CPP_REF=feature/turboquant-kv-cache
-ARG GRIMOIRE_LLAMA_CPP_PINNED_SHA=407f3237bfb3eeaff61546797de3d8c1a96be748
-ARG GRIMOIRE_LLAMA_CPP_APPLY_PATCHES=1
-ARG GRIMOIRE_LLAMA_CPP_CUDA_GRAPHS=OFF
-# Comma-separated list of patch filenames in patches/atomic-llama-cpp/, applied in order.
-# Default ships PEFT token replacements, the Gemma4V multi-image mtmd fix,
-# Muse Glimmer support (llama.cpp PR #26841), and direct FA dequant scratch for
-# the current pinned llama.cpp SHA. Direct scratch requires CUDA graphs off.
-ARG GRIMOIRE_LLAMA_CPP_PATCH_FILE=0005-peft-trainable-token-replacements.patch,0006-mtmd-gemma4v-sequential-images.patch,0010-muse-glimmer-26841.patch,0011-cuda-fa-temp-buffers-bypass-vmm-pool.patch
-# Bump to force rebuild of the build stage (e.g. after upstream force-push)
-ARG CACHE_BUST=11
 
 # =============================================================================
 # Build stage: Compile llama.cpp with CUDA + turbo4 cache + patches
@@ -85,7 +82,8 @@ ARG GRIMOIRE_LLAMA_CPP_CUDA_GRAPHS=OFF
 # Default ships PEFT token replacements, the Gemma4V multi-image mtmd fix,
 # Muse Glimmer support (llama.cpp PR #26841), and direct FA dequant scratch for
 # the current pinned llama.cpp SHA. Direct scratch requires CUDA graphs off.
-ARG GRIMOIRE_LLAMA_CPP_PATCH_FILE=0005-peft-trainable-token-replacements.patch,0006-mtmd-gemma4v-sequential-images.patch,0010-muse-glimmer-26841.patch,0011-cuda-fa-temp-buffers-bypass-vmm-pool.patch
+ARG GRIMOIRE_LLAMA_CPP_PATCH_FILE=0005-peft-trainable-token-replacements.patch,0006-mtmd-gemma4v-sequential-images.patch,0011-cuda-fa-temp-buffers-bypass-vmm-pool.patch
+# Inherits the global CACHE_BUST default (declared before the first FROM).
 ARG CACHE_BUST
 ARG INFERENCE_TARGET=grimoire
 # Per-target CMAKE_CUDA_ARCHITECTURES. Thor (mangchi) is Blackwell sm_110;
@@ -261,7 +259,7 @@ RUN mkdir -p /etc/grimoire /var/lib/grimoire
 # Seed the registry from the per-target model set. INFERENCE_TARGET selects
 # etc/models.<target>.json; see DEC-20260908-001.
 ARG INFERENCE_TARGET=grimoire
-COPY etc/models.\${INFERENCE_TARGET}.json /etc/grimoire/models.json
+COPY etc/models.${INFERENCE_TARGET}.json /etc/grimoire/models.json
 
 # Tokenizer files are mounted at runtime via /models volume (see compose)
 # Tokenizers mounted at runtime via /models volume

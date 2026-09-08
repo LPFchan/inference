@@ -19,9 +19,7 @@
       "n-gpu-layers": 999,
       "cache-type-k": "turbo4",
       "cache-type-v": "turbo4",
-      "extra-args": [
-        "--flash-attn"
-      ]
+      "extra-args": []
     }
   },
   "fixed": {},
