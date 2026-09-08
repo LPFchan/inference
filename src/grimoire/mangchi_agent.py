@@ -15,6 +15,7 @@ track grimoire's state and grimoire does not track mangchi's memory.
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import json
 import logging
 import os
@@ -27,7 +28,8 @@ from pathlib import Path
 from typing import Optional
 
 import httpx
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 
 logger = logging.getLogger("mangchi_agent")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
@@ -41,6 +43,18 @@ MEMORY_BUDGET_GIB = float(os.environ.get("MANGCHI_AGENT_BUDGET_GIB", "110"))
 HEALTH_TIMEOUT_S = float(os.environ.get("MANGCHI_AGENT_HEALTH_TIMEOUT_S", "600"))
 STOP_TIMEOUT_S = float(os.environ.get("MANGCHI_AGENT_STOP_TIMEOUT_S", "60"))
 
+# Trusted source networks: loopback, the LAN, and the tailnet. The agent exposes
+# process lifecycle (load/unload), so it must not answer arbitrary internet
+# clients even though it binds all interfaces (it has to serve both grimoire,
+# which resolves mangchi.lost.plus -> the LAN IP, and tailnet peers). Fails
+# closed if the env override is empty.
+_DEFAULT_TRUSTED = "127.0.0.0/8,10.0.0.0/24,100.64.0.0/10,::1/128"
+TRUSTED_NETWORKS = [
+    ipaddress.ip_network(x.strip())
+    for x in os.environ.get("MANGCHI_AGENT_TRUSTED_CIDRS", _DEFAULT_TRUSTED).split(",")
+    if x.strip()
+]
+
 
 @dataclass
 class LaunchSpec:
@@ -48,6 +62,7 @@ class LaunchSpec:
 
     model_path: str
     resident_gb: float
+    gpu_mem_util: Optional[float] = None
     serve_args: list[str] = field(default_factory=list)
     env: dict[str, str] = field(default_factory=dict)
     port: int = 8000
@@ -72,6 +87,7 @@ def load_specs(path: str = SPECS_PATH) -> dict[str, LaunchSpec]:
         specs[name] = LaunchSpec(
             model_path=cfg["model_path"],
             resident_gb=float(cfg["resident_gb"]),
+            gpu_mem_util=(float(cfg["gpu_mem_util"]) if "gpu_mem_util" in cfg else None),
             serve_args=list(cfg.get("serve_args", [])),
             env=dict(cfg.get("env", {})),
             port=int(cfg.get("port", 8000)),
@@ -100,9 +116,11 @@ class ResidencyManager:
         r = self.resident.get(name)
         if not r:
             return
-        logger.info("stopping %s (pid %s)", name, r.process.pid)
-        # SIGTERM and wait — SIGKILL mid-CUDA-op can wedge the Thor's GPU.
-        r.process.send_signal(signal.SIGTERM)
+        logger.info("stopping %s (pid %s, pgid)", name, r.process.pid)
+        # Signal the whole process group (vLLM spawns worker children), not just
+        # the launcher PID, so descendants can't linger holding CUDA memory.
+        # SIGTERM first — SIGKILL mid-CUDA-op can wedge the Thor's GPU.
+        self._signal_group(r, signal.SIGTERM)
         try:
             await asyncio.wait_for(
                 asyncio.get_event_loop().run_in_executor(None, r.process.wait),
@@ -110,25 +128,59 @@ class ResidencyManager:
             )
         except asyncio.TimeoutError:
             logger.warning("%s did not exit in %ss; SIGKILL as last resort", name, STOP_TIMEOUT_S)
-            r.process.kill()
+            self._signal_group(r, signal.SIGKILL)
             await asyncio.get_event_loop().run_in_executor(None, r.process.wait)
         self.resident.pop(name, None)
 
+    @staticmethod
+    def _signal_group(r: Resident, sig: int) -> None:
+        try:
+            os.killpg(os.getpgid(r.process.pid), sig)
+        except (ProcessLookupError, PermissionError):
+            try:
+                r.process.send_signal(sig)
+            except ProcessLookupError:
+                pass
+
+    def _plan_evictions(self, need_gib: float, exclude: str) -> list[str]:
+        """Compute the LRU victim list to fit need_gib WITHOUT stopping anything.
+
+        Returns the names to evict (oldest-first). Raises 409 if it cannot be
+        done — feasibility is decided before any resident is harmed.
+        """
+        if need_gib > self.budget_gib:
+            raise HTTPException(
+                status_code=409,
+                detail=f"'{exclude}' needs {need_gib:.1f} GiB, above budget {self.budget_gib:.1f} GiB",
+            )
+        free = self._free_gib()
+        if free >= need_gib:
+            return []
+        candidates = sorted(
+            (r for r in self.resident.values() if not r.spec.pinned and r.name != exclude),
+            key=lambda r: r.last_used,
+        )
+        victims: list[str] = []
+        for r in candidates:
+            if free >= need_gib:
+                break
+            victims.append(r.name)
+            free += r.spec.resident_gb
+        if free < need_gib:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"cannot free {need_gib:.1f} GiB for '{exclude}': "
+                    "remaining residents are pinned"
+                ),
+            )
+        return victims
+
     async def _evict_until_fits(self, need_gib: float, exclude: str) -> None:
-        """Evict least-recently-used unpinned residents until need_gib fits."""
-        while self._free_gib() < need_gib:
-            candidates = [r for r in self.resident.values() if not r.spec.pinned and r.name != exclude]
-            if not candidates:
-                raise HTTPException(
-                    status_code=409,
-                    detail=(
-                        f"cannot free {need_gib:.1f} GiB for '{exclude}': "
-                        "all residents are pinned"
-                    ),
-                )
-            victim = min(candidates, key=lambda r: r.last_used)
-            logger.info("evicting LRU resident %s to make room", victim.name)
-            await self._stop(victim.name)
+        """Evict the planned LRU victims to fit need_gib (feasibility pre-checked)."""
+        for victim in self._plan_evictions(need_gib, exclude):
+            logger.info("evicting LRU resident %s to make room", victim)
+            await self._stop(victim)
 
     async def _wait_healthy(self, r: Resident) -> None:
         url = f"http://127.0.0.1:{r.port}/health"
@@ -159,7 +211,10 @@ class ResidencyManager:
                 return {"name": name, "status": "already-resident", "port": r.port}
             spec = self.specs[name]
             await self._evict_until_fits(spec.resident_gb, exclude=name)
-            cmd = [spec.vllm_bin, "serve", spec.model_path, "--port", str(spec.port), *spec.serve_args]
+            cmd = [spec.vllm_bin, "serve", spec.model_path, "--port", str(spec.port)]
+            if spec.gpu_mem_util is not None:
+                cmd += ["--gpu-memory-utilization", str(spec.gpu_mem_util)]
+            cmd += list(spec.serve_args)
             env = {**os.environ, **spec.env}
             logger.info("launching %s: %s", name, " ".join(cmd))
             proc = subprocess.Popen(cmd, env=env, start_new_session=True)
@@ -167,10 +222,12 @@ class ResidencyManager:
             self.resident[name] = r
             try:
                 await self._wait_healthy(r)
-            except Exception:
-                self.resident.pop(name, None)
-                if proc.poll() is None:
-                    proc.send_signal(signal.SIGTERM)
+            except BaseException:
+                # Startup failed or was cancelled: shut the process group down
+                # and WAIT for it, so we never release the lock while a live
+                # process still holds GPU memory or the port. BaseException so
+                # asyncio.CancelledError takes this path too.
+                await self._stop(name)
                 raise
             return {"name": name, "status": "loaded", "port": r.port, "resident_gb": spec.resident_gb}
 
@@ -225,6 +282,20 @@ def create_app(manager: Optional[ResidencyManager] = None) -> FastAPI:
 
     app = FastAPI(title="mangchi-residency-agent", lifespan=lifespan)
     app.state.manager = mgr
+
+    @app.middleware("http")
+    async def _trusted_sources_only(request: Request, call_next):
+        host = request.client.host if request.client else None
+        try:
+            addr = ipaddress.ip_address(host) if host else None
+        except ValueError:
+            addr = None
+        allowed = bool(TRUSTED_NETWORKS) and addr is not None and any(
+            addr in net for net in TRUSTED_NETWORKS
+        )
+        if not allowed:
+            return JSONResponse(status_code=403, content={"detail": "forbidden source"})
+        return await call_next(request)
 
     @app.post("/models/{name}/load")
     async def load_model(name: str):

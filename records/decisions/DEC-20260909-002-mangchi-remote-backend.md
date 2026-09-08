@@ -117,9 +117,11 @@ touches the Thor.
 
 Grimoire's remote backend holds the mangchi base URL and the model id, and its
 `start_model`/`stop_model`/health paths map onto these agent endpoints. Since
-mangchi is single-GPU, loading one model implies unloading whatever is resident
-(the agent enforces single-residency), mirroring how grimoire evicts to make
-room.
+mangchi is single-GPU with one memory budget, admitting a model that does not
+fit evicts resident model(s) to make room (LRU, pinning respected) — in practice
+a large resident like Flash-Next fills the device alone, while smaller models
+may co-reside when their footprints fit the budget. This mirrors how grimoire
+evicts to make room. See the residency-set rules below.
 
 ### Scaling to more models: registered vs resident
 

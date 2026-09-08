@@ -157,3 +157,59 @@ def test_specs_file_parses():
     flash = specs["qwen3.8-flash-next-uncensored-nvfp4"]
     assert flash.env.get("VLLM_PLE_CPU_OFFLOAD") == "1"
     assert flash.resident_gb > specs["qwen3.8-27b-uncensored-nvfp4"].resident_gb
+
+
+def test_specs_have_per_model_gpu_mem_util():
+    # Per-instance --gpu-memory-utilization must reflect each model's share, not
+    # a blanket near-1.0 (which would let two models both claim ~the whole device).
+    specs = agent.load_specs()
+    for name, spec in specs.items():
+        assert spec.gpu_mem_util is not None, name
+        assert 0.0 < spec.gpu_mem_util < 0.9, name
+
+
+def test_infeasible_load_does_not_harm_residents(mgr):
+    # 40 pinned + 30 unpinned under 110 budget; 80 cannot fit even after evicting
+    # the unpinned resident, so the request must 409 WITHOUT touching anyone.
+    run(mgr.load("small"))    # 30 unpinned
+    run(mgr.load("pinned"))   # 40 pinned
+    mgr.resident["small"].last_used -= 100
+    with pytest.raises(HTTPException) as e:
+        run(mgr.load("large"))
+    assert e.value.status_code == 409
+    # pre-check must have rejected before evicting: both residents intact.
+    assert "small" in mgr.resident
+    assert "pinned" in mgr.resident
+
+
+def test_oversized_spec_rejected_before_eviction(mgr):
+    mgr.specs["huge"] = LaunchSpec(model_path="/m/huge", resident_gb=200, port=8009)
+    run(mgr.load("small"))
+    with pytest.raises(HTTPException) as e:
+        run(mgr.load("huge"))
+    assert e.value.status_code == 409
+    assert "small" in mgr.resident  # not evicted by an impossible request
+
+
+def test_failed_start_cleans_up_and_waits(mgr, monkeypatch):
+    # Health check raises: the failed process must be stopped (and waited on)
+    # and removed from residency, not abandoned holding memory/port.
+    async def _boom(r):
+        raise RuntimeError("never healthy")
+
+    monkeypatch.setattr(mgr, "_wait_healthy", _boom)
+    with pytest.raises(RuntimeError):
+        run(mgr.load("small"))
+    assert "small" not in mgr.resident
+    assert mgr.status()["used_gib"] == 0
+
+
+def test_stop_signals_process_group(mgr, monkeypatch):
+    run(mgr.load("small"))
+    r = mgr.resident["small"]
+    calls = []
+    monkeypatch.setattr(agent.os, "getpgid", lambda pid: 4242)
+    monkeypatch.setattr(agent.os, "killpg", lambda pgid, sig: calls.append((pgid, sig)))
+    run(mgr.unload("small"))
+    # SIGTERM (15) must go to the process group, not only the launcher PID.
+    assert (4242, 15) in calls
