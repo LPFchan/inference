@@ -90,6 +90,11 @@ ARG INFERENCE_TARGET=grimoire
 # the grimoire box targets sm_86/89. Default keeps grimoire behavior.
 ARG GRIMOIRE_CMAKE_CUDA_ARCHITECTURES_GRIMOIRE=86;89
 ARG GRIMOIRE_CMAKE_CUDA_ARCHITECTURES_MANGCHI=110
+# Per-target CUDA VMM. Thor (mangchi) hits NV_ERR_NO_MEMORY in the VMM
+# allocator with unified memory (known llama.cpp-on-Jetson issue), so build
+# with GGML_CUDA_NO_VMM=ON to fall back to the legacy pool. Grimoire keeps VMM.
+ARG GRIMOIRE_CUDA_NO_VMM_GRIMOIRE=OFF
+ARG GRIMOIRE_CUDA_NO_VMM_MANGCHI=ON
 
 ENV CCACHE_DIR=/root/.ccache \
     CCACHE_COMPRESS=1 \
@@ -138,12 +143,14 @@ fi; \
         if [ ! -f "$pp" ]; then echo "ERROR: patch not found: $pp"; exit 1; fi; \
         patch_hash="${patch_hash}$(sha256sum "$pp"); "; \
     done; \
-    # Resolve the CUDA arch for the selected target (suffix uppercased). \
+    # Resolve the CUDA arch and VMM setting for the selected target (suffix uppercased). \
     target_upper=$(echo "$INFERENCE_TARGET" | tr '[:lower:]' '[:upper:]'); \
     arch_var="GRIMOIRE_CMAKE_CUDA_ARCHITECTURES_$target_upper"; \
     GRIMOIRE_CMAKE_CUDA_ARCHITECTURES=$(eval echo "\$$arch_var"); \
-    echo "Target=$INFERENCE_TARGET CUDA arch=$GRIMOIRE_CMAKE_CUDA_ARCHITECTURES"; \
-    build_config="target=$INFERENCE_TARGET sha=$GRIMOIRE_LLAMA_CPP_PINNED_SHA apply_patches=$GRIMOIRE_LLAMA_CPP_APPLY_PATCHES cuda_graphs=$GRIMOIRE_LLAMA_CPP_CUDA_GRAPHS arch=$GRIMOIRE_CMAKE_CUDA_ARCHITECTURES patches=$patch_hash"; \
+    novmm_var="GRIMOIRE_CUDA_NO_VMM_$target_upper"; \
+    GGML_CUDA_NO_VMM=$(eval echo "\$$novmm_var"); \
+    echo "Target=$INFERENCE_TARGET CUDA arch=$GRIMOIRE_CMAKE_CUDA_ARCHITECTURES no_vmm=$GGML_CUDA_NO_VMM"; \
+    build_config="target=$INFERENCE_TARGET sha=$GRIMOIRE_LLAMA_CPP_PINNED_SHA apply_patches=$GRIMOIRE_LLAMA_CPP_APPLY_PATCHES cuda_graphs=$GRIMOIRE_LLAMA_CPP_CUDA_GRAPHS arch=$GRIMOIRE_CMAKE_CUDA_ARCHITECTURES no_vmm=$GGML_CUDA_NO_VMM patches=$patch_hash"; \
     build_config_file=/app/.cache/llama-cpp-build/.atomic_build_config; \
     old_build_config=""; \
     if [ -f "$build_config_file" ]; then old_build_config=$(cat "$build_config_file"); fi; \
@@ -170,6 +177,7 @@ fi; \
             -DGGML_CUDA=ON \
             -DGGML_CUDA_FA=ON \
             -DGGML_CUDA_GRAPHS=${GRIMOIRE_LLAMA_CPP_CUDA_GRAPHS} \
+            -DGGML_CUDA_NO_VMM=${GGML_CUDA_NO_VMM} \
             -DGGML_NATIVE=OFF \
             -DGGML_BUILD_EXAMPLES=OFF \
             -DGGML_BUILD_TESTS=OFF \
