@@ -76,11 +76,13 @@ ARG GRIMOIRE_LLAMA_CPP_REPO_URL
 ARG GRIMOIRE_LLAMA_CPP_REF
 ARG GRIMOIRE_LLAMA_CPP_PINNED_SHA
 ARG GRIMOIRE_LLAMA_CPP_APPLY_PATCHES=1
-# Comma-separated list of patch filenames in patches/atomic-llama-cpp/, applied in order.
-# Default ships PEFT token replacements, the Gemma4V multi-image mtmd fix,
-# Muse Glimmer support (llama.cpp PR #26841), and direct FA dequant scratch for
-# the current pinned llama.cpp SHA. Direct scratch requires CUDA graphs off.
-ARG GRIMOIRE_LLAMA_CPP_PATCH_FILE=0005-peft-trainable-token-replacements.patch,0006-mtmd-gemma4v-sequential-images.patch,0011-cuda-fa-temp-buffers-bypass-vmm-pool.patch
+# Comma-separated patch lists in patches/atomic-llama-cpp/, applied in order, per
+# target. Both ship the PEFT token replacements and Gemma4V mtmd fix. Grimoire
+# additionally ships patch 0011 (direct FA dequant scratch), which requires CUDA
+# graphs OFF. Mangchi runs graphs ON, so it must NOT apply 0011 -- the raw scratch
+# cudaMalloc conflicts with graph capture and fails with NV_ERR_NO_MEMORY.
+ARG GRIMOIRE_LLAMA_CPP_PATCH_FILE_GRIMOIRE=0005-peft-trainable-token-replacements.patch,0006-mtmd-gemma4v-sequential-images.patch,0011-cuda-fa-temp-buffers-bypass-vmm-pool.patch
+ARG GRIMOIRE_LLAMA_CPP_PATCH_FILE_MANGCHI=0005-peft-trainable-token-replacements.patch,0006-mtmd-gemma4v-sequential-images.patch
 # Inherits the global CACHE_BUST default (declared before the first FROM).
 ARG CACHE_BUST
 ARG INFERENCE_TARGET=grimoire
@@ -139,6 +141,10 @@ fi; \
         exit 1; \
     fi; \
     git -C /app/.cache/llama-cpp-src/repo clean -fdx; \
+    # Resolve per-target settings (suffix uppercased).
+    target_upper=$(echo "$INFERENCE_TARGET" | tr '[:lower:]' '[:upper:]'); \
+    patchlist_var="GRIMOIRE_LLAMA_CPP_PATCH_FILE_$target_upper"; \
+    GRIMOIRE_LLAMA_CPP_PATCH_FILE=$(eval echo "\$$patchlist_var"); \
     # Resolve patch files (comma-separated list, applied in order).
     patch_files=$(echo "$GRIMOIRE_LLAMA_CPP_PATCH_FILE" | tr ',' ' '); \
     patch_hash=""; \
@@ -147,8 +153,7 @@ fi; \
         if [ ! -f "$pp" ]; then echo "ERROR: patch not found: $pp"; exit 1; fi; \
         patch_hash="${patch_hash}$(sha256sum "$pp"); "; \
     done; \
-    # Resolve the CUDA arch and VMM setting for the selected target (suffix uppercased). \
-    target_upper=$(echo "$INFERENCE_TARGET" | tr '[:lower:]' '[:upper:]'); \
+    # Resolve the CUDA arch, VMM and graphs settings for the selected target. \
     arch_var="GRIMOIRE_CMAKE_CUDA_ARCHITECTURES_$target_upper"; \
     GRIMOIRE_CMAKE_CUDA_ARCHITECTURES=$(eval echo "\$$arch_var"); \
     novmm_var="GRIMOIRE_CUDA_NO_VMM_$target_upper"; \
