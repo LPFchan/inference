@@ -5,7 +5,7 @@ Recorded by agent: codex
 
 ## Metadata
 
-- Status: proposed
+- Status: accepted
 - Deciders: operator, codex
 - Area: grimoire gateway, `src/grimoire/model_manager.py`, `src/grimoire/registry.py`,
   `src/grimoire/proxy/llama.py`, `etc/models.grimoire.json`
@@ -67,19 +67,49 @@ This is deliberately narrower than DEC-20260528-001 (which replaces grimoire's
 add the ability to *front* a remote vLLM that happens to live on mangchi. The
 two efforts share the vLLM adapter work but are independently shippable.
 
-Open design points the implementation must resolve:
+Operator-resolved design points (2026-09-09):
 
-- **Health + lifecycle semantics.** What "load"/"unload" mean for a remote model
-  (no-op + health gate, vs. signalling mangchi's own manager over a side API).
-- **Streaming + KV persistence.** Whether SSE streaming and any KV-cache
-  persistence passthrough work unchanged against the remote `/v1`, or need a
-  remote-aware path in `proxy/llama.py` / `proxy/sse.py`.
-- **Failure + timeout behavior.** How the gateway surfaces a mangchi outage
-  (model shows unavailable vs. errors on request), and reconnect/backoff.
-- **Auth/network.** Whether mangchi's vLLM is reached over the LAN
-  (`10.0.0.53`), the Tailscale name (`mangchi.lost.plus`), or behind the same
-  Cloudflare tunnel pattern as other fleet services; and whether it needs an API
-  key.
+- **Network / reachability.** Grimoire reaches mangchi at the Tailscale name
+  `mangchi.lost.plus`. Not the LAN IP, not a Cloudflare tunnel.
+- **Lifecycle (load/unload).** Grimoire actively **signals mangchi to load and
+  unload** models, and it should behave the way grimoire's own model
+  load/unload behaves today. Because vLLM does not load/unload arbitrary
+  checkpoints by name the way grimoire spawns a subprocess per model, this
+  needs a **thin control agent on mangchi**: the gateway's
+  `start_model`/`stop_model` for a remote backend translate to HTTP calls to
+  that agent, which launches / tears down the matching vLLM process
+  (`vllm serve <model>`) for the requested checkpoint. From the webui and
+  `/v1`, a remote model loads and unloads indistinguishably from a local one;
+  only the mechanism (remote process control instead of local subprocess)
+  differs. See "Control agent" below.
+- **Outage behavior.** A mangchi model **stays listed** in the registry when
+  mangchi is down/unreachable, and **errors on request** — it is not hidden from
+  `/v1/models`, and it is not shown as a distinct "offline" state. The model is
+  present; requests to it fail while the backend is unreachable.
+- **Auth.** No API key on mangchi's vLLM (or its control agent). The private
+  tailnet is the trust boundary.
+
+### Control agent on mangchi
+
+To make remote load/unload behave like local load/unload, mangchi runs a small
+always-on control service (separate from any single vLLM process) that owns
+vLLM process lifecycle:
+
+- `POST /models/<id>/load` -> start `vllm serve` for that model's checkpoint
+  (with the NVFP4 + PLE-offload flags), return once `/v1` is healthy.
+- `POST /models/<id>/unload` -> stop that vLLM process gracefully.
+- `GET /models/<id>/status` (or `/healthz`) -> whether the model's vLLM is up
+  and serving, for grimoire's health/error reporting.
+
+Grimoire's remote backend holds the mangchi base URL and the model id, and its
+`start_model`/`stop_model`/health paths map onto these agent endpoints. Since
+mangchi is single-GPU, loading one model implies unloading whatever is resident
+(the agent enforces single-residency), mirroring how grimoire evicts to make
+room.
+
+Remaining implementation detail (not blocking the decision): whether SSE
+streaming and any KV-cache persistence passthrough work unchanged against the
+remote `/v1`, or need a remote-aware path in `proxy/llama.py` / `proxy/sse.py`.
 
 ## Options Considered
 
