@@ -107,6 +107,38 @@ mangchi is single-GPU, loading one model implies unloading whatever is resident
 (the agent enforces single-residency), mirroring how grimoire evicts to make
 room.
 
+### Scaling to more models: registered vs resident
+
+The agent is designed for **many registered models, few resident**, so adding
+future NVFP4 downloads is a config entry, not a redesign. It mirrors grimoire's
+own multi-model memory model (`ModelManager`: per-GPU budget, evict the
+oldest-loaded non-pinned model, pinning protects incumbents), collapsed onto
+mangchi's single device:
+
+- **Registry of launch specs.** Each model mangchi can run has a named launch
+  spec (checkpoint path, NVFP4 flags, PLE-offload, context, draft/spec-decode
+  config). Adding a model = adding a spec; no agent code change.
+- **Residency set, not a singleton.** Rather than hard-coding "one resident,"
+  the agent tracks a residency set bounded by a **memory budget** (the Thor's
+  128 GB unified). A small model (e.g. the 24.7 GB 27B) can co-reside with
+  nothing large, but two small models could share the device if their combined
+  footprint + KV fits the budget. Today only the 27B is small enough to matter;
+  Flash-Next (~76 GB resident) effectively fills the device alone.
+- **LRU eviction + pinning.** Loading a model that won't fit evicts the
+  least-recently-used unpinned resident(s) until it fits — the same rule
+  grimoire applies per-GPU. A model can be pinned resident to survive
+  eviction (e.g. keep the 27B always up).
+- **Swap cost is explicit.** A vLLM process restart means reload-from-SSD plus
+  CUDA-graph warm-up (tens of seconds to minutes for Flash-Next), and any
+  resident KV is dropped. Future mitigation, if swap latency becomes painful:
+  vLLM **sleep mode** (suspend a resident to host RAM and wake it, far faster
+  than a cold start) instead of full process teardown. That is an optimization
+  on top of this DEC, not part of it.
+
+Net: the two current models are just the first two entries in a residency
+manager that already knows how to admit, evict, pin, and (later) sleep/swap an
+arbitrary registered set against a fixed memory budget.
+
 Remaining implementation detail (not blocking the decision): whether SSE
 streaming and any KV-cache persistence passthrough work unchanged against the
 remote `/v1`, or need a remote-aware path in `proxy/llama.py` / `proxy/sse.py`.
