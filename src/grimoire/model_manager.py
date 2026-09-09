@@ -14,6 +14,7 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional
+from urllib.parse import quote
 
 import httpx
 
@@ -30,6 +31,7 @@ from grimoire.registry import (
     _looks_like_local_path,
     _strip_hf_prefix,
     BACKEND_LLAMA,
+    BACKEND_VLLM_REMOTE,
 )
 from grimoire.proxy.routes_table import publish as _publish_route_table
 
@@ -354,6 +356,7 @@ class ActiveModel:
         self.backend_model_id = None
         self.status = config.MODEL_STATUS_LOADING
         self.backend_type = cfg.get("backend", BACKEND_LLAMA)
+        self.remote_running = False
 
         self.kv_cache_store = None
         self.snapshot_staging_slot: int = 7
@@ -361,8 +364,33 @@ class ActiveModel:
         self._qwen_prompt_block_cache = OrderedDict()
 
     def start(self):
-        """Start the llama-server process."""
-        self._start_llama()
+        """Start the configured local or remote backend."""
+        if getattr(self, "backend_type", BACKEND_LLAMA) == BACKEND_VLLM_REMOTE:
+            return self._start_remote()
+        return self._start_llama()
+
+    @property
+    def backend_base_url(self):
+        if self.backend_type == BACKEND_VLLM_REMOTE:
+            return self.cfg["remote-url"].rstrip("/")
+        return f"http://127.0.0.1:{self.port}"
+
+    def backend_url(self, path=""):
+        return f"{self.backend_base_url}/{path.lstrip('/')}" if path else self.backend_base_url
+
+    @property
+    def supports_kv_slots(self):
+        return self.backend_type == BACKEND_LLAMA
+
+    def _start_remote(self):
+        model_id = quote(self.cfg["remote-model-id"], safe="")
+        url = f"{self.cfg['remote-agent-url'].rstrip('/')}/models/{model_id}/load"
+        timeout = float(self.cfg.get("startup-timeout", config.DEFAULT_STARTUP_TIMEOUT)) + 5
+        with httpx.Client(timeout=timeout) as client:
+            response = client.post(url)
+            response.raise_for_status()
+        self.remote_running = True
+        return response.json()
 
     def _start_llama(self):
         """Start the llama-server process."""
@@ -386,7 +414,7 @@ class ActiveModel:
     async def wait_ready(self, timeout=config.DEFAULT_STARTUP_TIMEOUT):
         """Wait until the backend is ready."""
         deadline = asyncio.get_running_loop().time() + timeout
-        url = f"http://127.0.0.1:{self.port}/health"
+        url = self.backend_url("health")
         last_error = None
 
         async with httpx.AsyncClient(timeout=2.0) as client:
@@ -407,11 +435,14 @@ class ActiveModel:
 
     async def get_backend_model_id(self):
         """Resolve the backend model ID for core alias rewriting."""
+        configured = self.cfg.get("backend-model-id")
+        if configured:
+            return configured
         if self.backend_model_id:
             return self.backend_model_id
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
-                response = await client.get(f"http://127.0.0.1:{self.port}/v1/models")
+                response = await client.get(self.backend_url("v1/models"))
             data = response.json()
             items = data.get("data") or data.get("models") or []
             if items:
@@ -425,12 +456,26 @@ class ActiveModel:
         return self.backend_model_id or self.name
 
     def stop(self):
-        """Stop the backend process."""
-        self._stop_llama()
+        """Stop the configured local or remote backend."""
+        if getattr(self, "backend_type", BACKEND_LLAMA) == BACKEND_VLLM_REMOTE:
+            self._stop_remote()
+        else:
+            self._stop_llama()
         # The server's KV slots die with the process. Clear the marker for the
         # conversation that was resident, or the next request for it sees a
         # match, skips the restore, and runs against an empty slot.
         self._current_conv_id = None
+
+    def _stop_remote(self):
+        if not self.remote_running:
+            return
+        model_id = quote(self.cfg["remote-model-id"], safe="")
+        url = f"{self.cfg['remote-agent-url'].rstrip('/')}/models/{model_id}/unload"
+        with httpx.Client(timeout=config.DEFAULT_REMOTE_STOP_TIMEOUT) as client:
+            response = client.post(url)
+            response.raise_for_status()
+        self.remote_running = False
+        logger.info("Stopped remote model %s", self.name)
 
     def _stop_llama(self):
         """Stop the llama-server process."""
@@ -458,6 +503,8 @@ class ActiveModel:
 
     def is_running(self):
         """Check if the process is running."""
+        if self.backend_type == BACKEND_VLLM_REMOTE:
+            return self.remote_running
         return self.process is not None and self.process.poll() is None
 
     def get_tokenizer(self):
@@ -545,7 +592,9 @@ class ModelManager:
         pin = self.effective_fixed_gpu(model_name, include_pending=False)
         if requested is None and pin is not None:
             requested = [pin]
-        if override.gpu_ids is not None:
+        if cfg.get("backend") == BACKEND_VLLM_REMOTE:
+            placement_source = "remote"
+        elif override.gpu_ids is not None:
             placement_source = "runtime"
         elif cfg.get("gpu-ids") is not None:
             placement_source = "registry"
@@ -645,7 +694,11 @@ class ModelManager:
 
         def entry(name):
             a = running[name]
-            return {"port": a.port, "backend_model_id": a.cfg.get("alias") or a.backend_model_id or name}
+            return {
+                "port": a.port,
+                "base_url": a.backend_base_url,
+                "backend_model_id": a.cfg.get("alias") or a.backend_model_id or name,
+            }
 
         models = {}
         for name in running:
@@ -952,6 +1005,22 @@ class ModelManager:
         if not valid:
             raise RuntimeError(reason)
         self._validate_effective_config(model_name, cfg)
+
+        if cfg.get("backend") == BACKEND_VLLM_REMOTE:
+            active = ActiveModel(model_name, cfg, port=None, gpu=None)
+            self.active[model_name] = active
+            try:
+                await self._start_active_model(active)
+            except Exception:
+                active.status = config.MODEL_STATUS_FAILED
+                try:
+                    await self._stop_active_model(model_name, active)
+                except Exception:
+                    pass
+                raise
+            logger.info("Started %s on remote backend %s", model_name, active.backend_base_url)
+            self._publish_routes()
+            return active
 
         if cfg.get("cpu-only"):
             port = self._find_cpu_port()

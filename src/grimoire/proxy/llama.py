@@ -24,6 +24,13 @@ logger = logging.getLogger(__name__)
 CONVERSATION_SLOT = 0
 
 
+def _active_backend_url(active, path):
+    builder = getattr(active, "backend_url", None)
+    if builder is not None:
+        return builder(path)
+    return f"http://127.0.0.1:{active.port}/{path.lstrip('/')}"
+
+
 def _slot_lock(active):
     lock = getattr(active, "_kv_slot_lock", None)
     if lock is None:
@@ -166,7 +173,7 @@ async def _proxy_chat(
     payload = plugin_manager.before_request(payload, requested_name, model_cfg)
     backend_model_id = await active.get_backend_model_id()
     payload["model"] = backend_model_id
-    url = f"http://127.0.0.1:{active.port}/v1/chat/completions"
+    url = _active_backend_url(active, "v1/chat/completions")
     headers = {}
     validated_conversation_id = conversation_id if isinstance(conversation_id, str) else None
     if validated_conversation_id:
@@ -174,12 +181,13 @@ async def _proxy_chat(
             (active.name, user_hash or "anonymous", validated_conversation_id)
         )
 
-    store = _kv_store(active)
+    supports_kv_slots = getattr(active, "supports_kv_slots", active.backend_type == "llama")
+    store = _kv_store(active) if supports_kv_slots else None
 
     client = get_proxy_client()
     slot_guard = None
     slot_url = None
-    needs_slot_guard = validated_conversation_id is not None
+    needs_slot_guard = validated_conversation_id is not None and supports_kv_slots
     if needs_slot_guard:
         slot_guard = _slot_lock(active)
         await slot_guard.acquire()
@@ -202,7 +210,7 @@ async def _proxy_chat(
             # invisible today only because every registered model sets
             # parallel=1.
             payload["id_slot"] = CONVERSATION_SLOT
-            slot_url = f"http://127.0.0.1:{active.port}/slots/{CONVERSATION_SLOT}"
+            slot_url = _active_backend_url(active, f"slots/{CONVERSATION_SLOT}")
             prev_conv = getattr(active, "_current_conv_id", None)
             if validated_conversation_id and validated_conversation_id != prev_conv:
                 # Same-model conversation switch: save old to tmpfs, restore target.

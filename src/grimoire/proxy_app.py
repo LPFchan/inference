@@ -143,14 +143,15 @@ async def proxy_v1(request: Request, path: str):
         raise HTTPException(status_code=503, detail=f"Model '{model}' not available")
 
     backend = _next_replica(model, replicas)
+    backend_base_url = backend.get("base_url") or f"http://127.0.0.1:{backend['port']}"
     headers = _backend_request_headers(request.headers)
     if isinstance(payload, dict):
         payload = copy.deepcopy(payload)
         payload["model"] = backend.get("backend_model_id") or model
-        req = client.build_request("POST", f"http://127.0.0.1:{backend['port']}/v1/{path}",
+        req = client.build_request("POST", f"{backend_base_url}/v1/{path}",
                                    headers=headers, params=request.query_params, json=payload)
     else:
-        req = client.build_request("POST", f"http://127.0.0.1:{backend['port']}/v1/{path}",
+        req = client.build_request("POST", f"{backend_base_url}/v1/{path}",
                                    headers=headers, params=request.query_params, content=body)
     try:
         upstream = await client.send(req, stream=True)

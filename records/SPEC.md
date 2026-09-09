@@ -1,9 +1,9 @@
 # Project Spec
 
-**Project:** Grimoire — Model serving gateway with DFlash/PFlash speculative decoding
-**Canonical repo:** `git@github.com:LPFchan/grimoire.git` (refactor branch)
+**Project:** Inference — Multi-host model serving gateway
+**Canonical repo:** `git@github.com:LPFchan/inference.git`
 **Operator:** LPFchan
-**Last updated:** 2026-08-27
+**Last updated:** 2026-09-10
 
 ## Mission
 
@@ -88,6 +88,20 @@ These decisions were locked before Phase 1 and are not subject to renegotiation 
   reasoning kwarg advertises `reasoning.supported: false`.
 - Malformed or conflicting reasoning kwargs produce an empty reasoning object;
   the gateway does not infer a level from an alias name or from another model.
+
+### Contract G: Mangchi Remote Backends
+
+- `chat.lost.plus` and the webui remain on Grimoire. Mangchi models appear in
+  the same registry and use the same authenticated public API.
+- A `vllm-remote` registry entry names a Mangchi residency-agent origin, the
+  agent's model ID, the vLLM origin, and the backend's native model ID.
+- Loading and unloading call Mangchi's residency agent. Inference is forwarded
+  directly to the corresponding vLLM service without forwarding Grimoire API
+  credentials.
+- Remote models do not participate in Grimoire GPU allocation, eviction,
+  pinning, cloning, or llama.cpp KV-slot persistence.
+- Mangchi owns its unified-memory budget, LRU eviction, pinning, launch specs,
+  and process health. Grimoire owns the public registry and client-facing state.
 
 ## Pinned Upstream Repos
 

@@ -103,6 +103,13 @@ from grimoire.usage import usage_store
 
 logger = logging.getLogger(__name__)
 
+
+def _active_backend_url(active, path):
+    builder = getattr(active, "backend_url", None)
+    if builder is not None:
+        return builder(path)
+    return f"http://127.0.0.1:{active.port}/{path.lstrip('/')}"
+
 # Keep a single module identity under `python -m grimoire.entrypoint` so
 # extracted modules importing `grimoire.entrypoint` reuse the live gateway
 # state instead of creating a second module instance.
@@ -402,7 +409,7 @@ async def chat_responses(request: Request):
         payload["model"] = await active.get_backend_model_id()
         req = client.build_request(
             "POST",
-            f"http://127.0.0.1:{active.port}/v1/responses",
+            _active_backend_url(active, "v1/responses"),
             headers=headers,
             params=request.query_params,
             json=payload,
@@ -462,7 +469,7 @@ async def proxy_v1(request: Request, path: str):
             payload["model"] = await active.get_backend_model_id()
             req = client.build_request(
                 request.method,
-                f"http://127.0.0.1:{active.port}/v1/{path}",
+                _active_backend_url(active, f"v1/{path}"),
                 headers=headers,
                 params=request.query_params,
                 json=payload,
@@ -470,7 +477,7 @@ async def proxy_v1(request: Request, path: str):
         else:
             req = client.build_request(
                 request.method,
-                f"http://127.0.0.1:{active.port}/v1/{path}",
+                _active_backend_url(active, f"v1/{path}"),
                 headers=headers,
                 params=request.query_params,
                 content=body,

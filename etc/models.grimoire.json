@@ -1,5 +1,41 @@
 {
   "models": {
+    "qwen3.8-27b-uncensored-nvfp4": {
+      "backend": "vllm-remote",
+      "remote-agent-url": "http://mangchi.lost.plus:9700",
+      "remote-model-id": "qwen3.8-27b-uncensored-nvfp4",
+      "remote-url": "http://mangchi.lost.plus:8001",
+      "backend-model-id": "/models/qwen3.8-27b-uncensored",
+      "family": "qwen",
+      "capabilities": [
+        "completion"
+      ],
+      "cost": {
+        "input": 0.33,
+        "output": 3.25,
+        "cache_read": 0.1
+      },
+      "ctx-size": 32768,
+      "startup-timeout": 900
+    },
+    "qwen3.8-flash-next-uncensored-nvfp4": {
+      "backend": "vllm-remote",
+      "remote-agent-url": "http://mangchi.lost.plus:9700",
+      "remote-model-id": "qwen3.8-flash-next-uncensored-nvfp4",
+      "remote-url": "http://mangchi.lost.plus:8002",
+      "backend-model-id": "/models/qwen3.8-flash-next-uncensored",
+      "family": "qwen",
+      "capabilities": [
+        "completion"
+      ],
+      "cost": {
+        "input": 0.33,
+        "output": 3.25,
+        "cache_read": 0.1
+      },
+      "ctx-size": 262144,
+      "startup-timeout": 900
+    },
     "qwen3.6-mtp-27B": {
       "file": "gguf/Qwen3.6-27B-MTP-Q4_K_M.gguf",
       "chat-template-file": "/templates/buun-Qwen3.6-chat_template.jinja",

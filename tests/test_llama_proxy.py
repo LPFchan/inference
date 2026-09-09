@@ -86,7 +86,7 @@ class _FakeClient:
         return None
 
 
-class LlamaProxyTests(unittest.TestCase):
+class LlamaProxyTests(unittest.IsolatedAsyncioTestCase):
     def test_chat_template_defaults_merge_and_request_wins(self):
         payload = {"chat_template_kwargs": {"reasoning_effort": "medium"}}
         cfg = {
@@ -107,7 +107,6 @@ class LlamaProxyTests(unittest.TestCase):
         active = _FakeActive()
         active.name = "muse-glimmer-30b-low"
         active.cfg = {"family": "muse", "ctx-size": 4096}
-        active.prefill_config.enabled = False
         requested_cfg = {
             "family": "muse",
             "ctx-size": 8192,

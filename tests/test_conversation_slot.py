@@ -26,7 +26,7 @@ class ConversationSlotPinningTests(unittest.TestCase):
         """The request must name the slot the cache was restored into."""
         source = (ROOT / "src" / "grimoire" / "proxy" / "llama.py").read_text()
         self.assertIn('payload["id_slot"] = CONVERSATION_SLOT', source)
-        self.assertIn('f"http://127.0.0.1:{active.port}/slots/{CONVERSATION_SLOT}"', source)
+        self.assertIn('_active_backend_url(active, f"slots/{CONVERSATION_SLOT}")', source)
 
     def test_pin_and_save_target_the_same_slot(self):
         """A constant, so the two can never drift apart."""

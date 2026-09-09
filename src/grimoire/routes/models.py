@@ -27,6 +27,13 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
+def _backend_url(active, path):
+    builder = getattr(active, "backend_url", None)
+    if builder is not None:
+        return builder(path)
+    return f"http://127.0.0.1:{active.port}/{path.lstrip('/')}"
+
+
 @router.on_event("startup")
 async def _on_startup():
     asyncio.create_task(prune_old_ingest_tasks())
@@ -132,7 +139,7 @@ async def _active_alpha_target(request: Request):
 
 async def _backend_lora_adapters(active) -> list[dict]:
     async with httpx.AsyncClient(timeout=10.0) as client:
-        resp = await client.get(f"http://127.0.0.1:{active.port}/lora-adapters")
+        resp = await client.get(_backend_url(active, "lora-adapters"))
     if resp.status_code != 200:
         raise HTTPException(status_code=502, detail=f"Backend rejected /lora-adapters GET: {resp.text}")
     try:
@@ -537,7 +544,7 @@ async def set_alpha(request: Request):
     ]
     async with httpx.AsyncClient(timeout=10.0) as client:
         resp = await client.post(
-            f"http://127.0.0.1:{active.port}/lora-adapters",
+            _backend_url(active, "lora-adapters"),
             json=updated_payload,
         )
     if resp.status_code != 200:
@@ -637,7 +644,7 @@ async def props(request: Request):
 
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(f"http://127.0.0.1:{active.port}/props")
+            resp = await client.get(_backend_url(active, "props"))
         if resp.status_code == 200:
             data = resp.json()
             data["role"] = "router"

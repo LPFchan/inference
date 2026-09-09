@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from threading import RLock
 from typing import Optional
+from urllib.parse import urlsplit
 
 from grimoire import config
 from grimoire.chat_template import configured_reasoning_capability
@@ -23,6 +24,7 @@ REGISTRY_PATH = os.environ.get("GRIMOIRE_REGISTRY_PATH", DEFAULT_REGISTRY_PATH)
 REGISTRY_SEED_PATH = os.environ.get("GRIMOIRE_REGISTRY_SEED_PATH", DEFAULT_REGISTRY_SEED_PATH)
 
 BACKEND_LLAMA = "llama"
+BACKEND_VLLM_REMOTE = "vllm-remote"
 
 _GGUF_MAGIC = 0x46554747
 _GGUF_SUPPORTED_VERSIONS = {2, 3}
@@ -47,6 +49,21 @@ _GGUF_FIXED_VALUE_SIZES = {
 def _get_backend(cfg: dict) -> str:
     """Get the backend type for a model config. Defaults to llama."""
     return cfg.get("backend", "llama")
+
+
+def _valid_remote_base_url(value: object) -> bool:
+    if not isinstance(value, str) or not value:
+        return False
+    parsed = urlsplit(value)
+    return (
+        parsed.scheme in {"http", "https"}
+        and bool(parsed.hostname)
+        and parsed.username is None
+        and parsed.password is None
+        and parsed.path in {"", "/"}
+        and not parsed.query
+        and not parsed.fragment
+    )
 
 
 def resolve_path(cfg: dict, key: str) -> Optional[str]:
@@ -404,7 +421,7 @@ class ModelRegistry:
             return False, f"Model '{model_name}' not found"
 
         backend = _get_backend(cfg)
-        if backend == "llama":
+        if backend == BACKEND_LLAMA:
             if not cfg.get("file"):
                 return False, "Missing 'file' field"
             model_path = os.path.join(MODELS_DIR, cfg["file"])
@@ -420,6 +437,20 @@ class ModelRegistry:
             for field in config.RETIRED_MODEL_FIELDS:
                 if cfg.get(field):
                     return False, f"'{field}' is no longer supported"
+        elif backend == BACKEND_VLLM_REMOTE:
+            for field in ("remote-agent-url", "remote-url"):
+                if not _valid_remote_base_url(cfg.get(field)):
+                    return False, f"'{field}' must be a credential-free HTTP(S) origin"
+            if not isinstance(cfg.get("remote-model-id"), str) or not cfg["remote-model-id"]:
+                return False, "Missing 'remote-model-id' field"
+            incompatible = [
+                field for field in ("file", "cpu-only", "gpu-ids", "vram-budget-mib")
+                if cfg.get(field)
+            ]
+            if incompatible:
+                return False, f"Remote backend is incompatible with {', '.join(incompatible)}"
+            if self.get_fixed_gpu(model_name) is not None:
+                return False, "Remote backend cannot use a grimoire GPU pin"
         else:
             return False, f"Unknown backend '{backend}'"
 

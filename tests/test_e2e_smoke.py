@@ -191,16 +191,20 @@ class E2ESmokeTestCase(unittest.TestCase):
 
         # Extract assistant text and usage
         text_parts = []
+        reasoning_parts = []
         usage = {"completion_tokens": 0}
         for frame in chunks:
             if isinstance(frame, dict):
-                delta = frame.get("choices", [{}])[0].get("delta", {})
+                choices = frame.get("choices") or [{}]
+                delta = choices[0].get("delta", {})
                 if delta.get("content"):
                     text_parts.append(delta["content"])
+                if delta.get("reasoning_content"):
+                    reasoning_parts.append(delta["reasoning_content"])
                 if frame.get("usage"):
                     usage = frame["usage"]
 
-        assistant_text = "".join(text_parts)
+        assistant_text = "".join(text_parts) or "".join(reasoning_parts)
         completion_tokens = usage.get("completion_tokens", 0)
         decode_tps = completion_tokens / decode_time if decode_time > 0 else 0
 

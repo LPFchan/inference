@@ -1,11 +1,10 @@
-# Grimoire
+# Inference
 
-Multi-GPU inference gateway: llama.cpp with MTP/NextN speculative decoding behind an OpenAI-compatible `/v1` API.
+One OpenAI-compatible inference gateway for local llama.cpp models on Grimoire and remote vLLM models on Mangchi.
 
 ```
-client ──/v1──► chat.lost.plus (CF Tunnel) ──► grimoire :9001 ──┬── GPU 0: llama model A
-                                                                 ├── GPU 1: llama model B
-                                                                 └── GPU N: llama model Z
+client ──/v1──► chat.lost.plus ──► grimoire :9001 ──┬── local llama.cpp GPU
+                                                     └── mangchi vLLM over lost.plus
 ```
 
 ## Quick Start
@@ -51,6 +50,15 @@ Seed at `/etc/grimoire/models.json`, persisted to `/var/lib/grimoire/models.json
       "cache-type-v": "turbo4",
       "extra-args": ["--tensor-split", "1,1"]
     },
+    "qwen3.8-27b-uncensored-nvfp4": {
+      "backend": "vllm-remote",
+      "remote-agent-url": "http://mangchi.lost.plus:9700",
+      "remote-model-id": "qwen3.8-27b-uncensored-nvfp4",
+      "remote-url": "http://mangchi.lost.plus:8001",
+      "backend-model-id": "/models/qwen3.8-27b-uncensored",
+      "ctx-size": 32768,
+      "startup-timeout": 900
+    },
     "gemma-4-mtp-31B": {
       "file": "gguf/Gemma4-31B-Q4_K_M.gguf",
       "mtp-head": "gguf/gemma4-mtp-head-q8_0.gguf",
@@ -92,7 +100,9 @@ curl -X POST "$GRIMOIRE_ORIGIN/models/qwen/unpin" -H "Authorization: Bearer $GRI
 
 `clone` runs one llama-server process sharded across the ordered GPUs; it does not create a replica. Clone/declone reload active models with rollback on failure. Pin reloads only when residency must move; unpin changes eviction protection without moving a running model. `/status` keeps `gpu`/`gpus` for actual residency and reports requested placement, placement/pin sources, and runtime overrides separately. Locked presets clear runtime overrides and reconcile target models; manual-control presets retain them but enforce their GPU mask.
 - Dynamic allocation: free GPU preferred, oldest non-pinned evicted when all busy
-- All models use `backend: "llama"` (`llama-server` HTTP); it is the only backend
+- `backend: "llama"` starts a local llama-server and participates in Grimoire's GPU allocator.
+- `backend: "vllm-remote"` asks the Mangchi residency agent to load or unload `remote-model-id`, forwards inference to `remote-url`, and does not consume or evict Grimoire GPU residency.
+- Grimoire keeps the public API key boundary. Mangchi's agent accepts only its configured private source CIDRs and does not receive the client credential.
 
 ### Prompt Cache Reuse
 
@@ -130,8 +140,8 @@ DFlash and PFlash were retired in DEC-20260902-001.
 ## Building
 
 ```bash
-git clone --recursive <repo> ~/grimoire
-cd ~/grimoire
+git clone --recursive <repo> ~/inference
+cd ~/inference
 docker compose build        # ~90 min first build (llama.cpp)
 ```
 
