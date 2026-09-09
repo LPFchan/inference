@@ -1,8 +1,8 @@
 # Current Status
 
 **Snapshot:** 2026-09-10
-**Posture:** Production stack is llama.cpp (TheTom turboquant fork, turbo4 KV). Recent work is operational tuning of that stack — always-on embedder/reranker GPU co-location and gateway proxy throughput. vLLM/AWQ migration remains an open parallel research track (DEC-20260528-001), not the current focus.
-**Focus:** Operate and tune the llama.cpp gateway (co-location, proxy throughput, per-model ctx/KV tuning).
+**Posture:** The Grimoire gateway serves local llama.cpp models and admits remote vLLM models through Mangchi's residency agent. The local engine remains TheTom's turboquant fork with turbo4 KV. Mangchi model artifacts are managed separately from the gateway.
+**Focus:** Operate the multi-host gateway and finish live inference smokes as Mangchi model artifacts become available.
 
 ## Migration Summary
 
@@ -23,7 +23,7 @@ Patch chain in `patches/atomic-llama-cpp/`, applied in order by `Dockerfile`:
 
 ## Recent Changes
 
-- 2026-09-10: **Mangchi remote-backend gateway support implemented; production deployment pending** — added `vllm-remote` lifecycle and request routing, registered both Mangchi NVFP4 services in the Grimoire seed, excluded remote models from local GPU allocation and llama.cpp KV slots, and covered the path with registry/lifecycle tests. (`DEC-20260909-002`)
+- 2026-09-10: **Mangchi remote-backend gateway support deployed** — added `vllm-remote` lifecycle and request routing, registered both Mangchi NVFP4 services in tracked and live Grimoire state, excluded remote models from local GPU allocation and llama.cpp KV slots, and made the registry HTTP admission validator backend-aware. Production health and authenticated management checks pass. A cold-load request reached Mangchi and failed safely because the registered 27B model directory is not present; Mangchi released the reservation and has no resident model. A separate Flash-Next artifact download is still active, so an end-to-end remote chat smoke remains pending. (`DEC-20260909-002`)
 - 2026-09-10: **Qwen3.8 Flash-Next now serves native 262K context with FP8 QSA KV on Jetson Thor** — pinned vLLM PR #55557 at `5fd5dd5`, retained the SSD-backed 95.4 GiB PLE table and SM110 top-k fallback, and raised the model allocation to 0.67. Production allocated 5.88 GiB for 434,087 cache tokens (1.66x native context) and passed a deterministic chat smoke. The canary completed an exact 262,144-token request in 1,642.64 seconds with zero preemptions or request errors. Attention KV is FP8; the GDN/Mamba recurrent cache remains float32. (`DEC-20260909-003`, `RSH-20260909-002`)
 - 2026-09-09: **Qwen3.8 Flash-Next ported to Jetson Thor with SSD-backed PLE** — ported Blazux's PLE mmap approach to vLLM v0.29's `Qwen4Exp` implementation while retaining the Thor-native `sm_110a` image. The 95.4 GiB BF16 PLE table remains on NVMe; the rest of the model uses 71.11 GiB. Added Thor fallbacks for incompatible FlashInfer autotuning and QSA cooperative top-k kernels. (`RSH-20260909-001`)
 - 2026-07-19: **Eastself serving registry restored from retained intake provenance** — reconciled the tracked seed and persistent runtime registry to one byte-identical document, restored all 19 valid manifest-backed Eastself completion aliases in ascending intake `created_at` order, and preserved the fixed embedder/reranker assignments. The failed `eastself-gemma4-12b-dec20260718` alias and pin were removed; its unshared PEFT directory, LoRA GGUF, tokenizer-aligned GGUF, and intake manifest were permanently deleted while the shared 12B base and healthy v2 artifacts were preserved. All 19 restored entries pass real-file registry validation. Live sequential smokes passed for accepted 31B generations (`ck17972-final`, `ck3749-120k-final`) and healthy 12B v2; historical probes remain available as rollback/evidence and are not implied to be quality-accepted (for example, `ck250-dec4` loaded but produced an empty visible response).
