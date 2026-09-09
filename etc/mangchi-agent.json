@@ -16,18 +16,19 @@
     "qwen3.8-flash-next-uncensored-nvfp4": {
       "model_path": "/models/qwen3.8-flash-next-uncensored",
       "model_path_host": "/home/yeowool/models/nvfp4/qwen3.8-flash-next-uncensored",
-      "resident_gb": 80,
-      "gpu_mem_util": 0.65,
+      "resident_gb": 82,
+      "gpu_mem_util": 0.67,
       "port": 8002,
       "pinned": false,
-      "vllm_docker_image": "mangchi-vllm:thor-v0.29-ple-mmap",
+      "vllm_docker_image": "mangchi-vllm:thor-qsa-fp8-5fd5dd5",
       "models_dir_host": "/home/yeowool/models/nvfp4",
       "env": {
         "VLLM_PLE_MMAP": "1",
         "VLLM_PLE_MMAP_PREWARM": "0"
       },
       "serve_args": [
-        "--max-model-len", "131072",
+        "--max-model-len", "262144",
+        "--kv-cache-dtype", "fp8",
         "--max-num-seqs", "1",
         "--max-num-batched-tokens", "2048",
         "--no-enable-flashinfer-autotune",

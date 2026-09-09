@@ -6,12 +6,16 @@ DEC-20260909-002: registered-vs-resident, memory budget, LRU eviction, pinning.
 """
 
 import asyncio
+from pathlib import Path
 
 import pytest
 
 from grimoire import mangchi_agent as agent
 from grimoire.mangchi_agent import LaunchSpec, ResidencyManager
 from fastapi import HTTPException
+
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def run(coro):
@@ -165,12 +169,31 @@ def test_specs_file_parses():
     assert "qwen3.8-27b-uncensored-nvfp4" in specs
     assert "qwen3.8-flash-next-uncensored-nvfp4" in specs
     flash = specs["qwen3.8-flash-next-uncensored-nvfp4"]
-    assert flash.vllm_docker_image == "mangchi-vllm:thor-v0.29-ple-mmap"
+    assert flash.vllm_docker_image == "mangchi-vllm:thor-qsa-fp8-5fd5dd5"
     assert flash.env.get("VLLM_PLE_MMAP") == "1"
     assert "VLLM_PLE_CPU_OFFLOAD" not in flash.env
     assert "--enforce-eager" in flash.serve_args
     assert "--no-enable-flashinfer-autotune" in flash.serve_args
+    assert flash.serve_args[flash.serve_args.index("--max-model-len") + 1] == "262144"
+    assert flash.serve_args[flash.serve_args.index("--kv-cache-dtype") + 1] == "fp8"
+    assert flash.gpu_mem_util == 0.67
+    assert flash.resident_gb == 82
     assert flash.resident_gb > specs["qwen3.8-27b-uncensored-nvfp4"].resident_gb
+
+
+def test_qsa_fp8_canary_build_is_pinned_and_thor_aware():
+    dockerfile = (ROOT / "docker/mangchi-vllm/Dockerfile").read_text()
+    thor_patch = (ROOT / "docker/mangchi-vllm/patch_thor_qsa.py").read_text()
+    ple_patch = (ROOT / "docker/mangchi-vllm/vllm_ple_mmap.py").read_text()
+
+    assert "VLLM_REF=refs/pull/55557/head" in dockerfile
+    assert "VLLM_SHA=5fd5dd5cf4ac8e9f09b6fae3f3603e9a3cb88aaa" in dockerfile
+    assert 'test "$(git -C vllm rev-parse HEAD)" = "${VLLM_SHA}"' in dockerfile
+    assert "nvidia/ops/qsa_indexer.py" in thor_patch
+    assert "is_device_capability_family(110)" in thor_patch
+    assert "max_total_tokens" not in ple_patch
+    assert "qwen4_exp_compute_ple_ngram_ids" not in ple_patch
+    assert "self.compute_ngram_ids(" in ple_patch
 
 
 def test_docker_launch_command_shape():

@@ -1,9 +1,9 @@
-# mangchi-vllm:thor-v0.29-ple-mmap - vLLM 0.29.0 on Jetson AGX Thor (sm_110a)
-# Adapted from RobotFlow-Labs/anima-vllm-thor (Apache-2.0), bumped v0.23.0 -> v0.29.0.
-# v0.29.0 is the first vLLM ref that registers BOTH qwen3_5 (our 27B) and qwen4_exp
-# (Flash-Next). Built on NVIDIA's Thor base (CUDA 13.0, sm_110a kernels).
-# Build: ~30-50 min, needs most of the 128GB unified memory free. Don't build while serving.
-#   DOCKER_BUILDKIT=1 docker build -t mangchi-vllm:thor-v0.29-ple-mmap -f Dockerfile .
+# mangchi-vllm:thor-qsa-fp8-5fd5dd5 - vLLM QSA FP8 canary on Jetson AGX Thor
+# Adapted from RobotFlow-Labs/anima-vllm-thor (Apache-2.0). The vLLM source is
+# pinned to PR #55557, which contains current main plus FP8 main-QSA KV support.
+# Built on NVIDIA's Thor base (CUDA 13.0, sm_110a kernels).
+# Build: ~60-75 min cold, needs most of the 128GB unified memory free. Don't build while serving.
+#   DOCKER_BUILDKIT=1 docker build -t mangchi-vllm:thor-qsa-fp8-5fd5dd5 -f Dockerfile .
 FROM ghcr.io/nvidia-ai-iot/vllm:latest-jetson-thor
 
 # the base bakes PIP_CONSTRAINT=torch==2.10.0 -> unset it so the torch upgrade isn't blocked
@@ -24,9 +24,16 @@ RUN pip uninstall -y flash-attn flash_attn || true
 # cleanly and carries sm_110 kernels; use_existing_torch.py lets vLLM build against it.
 RUN pip install --no-cache-dir torch==2.11.0 torchvision==0.26.0 --index-url https://download.pytorch.org/whl/cu130
 
-# build vLLM v0.29.0 from source against the installed torch (reuse it, strip torch pins)
+# Build the reviewed QSA FP8 candidate from an exact commit. The PR ref is used
+# only to make the commit reachable; the SHA check keeps rebuilds reproducible.
+ARG VLLM_REF=refs/pull/55557/head
+ARG VLLM_SHA=5fd5dd5cf4ac8e9f09b6fae3f3603e9a3cb88aaa
 WORKDIR /build
-RUN git clone --depth 1 --branch v0.29.0 https://github.com/vllm-project/vllm.git
+RUN git init vllm \
+ && git -C vllm remote add origin https://github.com/vllm-project/vllm.git \
+ && git -C vllm fetch --depth 1 origin "${VLLM_REF}" \
+ && git -C vllm checkout --detach FETCH_HEAD \
+ && test "$(git -C vllm rev-parse HEAD)" = "${VLLM_SHA}"
 WORKDIR /build/vllm
 RUN python use_existing_torch.py || true
 RUN pip install --no-cache-dir "setuptools-scm>=8"
@@ -38,15 +45,16 @@ RUN set -eux; WHL="$(find /build -name 'vllm-*.whl' | head -1)"; echo "WHEEL=$WH
 # torch/flashinfer pins, so this won't downgrade the stack we just built
 RUN pip install --no-cache-dir -r requirements/common.txt -r requirements/cuda.txt || true
 
-# flashinfer: 0.6.18 (v0.29 pin) needs nvidia-cudnn-frontend>=1.25 which has no aarch64 wheel.
+# flashinfer: the current vLLM pin needs nvidia-cudnn-frontend>=1.25, which has no aarch64 wheel.
 # 0.6.8 (anima's) satisfies flashinfer_sampler_supported + the optional flashinfer paths
 # without that dep; kernels JIT on first run.
-RUN pip install --no-cache-dir --extra-index-url https://flashinfer.ai/whl/ flashinfer-python==0.6.8 || true
+RUN pip install --no-cache-dir --no-deps cuda-tile==1.5.0 \
+ && pip install --no-cache-dir --no-deps --extra-index-url https://flashinfer.ai/whl/ flashinfer-python==0.6.8
 
-# transformers v5 (v0.29 dropped v4 support); compressed-tensors 0.17.x (NVFP4); numba for ngram spec-decode
+# transformers v5; compressed-tensors 0.17.x (NVFP4); numba for ngram spec-decode
 RUN pip install --no-cache-dir --upgrade transformers
 # xgrammar: vLLM 0.29 harmony parser needs >=0.2.1 (openai_tool_call_schema), but no aarch64
-# wheel exists past 0.1.32 -> build from source. Built after torch 2.13 so it links correctly.
+# wheel exists past 0.1.32 -> build from source. Built after torch 2.11 so it links correctly.
 RUN pip uninstall -y xgrammar || true \
  && pip install --no-cache-dir "pybind11>=2.12" \
  && pip install --no-cache-dir "git+https://github.com/mlc-ai/xgrammar.git@v0.2.6"
@@ -64,7 +72,7 @@ COPY patch_ple_mmap.py /tmp/patch_ple_mmap.py
 RUN python /tmp/patch_ple_mmap.py
 
 # SM110 supports CUDA clusters in general, but rejects the cooperative top-k launch shape
-# used by Qwen3.8's QSA indexer. Route Thor through vLLM's existing persistent fallback.
+# used by Qwen3.8's QSA indexer. Route Thor through vLLM's persistent fallback.
 COPY patch_thor_qsa.py /tmp/patch_thor_qsa.py
 RUN python /tmp/patch_thor_qsa.py
 

@@ -5,17 +5,17 @@ from pathlib import Path
 
 
 site_packages = Path(sysconfig.get_paths()["purelib"])
-qsa_path = site_packages / "vllm/models/qwen4_exp/nvidia/ops/qsa.py"
+qsa_path = site_packages / "vllm/models/qwen4_exp/nvidia/ops/qsa_indexer.py"
 source = qsa_path.read_text()
 
-old = """            and current_platform.has_device_capability(90)
-            and not current_platform.is_device_capability_family(120)
+old = """        and current_platform.has_device_capability(90)
+        and not current_platform.is_device_capability_family(120)
 """
-new = """            and current_platform.has_device_capability(90)
-            # Thor (SM110) rejects this thread-block-cluster launch. Use the
-            # existing persistent_topk fallback, as vLLM already does on SM120.
-            and not current_platform.is_device_capability_family(110)
-            and not current_platform.is_device_capability_family(120)
+new = """        and current_platform.has_device_capability(90)
+        # Thor (SM110) rejects this thread-block-cluster launch. Use the
+        # existing persistent_topk fallback, as vLLM already does on SM120.
+        and not current_platform.is_device_capability_family(110)
+        and not current_platform.is_device_capability_family(120)
 """
 
 if old not in source:

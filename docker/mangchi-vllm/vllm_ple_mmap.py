@@ -14,7 +14,6 @@ import mmap
 import os
 import re
 import struct
-import sys
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
 
@@ -25,7 +24,6 @@ from torch import nn
 logger = logging.getLogger("vllm.ple_mmap")
 
 _DTYPES = {"BF16": torch.bfloat16, "F16": torch.float16}
-_REGISTRY: dict[str, nn.Module] = {}
 
 
 def enabled() -> bool:
@@ -316,29 +314,11 @@ def _setup_table(module: nn.Module) -> None:
     )
 
 
-def _gather_impl(ids: torch.Tensor, output: torch.Tensor, layer_name: str) -> None:
-    output.copy_(_REGISTRY[layer_name].ngram_embedding.gather(ids))
-
-
-def _gather_fake(ids: torch.Tensor, output: torch.Tensor, layer_name: str) -> None:
-    return
-
-
 def apply(cls: type) -> None:
     """Patch vLLM's Qwen4ExpNGramEmbedding when explicitly enabled."""
     if not enabled() or getattr(cls, "_ple_mmap_patched", False):
         return
-    from vllm.utils.torch_utils import direct_register_custom_op
-
-    if not hasattr(torch.ops.vllm, "qwen4_exp_ple_mmap_gather"):
-        direct_register_custom_op(
-            op_name="qwen4_exp_ple_mmap_gather",
-            op_func=_gather_impl,
-            mutates_args=["output"],
-            fake_impl=_gather_fake,
-        )
-
-    module = sys.modules[cls.__module__]
+    module = __import__(cls.__module__, fromlist=["PLEVocabParallelEmbedding"])
     original_init = cls.__init__
     original_load_weights = cls.load_weights
 
@@ -347,10 +327,7 @@ def apply(cls: type) -> None:
         config,
         embedding_dim,
         ple_dense_layer_id,
-        max_total_tokens,
-        max_num_reqs,
         prefix,
-        layer_name,
         quant_config=None,
         params_dtype=None,
     ):
@@ -366,10 +343,7 @@ def apply(cls: type) -> None:
                 config,
                 embedding_dim,
                 ple_dense_layer_id,
-                max_total_tokens,
-                max_num_reqs,
                 prefix,
-                layer_name,
                 quant_config=None,
                 params_dtype=params_dtype,
             )
@@ -377,7 +351,6 @@ def apply(cls: type) -> None:
             module.PLEVocabParallelEmbedding = real_embedding_class
         self._ple_mmap_prefix = prefix
         self._ple_mmap_model_path = None
-        _REGISTRY[layer_name] = self
         try:
             from vllm.config import get_current_vllm_config
 
@@ -403,23 +376,10 @@ def apply(cls: type) -> None:
         return loaded
 
     def patched_forward(self, input_ids, query_start_loc, ngram_context):
-        ids = input_ids.new_empty(
-            (input_ids.shape[0], self.ngram_heads), dtype=torch.long
+        ids = self.compute_ngram_ids(
+            input_ids, query_start_loc, ngram_context
         )
-        torch.ops.vllm.qwen4_exp_compute_ple_ngram_ids(
-            input_ids, query_start_loc, ngram_context, ids, self.layer_name
-        )
-        table = self.ngram_embedding.table
-        dtype = (
-            table.torch_dtype
-            if table is not None
-            else self.ngram_embedding._zeros_dtype
-        )
-        output = torch.empty(
-            (*ids.shape, self.head_dim), dtype=dtype, device=ids.device
-        )
-        torch.ops.vllm.qwen4_exp_ple_mmap_gather(ids, output, self.layer_name)
-        return output.flatten(-2)
+        return self.ngram_embedding.gather(ids).flatten(-2)
 
     cls.__init__ = patched_init
     cls.load_weights = patched_load_weights
