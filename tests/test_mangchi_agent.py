@@ -169,6 +169,54 @@ def test_specs_file_parses():
     assert flash.resident_gb > specs["qwen3.8-27b-uncensored-nvfp4"].resident_gb
 
 
+def test_docker_launch_command_shape():
+    specs = agent.load_specs()
+    name = "qwen3.8-27b-uncensored-nvfp4"
+    cmd = agent.build_launch_command(name, specs[name])
+    assert cmd[0] == "docker" and "run" in cmd and "-d" in cmd
+    assert f"mangchi-vllm-{name}" in cmd
+    assert "--runtime" in cmd and "nvidia" in cmd
+    # port published, model dir mounted ro, image + vllm serve present
+    joined = " ".join(cmd)
+    assert "-p 8001:8001" in joined
+    assert ":ro" in joined
+    assert "vllm serve /models/qwen3.8-27b-uncensored" in joined
+    assert "--gpu-memory-utilization 0.22" in joined
+
+
+def test_container_resident_alive_and_reap(mgr, monkeypatch):
+    # A container-backed resident is tracked by docker state, not host pgid.
+    mgr.specs["cont"] = LaunchSpec(
+        model_path="/models/x", resident_gb=10, port=9001,
+        vllm_docker_image="img", models_dir_host="/host/models",
+    )
+    states = {"running": True}
+    removed = []
+    monkeypatch.setattr(mgr, "_container_running", lambda c: states["running"])
+    monkeypatch.setattr(mgr, "_stop_container", lambda c, t: states.__setitem__("running", False))
+    monkeypatch.setattr(mgr, "_remove_container", lambda c: removed.append(c))
+    # docker run -d exits 0 immediately on success
+    monkeypatch.setattr(agent.subprocess, "Popen", lambda *a, **k: type("P", (), {"wait": lambda s: 0, "pid": 1})())
+    run(mgr.load("cont"))
+    r = mgr.resident["cont"]
+    assert r.container == "mangchi-vllm-cont"
+    out = run(mgr.unload("cont"))
+    assert out["status"] == "unloaded"
+    assert "mangchi-vllm-cont" in removed
+
+
+def test_group_alive_container_branch(monkeypatch):
+    # _group_alive on a container resident consults docker state, not host pgid.
+    m = ResidencyManager(_specs(), budget_gib=110)
+    r = agent.Resident(
+        name="c", spec=_specs()["small"], process=None, port=1, container="mangchi-vllm-c"
+    )
+    monkeypatch.setattr(m, "_container_running", lambda c: True)
+    assert m._group_alive(r) is True
+    monkeypatch.setattr(m, "_container_running", lambda c: False)
+    assert m._group_alive(r) is False
+
+
 def test_specs_have_per_model_gpu_mem_util():
     # Per-instance --gpu-memory-utilization must reflect each model's share, not
     # a blanket near-1.0 (which would let two models both claim ~the whole device).

@@ -1,21 +1,27 @@
 {
   "models": {
     "qwen3.8-27b-uncensored-nvfp4": {
-      "model_path": "/home/yeowool/models/nvfp4/qwen3.8-27b-uncensored",
+      "model_path": "/models/qwen3.8-27b-uncensored",
+      "model_path_host": "/home/yeowool/models/nvfp4/qwen3.8-27b-uncensored",
       "resident_gb": 30,
       "gpu_mem_util": 0.22,
       "port": 8001,
       "pinned": false,
+      "vllm_docker_image": "ghcr.io/nvidia-ai-iot/vllm:latest-jetson-thor",
+      "models_dir_host": "/home/yeowool/models/nvfp4",
       "serve_args": [
         "--max-model-len", "32768"
       ]
     },
     "qwen3.8-flash-next-uncensored-nvfp4": {
-      "model_path": "/home/yeowool/models/nvfp4/qwen3.8-flash-next-uncensored",
+      "model_path": "/models/qwen3.8-flash-next-uncensored",
+      "model_path_host": "/home/yeowool/models/nvfp4/qwen3.8-flash-next-uncensored",
       "resident_gb": 80,
       "gpu_mem_util": 0.62,
       "port": 8002,
       "pinned": false,
+      "vllm_docker_image": "ghcr.io/nvidia-ai-iot/vllm:latest-jetson-thor",
+      "models_dir_host": "/home/yeowool/models/nvfp4",
       "env": {
         "VLLM_PLE_CPU_OFFLOAD": "1"
       },

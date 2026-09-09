@@ -70,11 +70,18 @@ class LaunchSpec:
     model_path: str
     resident_gb: float
     gpu_mem_util: Optional[float] = None
+    model_path_host: Optional[str] = None  # host path, for docker -v mount
     serve_args: list[str] = field(default_factory=list)
     env: dict[str, str] = field(default_factory=dict)
     port: int = 8000
     pinned: bool = False
     vllm_bin: str = "vllm"
+    # When vllm_docker_image is set, the model runs as a sibling docker container
+    # (the agent itself runs in a container with the docker socket mounted).
+    vllm_docker_image: Optional[str] = None
+    docker_runtime: str = "nvidia"
+    models_dir_container: str = "/models"
+    models_dir_host: Optional[str] = None
 
 
 @dataclass
@@ -84,6 +91,7 @@ class Resident:
     process: subprocess.Popen
     port: int
     pgid: Optional[int] = None
+    container: Optional[str] = None  # set when launched as a docker container
     started_at: float = field(default_factory=time.time)
     last_used: float = field(default_factory=time.time)
 
@@ -96,13 +104,42 @@ def load_specs(path: str = SPECS_PATH) -> dict[str, LaunchSpec]:
             model_path=cfg["model_path"],
             resident_gb=float(cfg["resident_gb"]),
             gpu_mem_util=(float(cfg["gpu_mem_util"]) if "gpu_mem_util" in cfg else None),
+            model_path_host=cfg.get("model_path_host"),
             serve_args=list(cfg.get("serve_args", [])),
             env=dict(cfg.get("env", {})),
             port=int(cfg.get("port", 8000)),
             pinned=bool(cfg.get("pinned", False)),
             vllm_bin=cfg.get("vllm_bin", "vllm"),
+            vllm_docker_image=cfg.get("vllm_docker_image"),
+            docker_runtime=cfg.get("docker_runtime", "nvidia"),
+            models_dir_container=cfg.get("models_dir_container", "/models"),
+            models_dir_host=cfg.get("models_dir_host"),
         )
     return specs
+
+
+def build_launch_command(name: str, spec: LaunchSpec) -> list[str]:
+    """The argv used to start one model's vLLM process (host binary or docker)."""
+    serve = ["serve", spec.model_path, "--port", str(spec.port)]
+    if spec.gpu_mem_util is not None:
+        serve += ["--gpu-memory-utilization", str(spec.gpu_mem_util)]
+    serve += list(spec.serve_args)
+    if not spec.vllm_docker_image:
+        return [spec.vllm_bin, *serve]
+    # Sibling-container launch: name it so status/cleanup can find it, map the
+    # port, and mount the model dir read-only. --init gives a reaping PID 1.
+    cmd = [
+        "docker", "run", "-d", "--init",
+        "--name", f"mangchi-vllm-{name}",
+        "--runtime", spec.docker_runtime,
+        "-p", f"{spec.port}:{spec.port}",
+    ]
+    if spec.models_dir_host:
+        cmd += ["-v", f"{spec.models_dir_host}:{spec.models_dir_container}:ro"]
+    for k, v in spec.env.items():
+        cmd += ["-e", f"{k}={v}"]
+    cmd += [spec.vllm_docker_image, "vllm", *serve]
+    return cmd
 
 
 class ResidencyManager:
@@ -125,6 +162,8 @@ class ResidencyManager:
 
     def _group_alive(self, r: Resident) -> bool:
         """True if any member of the resident's process group still exists."""
+        if r.container:
+            return self._container_running(r.container)
         if r.pgid is None:
             return r.process.poll() is None
         try:
@@ -138,6 +177,28 @@ class ResidencyManager:
             # Treating this as absent would release the reservation over live
             # workers. Surface it as alive so shutdown fails honestly.
             return True
+
+    @staticmethod
+    def _docker(args: list[str]) -> tuple[int, str]:
+        try:
+            out = subprocess.run(
+                ["docker", *args], capture_output=True, text=True, timeout=30
+            )
+            return out.returncode, (out.stdout or "").strip()
+        except Exception as exc:
+            return 1, str(exc)
+
+    def _container_running(self, name: str) -> bool:
+        rc, out = self._docker(["inspect", "-f", "{{.State.Running}}", name])
+        return rc == 0 and out == "true"
+
+    def _stop_container(self, name: str, timeout_s: int) -> None:
+        # docker stop sends SIGTERM then SIGKILL after the timeout — graceful
+        # first, matching the Thor's SIGKILL-avoidance need.
+        self._docker(["stop", "-t", str(timeout_s), name])
+
+    def _remove_container(self, name: str) -> None:
+        self._docker(["rm", "-f", name])
 
     def _signal_group(self, r: Resident, sig: int) -> None:
         # Prefer the pgid captured at launch — reliable even after the launcher
@@ -184,6 +245,9 @@ class ResidencyManager:
         must NOT release the reservation in that case, or a replacement could be
         admitted over live workers holding CUDA memory.
         """
+        if r.container:
+            await self._reap_container(r)
+            return
         self._signal_group(r, signal.SIGTERM)
         if await self._wait_group_gone(r, STOP_TIMEOUT_S):
             return
@@ -194,6 +258,18 @@ class ResidencyManager:
         raise RuntimeError(
             f"process group for '{r.name}' could not be confirmed dead after SIGKILL"
         )
+
+    async def _reap_container(self, r: Resident) -> None:
+        """Stop+remove the model's container, confirming it is gone."""
+        name = r.container
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, self._stop_container, name, int(STOP_TIMEOUT_S))
+        deadline = time.time() + STOP_TIMEOUT_S + 15
+        while self._container_running(name):
+            if time.time() >= deadline:
+                raise RuntimeError(f"container '{name}' would not stop")
+            await asyncio.sleep(0.5)
+        await loop.run_in_executor(None, self._remove_container, name)
 
     def _ensure_stop_task(self, name: str) -> "asyncio.Task":
         """Return the single in-flight stop task for name, creating it if needed.
@@ -339,18 +415,32 @@ class ResidencyManager:
                 return {"name": name, "status": "already-resident", "port": r.port}
             spec = self.specs[name]
             await self._evict_until_fits(spec.resident_gb, exclude=name)
-            cmd = [spec.vllm_bin, "serve", spec.model_path, "--port", str(spec.port)]
-            if spec.gpu_mem_util is not None:
-                cmd += ["--gpu-memory-utilization", str(spec.gpu_mem_util)]
-            cmd += list(spec.serve_args)
+            cmd = build_launch_command(name, spec)
             env = {**os.environ, **spec.env}
             logger.info("launching %s: %s", name, " ".join(cmd))
+            if spec.vllm_docker_image:
+                # Clear any stale container with our name from a prior run, then
+                # launch. docker run -d returns immediately; the tracked entity
+                # is the named container, not the (already-exited) CLI process.
+                self._remove_container(f"mangchi-vllm-{name}")
             proc = subprocess.Popen(cmd, env=env, start_new_session=True)
-            try:
-                pgid = os.getpgid(proc.pid)
-            except (ProcessLookupError, PermissionError):
+            if spec.vllm_docker_image:
                 pgid = None
-            r = Resident(name=name, spec=spec, process=proc, port=spec.port, pgid=pgid)
+                container = f"mangchi-vllm-{name}"
+                rc = proc.wait()
+                if rc != 0:
+                    self._remove_container(container)
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"docker run for '{name}' failed (rc={rc})",
+                    )
+            else:
+                container = None
+                try:
+                    pgid = os.getpgid(proc.pid)
+                except (ProcessLookupError, PermissionError):
+                    pgid = None
+            r = Resident(name=name, spec=spec, process=proc, port=spec.port, pgid=pgid, container=container)
             self.resident[name] = r
             try:
                 await self._wait_healthy(r)
