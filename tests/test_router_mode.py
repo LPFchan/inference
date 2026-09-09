@@ -201,6 +201,49 @@ class RouterModeContractTests(unittest.TestCase):
             self.assertEqual(response.status_code, 201, value)
             self.assertEqual(fake_registry.added[1]["predict"], value)
 
+    def test_registry_put_accepts_remote_backend_without_local_file(self):
+        class FakeRegistry:
+            added = None
+
+            def get_fixed_gpu(self, _name):
+                return None
+
+            def add(self, name, data):
+                self.added = (name, data)
+                return data
+
+            def validate(self, _name, gpu_count=None):
+                return True, "OK"
+
+        config_data = {
+            "backend": "vllm-remote",
+            "remote-agent-url": "http://mangchi.lost.plus:9700",
+            "remote-model-id": "remote-model",
+            "remote-url": "http://mangchi.lost.plus:8001",
+        }
+        fake_registry = FakeRegistry()
+        with patch.object(models_routes, "registry", fake_registry):
+            response = self.client.put(
+                "/registry/model/remote-route-validation",
+                json=config_data,
+                headers=self.auth,
+            )
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(fake_registry.added, ("remote-route-validation", config_data))
+
+    def test_registry_put_rejects_incomplete_remote_backend(self):
+        response = self.client.put(
+            "/registry/model/remote-route-validation",
+            json={
+                "backend": "vllm-remote",
+                "remote-model-id": "remote-model",
+                "remote-url": "http://mangchi.lost.plus:8001",
+            },
+            headers=self.auth,
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("remote-agent-url", response.json()["detail"])
+
     def test_registry_predict_rejects_non_positive_and_non_integer_values(self):
         for value in (0, -2, True, 1.0, "1"):
             class FakeRegistry:

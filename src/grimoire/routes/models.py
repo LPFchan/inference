@@ -18,7 +18,13 @@ from grimoire.config import (
     SUPPORTED_SPECULATIVE_TYPES,
 )
 from grimoire.ingest import download_model_file, model_filename_from_url, parse_hf_url, download_model_file_with_progress, _DownloadCancelled, MAX_BYTES as INGEST_MAX_BYTES
-from grimoire.registry import MODELS_DIR, registry
+from grimoire.registry import (
+    BACKEND_LLAMA,
+    BACKEND_VLLM_REMOTE,
+    MODELS_DIR,
+    _valid_remote_base_url,
+    registry,
+)
 
 _REFERENCE_FIELDS = ("file", "mmproj", "mtp-head", "spec-draft-model", "draft", "drafter")
 _MAX_GGUF_UPLOAD_BYTES = int(os.environ.get("GRIMOIRE_MAX_GGUF_UPLOAD_BYTES", 40 * 1024**3))
@@ -198,9 +204,32 @@ def _scan_gguf_files() -> list[dict]:
 def _validate_model_config(data: dict, gpu_count=None) -> None:
     if not isinstance(data, dict):
         raise HTTPException(status_code=400, detail="Body must be a JSON object")
-    file_val = data.get("file")
-    if not file_val or not isinstance(file_val, str):
-        raise HTTPException(status_code=400, detail="'file' is required and must be a string")
+    backend = data.get("backend", BACKEND_LLAMA)
+    if backend == BACKEND_LLAMA:
+        file_val = data.get("file")
+        if not file_val or not isinstance(file_val, str):
+            raise HTTPException(status_code=400, detail="'file' is required and must be a string")
+    elif backend == BACKEND_VLLM_REMOTE:
+        for field in ("remote-agent-url", "remote-url"):
+            if not _valid_remote_base_url(data.get(field)):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"'{field}' must be a credential-free HTTP(S) origin",
+                )
+        remote_model_id = data.get("remote-model-id")
+        if not isinstance(remote_model_id, str) or not remote_model_id:
+            raise HTTPException(status_code=400, detail="'remote-model-id' is required and must be a string")
+        incompatible = [
+            field for field in ("file", "cpu-only", "gpu-ids", "vram-budget-mib")
+            if data.get(field)
+        ]
+        if incompatible:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Remote backend is incompatible with {', '.join(incompatible)}",
+            )
+    else:
+        raise HTTPException(status_code=400, detail=f"Unknown backend '{backend}'")
     for field in ("ctx-size", "predict", "parallel", "n-gpu-layers",
                   "image-min-tokens", "image-max-tokens", "vram-budget-mib"):
         val = data.get(field)
