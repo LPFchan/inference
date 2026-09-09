@@ -476,7 +476,7 @@ class ResidencyManager:
                 "name": r.name,
                 "port": r.port,
                 "pid": r.process.pid,
-                "alive": r.process.poll() is None,
+                "alive": self._group_alive(r),
                 "pinned": r.spec.pinned,
                 "resident_gb": r.spec.resident_gb,
                 "uptime_s": round(time.time() - r.started_at, 1),

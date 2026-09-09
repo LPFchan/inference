@@ -213,12 +213,16 @@ def test_group_alive_container_branch(monkeypatch):
     # _group_alive on a container resident consults docker state, not host pgid.
     m = ResidencyManager(_specs(), budget_gib=110)
     r = agent.Resident(
-        name="c", spec=_specs()["small"], process=None, port=1, container="mangchi-vllm-c"
+        name="c", spec=_specs()["small"], process=FakeProc(), port=1,
+        container="mangchi-vllm-c"
     )
     monkeypatch.setattr(m, "_container_running", lambda c: True)
     assert m._group_alive(r) is True
+    m.resident["c"] = r
+    assert m.status("c")["alive"] is True
     monkeypatch.setattr(m, "_container_running", lambda c: False)
     assert m._group_alive(r) is False
+    assert m.status("c")["alive"] is False
 
 
 def test_container_launcher_exit_does_not_fail_health_wait(monkeypatch):
