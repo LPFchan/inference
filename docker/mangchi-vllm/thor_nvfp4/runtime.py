@@ -48,6 +48,15 @@ def _pointer(tensor, dtype, align=16):
 @torch.library.custom_op("thor_nvfp4::moe", mutates_args=())
 def run(x: torch.Tensor, ids: torch.Tensor, routes: torch.Tensor,
         weights: list[torch.Tensor]) -> torch.Tensor:
+    return _run_impl(x, ids, routes, weights)
+
+
+def _run_impl(x, ids, routes, weights, trace=None):
+    """Shared launch path; diagnostic callers can retain actual stage buffers.
+
+    The custom op never requests a trace. Retained buffers are interpreted only
+    by the standalone diagnostic, outside graph capture and production forward.
+    """
     import cuda.bindings.driver as cuda
     import cutlass as c
 
@@ -116,6 +125,10 @@ def run(x: torch.Tensor, ids: torch.Tensor, routes: torch.Tensor,
         padded, HIDDEN, INTERMEDIATE, EXPERTS, tokens, TOP_K,
         max_active_clusters=clusters, stream=stream,
     )
+    if trace is not None:
+        trace.update(input_packed=a, input_sf=a_sf, intermediate_packed=intermediate,
+                     intermediate_sf=intermediate_sf, mapping=mapping, groups=groups,
+                     limits=limits, tile_count=tile_count)
     return result
 
 

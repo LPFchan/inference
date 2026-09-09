@@ -84,6 +84,15 @@ python -m thor_nvfp4.check --compile-only
 python -m thor_nvfp4.check
 ```
 
+For a numerical failure, run `python -m thor_nvfp4.check --diagnose`. It keeps
+the same failing acceptance gate and reports routing/repacking checks, actual
+input FP4 bytes/scales versus software quantization, FC1 intermediate error
+using the native quantized input, and FC2 error using the native intermediate.
+One-slot routing runs then separate FC2 from cross-expert scatter accumulation.
+These diagnostics retain scratch buffers and synchronize; they are confined to
+the standalone test and do not run in serving. The CPU reference/layout tests
+are in `tests/test_thor_nvfp4_reference.py` and need Torch, but no GPU.
+
 The numerical test uses exact expert geometry with single-token decode,
 shared routing, scattered routing, and a token count spanning a row tile. It
 compares against FP32 matrix multiplication with explicit NVFP4

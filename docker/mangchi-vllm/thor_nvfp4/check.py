@@ -14,10 +14,11 @@ def unpack(weight, block_scale, global_scale):
     return table[codes] * block_scale.float().repeat_interleave(16, dim=-1) * global_scale
 
 
-def quant_dequant(value, global_scale):
+def quant_dequant(value, global_scale, *, return_fields=False):
     blocks = value.reshape(value.shape[0], -1, 16)
+    global_scale = torch.as_tensor(global_scale, device=value.device).reshape(-1, 1)
     sf = (blocks.abs().amax(-1) / (6 * global_scale)).to(torch.float8_e4m3fn).float()
-    scale = sf[..., None] * global_scale
+    scale = sf[..., None] * global_scale[..., None]
     normalized = torch.where(scale > 0, blocks / scale, 0)
     mids = torch.tensor([.25, .75, 1.25, 1.75, 2.5, 3.5, 5.0], device=value.device)
     magnitude = normalized.abs().contiguous()
@@ -26,18 +27,34 @@ def quant_dequant(value, global_scale):
     tie = (magnitude == mids[code.clamp(max=6)]) & (code < 7) & ((code % 2) == 1)
     code = code + tie.to(code.dtype)
     levels = torch.tensor([0, .5, 1, 1.5, 2, 3, 4, 6], device=value.device)
-    return (levels[code] * normalized.sign() * scale).reshape_as(value)
+    result = (levels[code] * normalized.sign() * scale).reshape_as(value)
+    if return_fields:
+        signed_codes = code | (torch.signbit(normalized).to(code.dtype) * 8)
+        return result, signed_codes.reshape_as(value), sf.to(torch.float8_e4m3fn).view(torch.uint8)
+    return result
 
 
-def reference(x, ids, routes, original):
+def reference(x, ids, routes, original, *, input_override=None, intermediate_override=None, trace=None):
     w1, w2, s1, s2, g1, a1, g2, a2 = original
     result = torch.zeros_like(x, dtype=torch.float32)
+    if trace is not None:
+        trace["activated"] = torch.empty((ids.numel(), INTERMEDIATE), device=x.device)
+        trace["intermediate"] = torch.empty_like(trace["activated"])
     for expert in ids.unique().tolist():
         tokens, choices = torch.where(ids == expert)
-        values = quant_dequant(x[tokens].float(), a1[expert, 0])
-        first = values @ unpack(w1[expert], s1[expert], g1[expert, 0]).T
-        gate, up = first.split(INTERMEDIATE, dim=-1)
-        intermediate = quant_dequant(torch.nn.functional.silu(gate) * up, a2[expert])
+        expanded = tokens * TOP_K + choices
+        if intermediate_override is None:
+            values = (quant_dequant(x[tokens].float(), a1[expert, 0]) if input_override is None
+                      else input_override[expanded])
+            first = values @ unpack(w1[expert], s1[expert], g1[expert, 0]).T
+            gate, up = first.split(INTERMEDIATE, dim=-1)
+            activated = torch.nn.functional.silu(gate) * up
+            intermediate = quant_dequant(activated, a2[expert])
+            if trace is not None:
+                trace["activated"][expanded] = activated
+                trace["intermediate"][expanded] = intermediate
+        else:
+            intermediate = intermediate_override[expanded]
         second = intermediate @ unpack(w2[expert], s2[expert], g2[expert]).T
         result.index_add_(0, tokens, second * routes[tokens, choices, None])
     return result
@@ -46,6 +63,7 @@ def reference(x, ids, routes, original):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--compile-only", action="store_true")
+    parser.add_argument("--diagnose", action="store_true", help="Isolate native stages on the first numerical failure")
     args = parser.parse_args()
     torch.manual_seed(42)
     torch.backends.cuda.matmul.allow_tf32 = False
@@ -89,6 +107,9 @@ def main():
         cosine = torch.nn.functional.cosine_similarity(actual.flatten(), expected.flatten(), dim=0).item()
         print(f"tokens={tokens} routing={pattern} relative_rmse={relative_rmse:.6f} cosine={cosine:.6f}")
         if not torch.isfinite(actual).all() or relative_rmse > .02 or cosine < .999:
+            if args.diagnose:
+                from .diagnose import diagnose
+                diagnose(x, ids, routes, original, prepared)
             raise RuntimeError("Native kernel failed the NVFP4 reference accuracy gate")
     # Capture/replay exercises pointer lifetime and caller-owned scratch storage.
     graph = torch.cuda.CUDAGraph()
