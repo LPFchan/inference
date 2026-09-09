@@ -214,6 +214,23 @@ class _MmapNgramEmbedding(nn.Module):
     forward = gather
 
 
+def _load_weight_scale(
+    embedding: _MmapNgramEmbedding,
+    loaded_weight: torch.Tensor,
+    device: torch.device,
+) -> None:
+    if loaded_weight.numel() != 1:
+        raise ValueError(
+            "FP8 PLE embedding weight_scale must contain exactly one value"
+        )
+    scale = loaded_weight.to(device=device, dtype=torch.float32)
+    if not torch.isfinite(scale).all() or not torch.all(scale > 0):
+        raise ValueError("FP8 PLE embedding weight_scale must be positive and finite")
+    embedding.register_parameter(
+        "weight_scale", nn.Parameter(scale, requires_grad=False)
+    )
+
+
 def _find_shards(
     model_path: str, layer_idx: int
 ) -> tuple[dict[int, tuple[str, int, int]], str | None, int | None]:
@@ -374,6 +391,13 @@ def apply(cls: type) -> None:
         for name, weight in weights:
             if name.startswith("ngram_embedding.shard_") and name.endswith(".weight"):
                 loaded.add("ngram_embedding.weight")
+            elif name == "ngram_embedding.weight_scale":
+                _load_weight_scale(
+                    self.ngram_embedding,
+                    weight,
+                    self.layer_multipliers.device,
+                )
+                loaded.add(name)
             else:
                 remaining.append((name, weight))
         loaded.update(original_load_weights(self, remaining))
