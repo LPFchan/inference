@@ -1,6 +1,6 @@
 # Project Spec
 
-**Project:** Inference — Multi-host model serving gateway
+**Project:** Grimoire — Multi-host model serving gateway
 **Canonical repo:** `git@github.com:LPFchan/inference.git`
 **Operator:** LPFchan
 **Last updated:** 2026-09-10

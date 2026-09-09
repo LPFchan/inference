@@ -1,6 +1,8 @@
 # Inference
 
-One OpenAI-compatible inference gateway for local llama.cpp models on Grimoire and remote vLLM models on Mangchi.
+This repository contains the Grimoire inference backbone. Its OpenAI-compatible
+gateway runs on the grimoire host and serves local llama.cpp models there plus
+remote vLLM models on Mangchi.
 
 ```
 client ──/v1──► chat.lost.plus ──► grimoire :9001 ──┬── local llama.cpp GPU

@@ -11,7 +11,7 @@ TimeoutStopSec=120
 Restart=on-failure
 RestartSec=10
 User=yeowool
-WorkingDirectory=/home/yeowool/grimoire
+WorkingDirectory=/home/yeowool/inference
 
 ExecStartPre=-/usr/bin/docker compose down
 

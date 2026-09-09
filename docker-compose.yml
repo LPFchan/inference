@@ -27,8 +27,8 @@ services:
       # Host-built webui — shadows the image's COPY --from=webui.
       - ./webui/build:/opt/grimoire-webui:ro
       # FIXME: restore when atomic/llama-server binary is available
-      #- /home/yeowool/grimoire/atomic/llama-server:/opt/grimoire-llama-cpp/bin/llama-server:ro
-      - /home/yeowool/grimoire/atomic:/opt/atomic:ro
+      #- /home/yeowool/inference/atomic/llama-server:/opt/grimoire-llama-cpp/bin/llama-server:ro
+      - /home/yeowool/inference/atomic:/opt/atomic:ro
       - /sys/devices/virtual/powercap:/host-powercap:ro
       - type: tmpfs
         target: /dev/shm/grimoire-snapshots
