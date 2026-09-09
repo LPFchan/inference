@@ -368,7 +368,10 @@ class ResidencyManager:
         deadline = time.time() + HEALTH_TIMEOUT_S
         async with httpx.AsyncClient(timeout=5.0) as client:
             while time.time() < deadline:
-                if r.process.poll() is not None:
+                # `docker run -d` exits successfully as soon as it creates the
+                # sibling container. For container residents, inspect that
+                # container instead of treating the launcher exit as failure.
+                if not self._group_alive(r):
                     raise HTTPException(
                         status_code=500,
                         detail=f"vLLM for '{r.name}' exited during startup (rc={r.process.returncode})",

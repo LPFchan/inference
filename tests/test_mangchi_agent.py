@@ -221,6 +221,29 @@ def test_group_alive_container_branch(monkeypatch):
     assert m._group_alive(r) is False
 
 
+def test_container_launcher_exit_does_not_fail_health_wait(monkeypatch):
+    m = ResidencyManager(_specs(), budget_gib=110)
+    proc = FakeProc()
+    proc.returncode = 0  # `docker run -d` launcher exited successfully
+    r = agent.Resident(
+        name="c", spec=_specs()["small"], process=proc, port=1, container="mangchi-vllm-c"
+    )
+
+    class HealthyClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def get(self, _url):
+            return type("Response", (), {"status_code": 200})()
+
+    monkeypatch.setattr(m, "_container_running", lambda _name: True)
+    monkeypatch.setattr(agent.httpx, "AsyncClient", lambda **_kwargs: HealthyClient())
+    run(m._wait_healthy(r))
+
+
 def test_specs_have_per_model_gpu_mem_util():
     # Per-instance --gpu-memory-utilization must reflect each model's share, not
     # a blanket near-1.0 (which would let two models both claim ~the whole device).

@@ -52,6 +52,9 @@ table remain on SSD instead of exhausting Thor's 128 GB unified memory?
   request also JIT-compiled four Triton QSA kernels, as expected.
 - Raised the residency agent's default health timeout from 10 to 15 minutes;
   the measured startup left only 16 seconds of margin under the old limit.
+- Fixed the residency health poll to inspect sibling-container state. The
+  detached `docker run -d` launcher exits with code 0 immediately; treating
+  that normal exit as model failure prevented every Docker-backed load.
 
 ## Rejected paths
 
