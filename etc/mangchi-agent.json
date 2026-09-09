@@ -17,16 +17,21 @@
       "model_path": "/models/qwen3.8-flash-next-uncensored",
       "model_path_host": "/home/yeowool/models/nvfp4/qwen3.8-flash-next-uncensored",
       "resident_gb": 80,
-      "gpu_mem_util": 0.62,
+      "gpu_mem_util": 0.65,
       "port": 8002,
       "pinned": false,
-      "vllm_docker_image": "ghcr.io/nvidia-ai-iot/vllm:latest-jetson-thor",
+      "vllm_docker_image": "mangchi-vllm:thor-v0.29-ple-mmap",
       "models_dir_host": "/home/yeowool/models/nvfp4",
       "env": {
-        "VLLM_PLE_CPU_OFFLOAD": "1"
+        "VLLM_PLE_MMAP": "1",
+        "VLLM_PLE_MMAP_PREWARM": "0"
       },
       "serve_args": [
-        "--max-model-len", "131072"
+        "--max-model-len", "131072",
+        "--max-num-seqs", "1",
+        "--max-num-batched-tokens", "2048",
+        "--no-enable-flashinfer-autotune",
+        "--enforce-eager"
       ]
     }
   }

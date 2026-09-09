@@ -165,7 +165,11 @@ def test_specs_file_parses():
     assert "qwen3.8-27b-uncensored-nvfp4" in specs
     assert "qwen3.8-flash-next-uncensored-nvfp4" in specs
     flash = specs["qwen3.8-flash-next-uncensored-nvfp4"]
-    assert flash.env.get("VLLM_PLE_CPU_OFFLOAD") == "1"
+    assert flash.vllm_docker_image == "mangchi-vllm:thor-v0.29-ple-mmap"
+    assert flash.env.get("VLLM_PLE_MMAP") == "1"
+    assert "VLLM_PLE_CPU_OFFLOAD" not in flash.env
+    assert "--enforce-eager" in flash.serve_args
+    assert "--no-enable-flashinfer-autotune" in flash.serve_args
     assert flash.resident_gb > specs["qwen3.8-27b-uncensored-nvfp4"].resident_gb
 
 
