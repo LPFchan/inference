@@ -19,7 +19,12 @@ speed. Production acceptance remains in `records/PLANS.md`.
   replace TensorRT host dispatch with a Torch binding, and guard expert ids
   before indexing activation scales. NVIDIA's full TensorRT runtime is unnecessary.
 - Dependencies: CuTe DSL 4.7.0 with CUDA 13, CuPy CUDA 13 13.6.0, cuda-python
-  13.0.3, and the image's existing Torch/CUDA compiler. Kernels compile once
+  13.3.1, cuda-bindings 13.3.1, and the image's existing Torch/CUDA compiler.
+  The opt-in install adds official PyPI alongside the inherited Jetson index
+  so these pinned releases are available. The CUDA Python umbrella and binding
+  versions satisfy each other's metadata and Torch's `cuda-bindings>=13.0.3,<14`
+  requirement. The existing cuda-pathfinder 1.5.1 satisfies their constraints.
+  Kernels compile once
   during weight preparation, before graph capture, using the Torch/CuTe caches.
 
 The default Docker build keeps its existing dependency set. Build the separate

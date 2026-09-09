@@ -2,6 +2,7 @@
 from pathlib import Path
 import importlib.util
 import os
+import re
 import sys
 from types import ModuleType, SimpleNamespace
 import unittest
@@ -14,6 +15,22 @@ from thor_nvfp4.install import HOOK, PATCHED_HOOK, adapt_python, device_body, pa
 
 
 class ThorNvfp4Contracts(unittest.TestCase):
+    def test_cuda_dependency_pins_have_available_index_and_compatible_versions(self):
+        # Published cuda-python 13.3.1 requires cuda-bindings~=13.3.1;
+        # Torch 2.11's CUDA wheel requires cuda-bindings>=13.0.3,<14.
+        # The inherited Jetson index only exposes 13.0.1 for these packages.
+        dockerfile = (ROOT / "docker/mangchi-vllm/Dockerfile").read_text()
+        install = dockerfile.split('RUN if [ "${THOR_CUTEDSL_MOE}" = "1" ]; then', 1)[1].split("; fi", 1)[0]
+        self.assertIn("--extra-index-url https://pypi.org/simple", install)
+        pins = dict(re.findall(r'"(cuda-python|cuda-bindings)==([0-9.]+)"', install))
+        self.assertEqual(set(pins), {"cuda-python", "cuda-bindings"})
+        umbrella = tuple(map(int, pins["cuda-python"].split(".")))
+        bindings = tuple(map(int, pins["cuda-bindings"].split(".")))
+        self.assertEqual(umbrella[:2], bindings[:2])
+        self.assertGreaterEqual(bindings, umbrella)
+        self.assertGreaterEqual(bindings, (13, 0, 3))
+        self.assertLess(bindings, (14,))
+
     def setUp(self):
         self.config = dict(sm=(11, 0), quant_method="NVFP4", group_size=16,
                            hidden=2560, intermediate=640, experts=512, top_k=10,

@@ -84,8 +84,9 @@ RUN python /tmp/patch_thor_qsa.py
 ARG THOR_CUTEDSL_MOE=0
 COPY thor_nvfp4 /opt/venv/lib/python3.12/site-packages/thor_nvfp4
 RUN if [ "${THOR_CUTEDSL_MOE}" = "1" ]; then \
-      pip install --no-cache-dir "nvidia-cutlass-dsl[cu13]==4.7.0" \
-        "cupy-cuda13x==13.6.0" "cuda-python==13.0.3" ninja \
+      pip install --no-cache-dir --extra-index-url https://pypi.org/simple \
+        "nvidia-cutlass-dsl[cu13]==4.7.0" "cupy-cuda13x==13.6.0" \
+        "cuda-python==13.3.1" "cuda-bindings==13.3.1" ninja \
       && python -m thor_nvfp4.install --vllm-root /opt/venv/lib/python3.12/site-packages/vllm; \
     elif [ "${THOR_CUTEDSL_MOE}" != "0" ]; then exit 1; fi
 
