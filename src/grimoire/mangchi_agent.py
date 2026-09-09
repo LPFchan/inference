@@ -106,6 +106,7 @@ class ResidencyManager:
         self.budget_gib = budget_gib
         self.resident: dict[str, Resident] = {}
         self._lock = asyncio.Lock()
+        self._stop_tasks: dict[str, "asyncio.Task"] = {}
 
     def _used_gib(self) -> float:
         return sum(r.spec.resident_gb for r in self.resident.values())
@@ -120,8 +121,14 @@ class ResidencyManager:
         try:
             os.killpg(r.pgid, 0)
             return True
-        except (ProcessLookupError, PermissionError):
+        except ProcessLookupError:
+            # No such process/group: confirmed gone.
             return False
+        except PermissionError:
+            # Group exists but we can't signal it — it is NOT confirmed gone.
+            # Treating this as absent would release the reservation over live
+            # workers. Surface it as alive so shutdown fails honestly.
+            return True
 
     def _signal_group(self, r: Resident, sig: int) -> None:
         # Prefer the pgid captured at launch — reliable even after the launcher
@@ -137,43 +144,85 @@ class ResidencyManager:
         except ProcessLookupError:
             pass
 
-    async def _reap_group(self, r: Resident) -> None:
-        """Signal then wait until NO member of the process group survives.
+    def _reap_launcher(self, r: Resident) -> None:
+        """Reap the launcher so an exited one doesn't linger as a zombie and make
+        the group look alive. Non-blocking."""
+        try:
+            r.process.wait(timeout=0)
+        except Exception:
+            pass
 
-        Waits on the group (via killpg(pgid, 0)), not just the launcher PID, so
-        a fast-exiting launcher can't release the reservation while a worker
-        still holds CUDA memory. Escalates to SIGKILL only as a last resort —
-        SIGKILL mid-CUDA-op can wedge the Thor's GPU.
+    async def _wait_group_gone(self, r: Resident, timeout: float) -> bool:
+        """Poll until no group member survives (reaping the launcher meanwhile).
+
+        Returns True on confirmed group death, False on timeout. Cannot rely on
+        signal-0 alone to distinguish a zombie from a live worker, so the
+        launcher is reaped each poll.
+        """
+        deadline = time.time() + timeout
+        while True:
+            self._reap_launcher(r)
+            if not self._group_alive(r):
+                return True
+            if time.time() >= deadline:
+                return False
+            await asyncio.sleep(0.5)
+
+    async def _reap_group(self, r: Resident) -> None:
+        """Stop the whole process group and confirm it is gone.
+
+        Raises RuntimeError if the group cannot be confirmed dead — the caller
+        must NOT release the reservation in that case, or a replacement could be
+        admitted over live workers holding CUDA memory.
         """
         self._signal_group(r, signal.SIGTERM)
-        deadline = time.time() + STOP_TIMEOUT_S
-        while self._group_alive(r):
-            if time.time() >= deadline:
-                logger.warning("group for %s survived %ss; SIGKILL as last resort", r.name, STOP_TIMEOUT_S)
-                self._signal_group(r, signal.SIGKILL)
-                # brief grace for the kill to take effect
-                kill_deadline = time.time() + 10
-                while self._group_alive(r) and time.time() < kill_deadline:
-                    await asyncio.sleep(0.5)
-                break
-            await asyncio.sleep(0.5)
-        # Reap the launcher itself so it never becomes a zombie.
-        if r.process.poll() is None:
-            try:
-                await asyncio.get_event_loop().run_in_executor(None, r.process.wait)
-            except Exception:
-                pass
+        if await self._wait_group_gone(r, STOP_TIMEOUT_S):
+            return
+        logger.warning("group for %s survived SIGTERM; SIGKILL as last resort", r.name)
+        self._signal_group(r, signal.SIGKILL)
+        if await self._wait_group_gone(r, 10):
+            return
+        raise RuntimeError(
+            f"process group for '{r.name}' could not be confirmed dead after SIGKILL"
+        )
 
-    async def _stop(self, name: str) -> None:
+    async def _stop_owned(self, name: str) -> dict:
+        """Manager-owned stop that ALWAYS finalizes bookkeeping, independent of
+        any caller. Cancellation of a caller never reaches this task.
+
+        On confirmed group death the reservation is released and a result
+        returned. On unconfirmed death the reservation is RETAINED and a
+        RuntimeError propagates, so the model is not silently "unloaded" while
+        workers may still hold the GPU.
+        """
         r = self.resident.get(name)
         if not r:
-            return
+            return False
         logger.info("stopping %s (pid %s, pgid %s)", name, r.process.pid, r.pgid)
-        # Shield so request/task cancellation cannot interrupt cleanup and leak a
-        # live GPU process; the reservation is dropped only after the group is
-        # confirmed gone.
-        await asyncio.shield(self._reap_group(r))
+        await self._reap_group(r)  # raises if not confirmed dead
         self.resident.pop(name, None)
+        self._stop_tasks.pop(name, None)
+        return True
+
+    def _ensure_stop_task(self, name: str) -> "asyncio.Task":
+        """Return the single in-flight stop task for name, creating it if needed.
+
+        Deduped per model so two concurrent stops don't run two reapers over the
+        same group.
+        """
+        task = self._stop_tasks.get(name)
+        if task is None or task.done():
+            task = asyncio.ensure_future(self._stop_owned(name))
+            self._stop_tasks[name] = task
+        return task
+
+    async def _stop(self, name: str) -> None:
+        # Delegate to the manager-owned stop task and wait for it WITHOUT a
+        # shield: if this caller is cancelled, the stop task keeps running to
+        # completion and finalizes bookkeeping; only the caller's view is
+        # cancelled. The reservation is released inside the task, never here.
+        task = self._ensure_stop_task(name)
+        await task
 
     def _plan_evictions(self, need_gib: float, exclude: str) -> list[str]:
         """Compute the LRU victim list to fit need_gib WITHOUT stopping anything.
@@ -272,7 +321,11 @@ class ResidencyManager:
         async with self._lock:
             if name not in self.resident:
                 return {"name": name, "status": "not-resident"}
-            await self._stop(name)
+            try:
+                await self._stop(name)
+            except RuntimeError as exc:
+                # Group not confirmed dead: reservation retained, report honestly.
+                raise HTTPException(status_code=500, detail=str(exc)) from exc
             return {"name": name, "status": "unloaded"}
 
     def status(self, name: Optional[str] = None) -> dict:
@@ -306,7 +359,10 @@ class ResidencyManager:
     async def shutdown(self) -> None:
         async with self._lock:
             for name in list(self.resident.keys()):
-                await self._stop(name)
+                try:
+                    await self._stop(name)
+                except RuntimeError:
+                    logger.error("shutdown: could not confirm '%s' dead; leaving reservation", name)
 
 
 def create_app(manager: Optional[ResidencyManager] = None) -> FastAPI:

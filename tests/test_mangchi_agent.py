@@ -242,3 +242,39 @@ def test_cleanup_waits_for_slow_group(mgr, monkeypatch):
 
 async def _instant_sleep(_):
     return None
+
+
+def test_unconfirmed_group_death_retains_reservation(mgr, monkeypatch):
+    # If the group never reports gone, unload must NOT claim success or release
+    # the reservation — a replacement must not be admitted over live workers.
+    run(mgr.load("small"))
+    monkeypatch.setattr(mgr, "_group_alive", lambda r: True)  # never dies
+    monkeypatch.setattr(agent.asyncio, "sleep", _instant_sleep)
+    # Drive the poll loop to timeout instantly by advancing time.
+    clock = {"t": 0.0}
+    monkeypatch.setattr(agent.time, "time", lambda: clock["t"])
+
+    async def _advance(_):
+        clock["t"] += 1000  # jump past every deadline on each poll
+
+    monkeypatch.setattr(agent.asyncio, "sleep", _advance)
+    with pytest.raises(HTTPException) as e:
+        run(mgr.unload("small"))
+    assert e.value.status_code == 500
+    assert "small" in mgr.resident          # reservation retained
+    assert mgr.status()["used_gib"] == 30   # accounting NOT dropped
+
+
+def test_zombie_launcher_does_not_block_reap(mgr, monkeypatch):
+    # An exited-but-unreaped launcher is a zombie in the group; reaping it during
+    # the wait lets group polling see the group as gone without SIGKILL timeout.
+    run(mgr.load("small"))
+    r = mgr.resident["small"]
+    r.process.returncode = 0  # launcher has exited
+    reaped = []
+    monkeypatch.setattr(mgr, "_reap_launcher", lambda res: reaped.append(res.name))
+    # group reports gone right away once launcher is reaped
+    monkeypatch.setattr(mgr, "_group_alive", lambda res: False)
+    out = run(mgr.unload("small"))
+    assert out["status"] == "unloaded"
+    assert "small" not in mgr.resident
