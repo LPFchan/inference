@@ -23,7 +23,11 @@ from torch import nn
 
 logger = logging.getLogger("vllm.ple_mmap")
 
-_DTYPES = {"BF16": torch.bfloat16, "F16": torch.float16}
+_DTYPES = {
+    "BF16": torch.bfloat16,
+    "F16": torch.float16,
+    "F8_E4M3": torch.float8_e4m3fn,
+}
 
 
 def enabled() -> bool:
@@ -50,6 +54,7 @@ def _itemsize(dtype: str) -> int:
         "BF16": 2,
         "F16": 2,
         "F32": 4,
+        "F8_E4M3": 1,
     }[dtype]
 
 
