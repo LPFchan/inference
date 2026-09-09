@@ -12,6 +12,50 @@ The incident audit and OpenCode soak are recorded in `records/research/RSH-20260
 
 A graph-safe reusable scratch reservation remains optional future work. Revisit it only if CUDA-graph throughput becomes more valuable than the currently verified long-agent-context headroom.
 
+## Thor-native NVFP4 MoE for Qwen3.8 Flash-Next
+
+Replace the target model's Marlin W4A16 expert fallback with NVIDIA's native
+SM110 CuTeDSL W4A4 MoE kernel from TensorRT-Edge-LLM. Keep the current
+`mangchi-vllm:thor-qsa-fp8-5fd5dd5` image and its 262,144-token service as the
+rollback until the new backend passes correctness, full-model, and performance
+gates.
+
+### Implementation path
+
+1. Pin the imported TensorRT-Edge-LLM source revision and preserve its
+   Apache-2.0 provenance. Adapt the SM110 runner behind a narrow vLLM expert
+   backend rather than copying unrelated TensorRT-Edge runtime code.
+2. Support the exact Flash-Next target geometry first: hidden size 2,560,
+   intermediate size 640, 512 experts, top-k 10, fused SwiGLU, ModelOpt NVFP4
+   weights and static NVFP4 activations. Reject unsupported layouts and
+   quantization schemes explicitly.
+3. Map compressed-tensors/ModelOpt W4A4 weights, block scales, global scales,
+   routing output, activation quantization, and BF16 output to the runner
+   without quantize-dequantize-quantize conversions on the expert hot path.
+4. Package the adapter and kernel build reproducibly in
+   `docker/mangchi-vllm/`, retaining the SSD-backed PLE, persistent QSA top-k,
+   FP8 attention KV, and native 262K context configuration.
+5. Validate kernel output against a trusted BF16 or Marlin reference across
+   representative token counts and routing patterns before loading the whole
+   checkpoint. Then run short chat, long-prefill, and decode tests on Mangchi.
+6. Benchmark Marlin, FlashInfer CUTLASS if its one-line SM110 dispatch fix is
+   usable, and the NVIDIA CuTeDSL backend under identical clocks and requests.
+   FlashInfer is a control measurement, not the primary implementation target.
+
+### Acceptance gates
+
+- The backend is selected only on SM110/SM110a for compatible true W4A4
+  NVFP4 MoE layers; W4A16 and unsupported layers keep their existing backend.
+- Numerical comparison finds no material correctness regression against the
+  reference path, and unsupported shapes fail cleanly before kernel launch.
+- Qwen3.8 Flash-Next starts from the downloaded W4A4 checkpoint, completes a
+  deterministic chat smoke, and retains the 262,144-token configured context.
+- Measured prefill and decode throughput are recorded against the current
+  Marlin deployment using the same prompt, output length, power mode, clocks,
+  CUDA-graph mode, and MTP setting.
+- Deployment happens only after the native backend is both correct and faster;
+  otherwise the current FP8-QSA/Marlin image remains production.
+
 ## Backlog (Future Interest)
 
 | Priority | Item | Why Deferred | Prerequisite |

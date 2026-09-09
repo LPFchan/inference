@@ -76,6 +76,18 @@ RUN python /tmp/patch_ple_mmap.py
 COPY patch_thor_qsa.py /tmp/patch_thor_qsa.py
 RUN python /tmp/patch_thor_qsa.py
 
+# Optional experimental NVIDIA SM110 W4A4 MoE adapter. Sources are fetched by
+# exact revision + SHA256; small native helpers and CuTe kernels compile once
+# during model weight preparation, before CUDA graph capture. Build a separate
+# canary tag with --build-arg THOR_CUTEDSL_MOE=1 and opt in at runtime with
+# VLLM_THOR_CUTEDSL_MOE=1. The default image preserves its existing dependencies.
+ARG THOR_CUTEDSL_MOE=0
+COPY thor_nvfp4 /opt/venv/lib/python3.12/site-packages/thor_nvfp4
+RUN if [ "${THOR_CUTEDSL_MOE}" = "1" ]; then \
+      pip install --no-cache-dir "nvidia-cutlass-dsl[cu13]==4.7.0" \
+        "cupy-cuda13x==13.6.0" "cuda-python==13.0.3" ninja \
+      && python -m thor_nvfp4.install --vllm-root /opt/venv/lib/python3.12/site-packages/vllm; \
+    elif [ "${THOR_CUTEDSL_MOE}" != "0" ]; then exit 1; fi
 
 # the cloned source tree shadows the installed _C.so -> remove it and serve from /
 RUN rm -rf /build
