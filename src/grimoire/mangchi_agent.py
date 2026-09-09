@@ -47,7 +47,9 @@ SPECS_PATH = os.environ.get(
 # Total unified memory the residency set may use, in GiB. Thor has 128; leave
 # headroom for the OS, CUDA runtime, and KV cache growth beyond estimate.
 MEMORY_BUDGET_GIB = float(os.environ.get("MANGCHI_AGENT_BUDGET_GIB", "110"))
-HEALTH_TIMEOUT_S = float(os.environ.get("MANGCHI_AGENT_HEALTH_TIMEOUT_S", "600"))
+# Flash-Next takes about 9m44s to initialize on Thor. Allow enough margin for
+# cold storage and kernel-cache variation while keeping the timeout bounded.
+HEALTH_TIMEOUT_S = float(os.environ.get("MANGCHI_AGENT_HEALTH_TIMEOUT_S", "900"))
 STOP_TIMEOUT_S = float(os.environ.get("MANGCHI_AGENT_STOP_TIMEOUT_S", "60"))
 
 # Trusted source networks: loopback, the LAN, and the tailnet. The agent exposes

@@ -50,6 +50,8 @@ table remain on SSD instead of exhausting Thor's 128 GB unified memory?
   GiB KV cache for 152,212 tokens, and completed two OpenAI-compatible chat
   requests. The warm request generated 34 tokens in 5.5 seconds. The first
   request also JIT-compiled four Triton QSA kernels, as expected.
+- Raised the residency agent's default health timeout from 10 to 15 minutes;
+  the measured startup left only 16 seconds of margin under the old limit.
 
 ## Rejected paths
 
