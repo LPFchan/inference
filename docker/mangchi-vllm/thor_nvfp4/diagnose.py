@@ -17,7 +17,7 @@ MAX_REPEAT_RELATIVE_DRIFT = .01
 # The CUDA input pack uses FP32 reciprocal/multiply operations, including
 # rcp.approx.ftz, while the independent emulator divides. Eight FP32 epsilons
 # allow their few rounding steps near an E2M1 midpoint; they do not allow a
-# nonadjacent code or a wrong FP8 block scale. The aggregate 2% gate also applies.
+# nonadjacent code or a wrong FP8 block scale.
 INPUT_BOUNDARY_RTOL = 8 * 2**-23
 
 
@@ -110,13 +110,20 @@ def require_quality(name, actual, expected):
 
 def validate_input_rounding(value, global_scale, actual_codes, actual_sf,
                             expected_codes, expected_sf):
+    global_scale = torch.as_tensor(global_scale, device=value.device).reshape(-1, 1)
+    sf = actual_sf.view(torch.float8_e4m3fn).float()
+    if (not torch.isfinite(value).all() or not torch.isfinite(global_scale).all()
+            or not (global_scale > 0).all() or not torch.isfinite(sf).all()
+            or not (sf >= 0).all()):
+        raise AssertionError("Input values and scales must be finite, with positive global scales")
+    if not (((actual_codes >= 0) & (actual_codes <= 15)).all()
+            and ((expected_codes >= 0) & (expected_codes <= 15)).all()):
+        raise AssertionError("Input FP4 codes must be in [0,15]")
     if not torch.equal(actual_sf, expected_sf):
         raise AssertionError("Input FP8 block scales must match the independent emulator exactly")
     actual_magnitude, expected_magnitude = actual_codes & 7, expected_codes & 7
     signed_zero = (actual_magnitude == 0) & (expected_magnitude == 0)
     changed = (actual_codes != expected_codes) & ~signed_zero
-    if not changed.any():
-        return
     adjacent = (actual_magnitude - expected_magnitude).abs() == 1
     same_sign = (actual_codes >> 3) == (expected_codes >> 3)
     if not (adjacent[changed] & same_sign[changed]).all():
@@ -124,12 +131,32 @@ def validate_input_rounding(value, global_scale, actual_codes, actual_sf,
     mids = torch.tensor([.25, .75, 1.25, 1.75, 2.5, 3.5, 5.0], device=value.device)
     lower_code = torch.minimum(actual_magnitude, expected_magnitude).clamp(max=6).long()
     midpoint = mids[lower_code]
-    scale = (expected_sf.view(torch.float8_e4m3fn).float()
-             * torch.as_tensor(global_scale, device=value.device).reshape(-1, 1)).repeat_interleave(16, -1)
+    scale = (sf * global_scale).repeat_interleave(16, -1)
     normalized = torch.where(scale > 0, value.abs() / scale, 0)
     tolerance = INPUT_BOUNDARY_RTOL * midpoint.clamp_min(1)
     if not ((normalized - midpoint).abs()[changed] <= tolerance[changed]).all():
         raise AssertionError("Input FP4 difference is outside the FP32 rounding-boundary allowance")
+    # Independently check error to the original input, including unchanged
+    # codes. FP64 evaluates all eight representable magnitudes without borrowing
+    # the emulator's selected code. Crossing a midpoint by delta can increase
+    # nearest-level error by at most 2*delta in normalized units.
+    levels = torch.tensor([0, .5, 1, 1.5, 2, 3, 4, 6], device=value.device)
+    decoded = (levels[actual_magnitude] * (1 - 2 * (actual_codes >> 3))
+               * sf.repeat_interleave(16, -1) * global_scale)
+    if not torch.isfinite(decoded).all():
+        raise AssertionError("Decoded input values must be finite")
+    scale64 = (sf.double() * global_scale.double()).repeat_interleave(16, -1)
+    magnitude64 = value.double().abs()
+    nearest_error = magnitude64.clone()
+    for level in levels.tolist()[1:]:
+        nearest_error = torch.minimum(nearest_error, (magnitude64 - level * scale64).abs())
+    decoded64 = (levels.double()[actual_magnitude] * scale64
+                 * (1 - 2 * (actual_codes >> 3)))
+    allowance = 2 * INPUT_BOUNDARY_RTOL * torch.maximum(scale64, magnitude64)
+    arithmetic_slack = 8 * 2**-52 * torch.maximum(magnitude64, decoded64.abs())
+    if not ((decoded64 - value.double()).abs()
+            <= nearest_error + allowance + arithmetic_slack).all():
+        raise AssertionError("Input quantization exceeds the pointwise nearest-level error bound")
 
 
 def codes(packed):
@@ -170,7 +197,7 @@ def validate_case(x, ids, routes, original, prepared, *, verbose=False):
     expected_input, input_codes, input_sf = quant_dequant(expanded_input, input_scale, return_fields=True)
     gates.check(validate_input_rounding, expanded_input, input_scale, codes(trace["input_packed"]),
                 trace["input_sf"], input_codes, input_sf)
-    gates.check(require_quality, "input_quantization", native_input, expected_input)
+    metrics("informational_input_quantization", native_input, expected_input)
     if verbose:
         report_fields("input_quantization", trace["input_packed"], trace["input_sf"], input_codes, input_sf)
 

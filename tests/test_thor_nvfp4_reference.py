@@ -94,6 +94,44 @@ class ThorReferenceTests(unittest.TestCase):
                 with self.assertRaisesRegex(AssertionError, "rounding-boundary"):
                     validate_input_rounding(values, 1.0, changed, sf, expected_codes, sf)
 
+    def test_valid_midpoint_choices_need_not_meet_aggregate_quality_gate(self):
+        values = torch.full((1, 16), .25)
+        values[0, -1] = 6
+        expected, expected_codes, sf = quant_dequant(values, 1., return_fields=True)
+        adjacent = expected_codes.clone()
+        adjacent[0, :15] = 1
+        validate_input_rounding(values, 1., adjacent, sf, expected_codes, sf)
+        actual = torch.full_like(values, .5)
+        actual[0, -1] = 6
+        self.assertEqual((actual - values).norm(), (expected - values).norm())
+        self.assertGreater(((actual - expected).norm() / expected.norm()).item(), .32)
+        with contextlib.redirect_stdout(io.StringIO()), self.assertRaises(AssertionError):
+            require_quality("valid opposite midpoint outcomes", actual, expected)
+
+    def test_input_pointwise_gate_checks_even_matching_codes(self):
+        values = torch.ones(1, 16)
+        values[0, -1] = 6
+        _, expected_codes, sf = quant_dequant(values, 1., return_fields=True)
+        wrong = expected_codes.clone()
+        wrong[0, 0] = 7
+        with self.assertRaisesRegex(AssertionError, "pointwise"):
+            validate_input_rounding(values, 1., wrong, sf, wrong, sf)
+        validate_input_rounding(values, 1., expected_codes, sf, expected_codes, sf)
+        zeros, zero_codes, zero_sf = quant_dequant(torch.zeros_like(values), 1., return_fields=True)
+        validate_input_rounding(zeros, 1., zero_codes, zero_sf, zero_codes, zero_sf)
+
+    def test_input_gate_rejects_nonfinite_values_and_scales(self):
+        values = torch.ones(1, 16)
+        _, codes, sf = quant_dequant(values, 1., return_fields=True)
+        for invalid in (float("nan"), float("inf")):
+            with self.assertRaisesRegex(AssertionError, "finite"):
+                validate_input_rounding(torch.full_like(values, invalid), 1., codes, sf, codes, sf)
+            with self.assertRaisesRegex(AssertionError, "finite"):
+                validate_input_rounding(values, invalid, codes, sf, codes, sf)
+        nan_sf = torch.full_like(sf, 127)  # E4M3FN NaN
+        with self.assertRaisesRegex(AssertionError, "finite"):
+            validate_input_rounding(values, 1., codes, nan_sf, codes, nan_sf)
+
     def test_quality_gate_rejects_drift_and_nonfinite_values(self):
         expected = torch.ones(16)
         with contextlib.redirect_stdout(io.StringIO()):

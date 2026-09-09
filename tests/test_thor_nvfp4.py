@@ -35,8 +35,13 @@ class ThorNvfp4Contracts(unittest.TestCase):
                      and len(node.args) > 1 and isinstance(node.args[0], ast.Name)]
         enforced = {node.args[1].value for node in collected if node.args[0].id == "require_quality"
                     and isinstance(node.args[1], ast.Constant)}
-        self.assertTrue({"input_quantization", "fc1_swiglu_requant_using_native_input",
+        self.assertTrue({"fc1_swiglu_requant_using_native_input",
                          "fc2_finalize_using_native_intermediate", "scatter_vs_sum_of_isolated_native_slots"} <= enforced)
+        self.assertNotIn("input_quantization", enforced)
+        self.assertTrue(any(node.args[0].id == "validate_input_rounding" for node in collected))
+        input_metrics = [node for node in calls if node.args[0].value == "informational_input_quantization"]
+        self.assertEqual(len(input_metrics), 1)
+        self.assertEqual(input_metrics[0].func.id, "metrics")
         informational = [node for node in calls if node.args[0].value == "informational_end_to_end_quantization_sensitivity"]
         self.assertEqual(len(informational), 1)
         self.assertEqual(informational[0].func.id, "metrics")

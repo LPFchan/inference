@@ -96,13 +96,20 @@ within `8 * float32 epsilon * max(1, abs(midpoint))` of their rounding midpoint
 in normalized FP4 units. This small allowance covers FP32 reciprocal/multiply
 rounding in CUDA versus division in the independent emulator. It cannot excuse
 wrong scales, nonadjacent levels, or differences away from a rounding boundary.
-Input dequantized values must also meet relative RMSE <= 0.02 and cosine >= 0.999.
+Inputs, scales, and decoded values must be finite. An independent FP64 check
+requires each decoded value's error to the original input to be no greater than
+the nearest representable level's error plus
+`2 * INPUT_BOUNDARY_RTOL * max(block_scale * global_scale, abs(input))`
+(with eight FP64 epsilons of arithmetic slack). The factor two bounds the
+extra error from choosing the other side of a midpoint. This check also covers
+codes that agree with the emulator. Input emulator-comparison RMSE and cosine
+are informational: valid opposite midpoint choices need not agree in aggregate.
 
 FC1/SwiGLU/requant is compared against a reference driven by the actual native
 quantized input. FC2/finalize is compared against a reference driven by the
 actual native intermediate. Each routing slot is checked separately, and the
 combined scatter is compared with the sum of isolated native slot outputs.
-Every stage requires finite values, relative RMSE <= 0.02, and cosine >= 0.999.
+These downstream stages require finite values, relative RMSE <= 0.02, and cosine >= 0.999.
 All four token/routing cases run these gates and CUDA graph replay. The complete
 pipeline comparison against independently emulated input quantization remains
 an informational sensitivity metric: SwiGLU can amplify a few valid opposite
