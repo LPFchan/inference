@@ -76,6 +76,7 @@ class Resident:
     spec: LaunchSpec
     process: subprocess.Popen
     port: int
+    pgid: Optional[int] = None
     started_at: float = field(default_factory=time.time)
     last_used: float = field(default_factory=time.time)
 
@@ -112,35 +113,67 @@ class ResidencyManager:
     def _free_gib(self) -> float:
         return self.budget_gib - self._used_gib()
 
+    def _group_alive(self, r: Resident) -> bool:
+        """True if any member of the resident's process group still exists."""
+        if r.pgid is None:
+            return r.process.poll() is None
+        try:
+            os.killpg(r.pgid, 0)
+            return True
+        except (ProcessLookupError, PermissionError):
+            return False
+
+    def _signal_group(self, r: Resident, sig: int) -> None:
+        # Prefer the pgid captured at launch — reliable even after the launcher
+        # has been reaped, and avoids os.getpgid() on a stale/reused PID.
+        if r.pgid is not None:
+            try:
+                os.killpg(r.pgid, sig)
+                return
+            except (ProcessLookupError, PermissionError):
+                pass
+        try:
+            r.process.send_signal(sig)
+        except ProcessLookupError:
+            pass
+
+    async def _reap_group(self, r: Resident) -> None:
+        """Signal then wait until NO member of the process group survives.
+
+        Waits on the group (via killpg(pgid, 0)), not just the launcher PID, so
+        a fast-exiting launcher can't release the reservation while a worker
+        still holds CUDA memory. Escalates to SIGKILL only as a last resort —
+        SIGKILL mid-CUDA-op can wedge the Thor's GPU.
+        """
+        self._signal_group(r, signal.SIGTERM)
+        deadline = time.time() + STOP_TIMEOUT_S
+        while self._group_alive(r):
+            if time.time() >= deadline:
+                logger.warning("group for %s survived %ss; SIGKILL as last resort", r.name, STOP_TIMEOUT_S)
+                self._signal_group(r, signal.SIGKILL)
+                # brief grace for the kill to take effect
+                kill_deadline = time.time() + 10
+                while self._group_alive(r) and time.time() < kill_deadline:
+                    await asyncio.sleep(0.5)
+                break
+            await asyncio.sleep(0.5)
+        # Reap the launcher itself so it never becomes a zombie.
+        if r.process.poll() is None:
+            try:
+                await asyncio.get_event_loop().run_in_executor(None, r.process.wait)
+            except Exception:
+                pass
+
     async def _stop(self, name: str) -> None:
         r = self.resident.get(name)
         if not r:
             return
-        logger.info("stopping %s (pid %s, pgid)", name, r.process.pid)
-        # Signal the whole process group (vLLM spawns worker children), not just
-        # the launcher PID, so descendants can't linger holding CUDA memory.
-        # SIGTERM first — SIGKILL mid-CUDA-op can wedge the Thor's GPU.
-        self._signal_group(r, signal.SIGTERM)
-        try:
-            await asyncio.wait_for(
-                asyncio.get_event_loop().run_in_executor(None, r.process.wait),
-                timeout=STOP_TIMEOUT_S,
-            )
-        except asyncio.TimeoutError:
-            logger.warning("%s did not exit in %ss; SIGKILL as last resort", name, STOP_TIMEOUT_S)
-            self._signal_group(r, signal.SIGKILL)
-            await asyncio.get_event_loop().run_in_executor(None, r.process.wait)
+        logger.info("stopping %s (pid %s, pgid %s)", name, r.process.pid, r.pgid)
+        # Shield so request/task cancellation cannot interrupt cleanup and leak a
+        # live GPU process; the reservation is dropped only after the group is
+        # confirmed gone.
+        await asyncio.shield(self._reap_group(r))
         self.resident.pop(name, None)
-
-    @staticmethod
-    def _signal_group(r: Resident, sig: int) -> None:
-        try:
-            os.killpg(os.getpgid(r.process.pid), sig)
-        except (ProcessLookupError, PermissionError):
-            try:
-                r.process.send_signal(sig)
-            except ProcessLookupError:
-                pass
 
     def _plan_evictions(self, need_gib: float, exclude: str) -> list[str]:
         """Compute the LRU victim list to fit need_gib WITHOUT stopping anything.
@@ -218,7 +251,11 @@ class ResidencyManager:
             env = {**os.environ, **spec.env}
             logger.info("launching %s: %s", name, " ".join(cmd))
             proc = subprocess.Popen(cmd, env=env, start_new_session=True)
-            r = Resident(name=name, spec=spec, process=proc, port=spec.port)
+            try:
+                pgid = os.getpgid(proc.pid)
+            except (ProcessLookupError, PermissionError):
+                pgid = None
+            r = Resident(name=name, spec=spec, process=proc, port=spec.port, pgid=pgid)
             self.resident[name] = r
             try:
                 await self._wait_healthy(r)

@@ -52,12 +52,19 @@ def _specs():
 @pytest.fixture
 def mgr(monkeypatch):
     monkeypatch.setattr(agent.subprocess, "Popen", FakeProc)
+    # Neutralize every OS process/signal boundary so FakeProc's invented PIDs
+    # can never reach a real process or process group. Individual tests can
+    # re-stub these to observe calls.
+    monkeypatch.setattr(agent.os, "getpgid", lambda pid: pid)
+    monkeypatch.setattr(agent.os, "killpg", lambda pgid, sig: None)
     m = ResidencyManager(_specs(), budget_gib=110)
 
     async def _no_healthy(r):
         return None
 
     monkeypatch.setattr(m, "_wait_healthy", _no_healthy)
+    # Group reaping must not actually block on fake processes.
+    monkeypatch.setattr(m, "_group_alive", lambda r: False)
     return m
 
 
@@ -208,8 +215,30 @@ def test_stop_signals_process_group(mgr, monkeypatch):
     run(mgr.load("small"))
     r = mgr.resident["small"]
     calls = []
-    monkeypatch.setattr(agent.os, "getpgid", lambda pid: 4242)
     monkeypatch.setattr(agent.os, "killpg", lambda pgid, sig: calls.append((pgid, sig)))
     run(mgr.unload("small"))
-    # SIGTERM (15) must go to the process group, not only the launcher PID.
-    assert (4242, 15) in calls
+    # SIGTERM (15) must go to the captured process group, not only the PID.
+    assert (r.pgid, 15) in calls
+
+
+def test_cleanup_waits_for_slow_group(mgr, monkeypatch):
+    # A group that stays alive for a few polls must delay _stop until it's gone;
+    # this proves cleanup actually waits (a non-waiting _stop would pass earlier
+    # tests but fail here).
+    run(mgr.load("small"))
+    r = mgr.resident["small"]
+    polls = {"n": 0}
+
+    def _alive(res):
+        polls["n"] += 1
+        return polls["n"] <= 3  # alive for first 3 checks, then gone
+
+    monkeypatch.setattr(mgr, "_group_alive", _alive)
+    monkeypatch.setattr(agent.asyncio, "sleep", _instant_sleep)
+    run(mgr.unload("small"))
+    assert polls["n"] > 3  # reaped only after the group stopped reporting alive
+    assert "small" not in mgr.resident
+
+
+async def _instant_sleep(_):
+    return None
