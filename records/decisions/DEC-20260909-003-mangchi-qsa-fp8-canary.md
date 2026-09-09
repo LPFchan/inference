@@ -44,7 +44,7 @@ The exact PR head is easier to audit and roll back than a manual QSA backport. A
 ## Consequences
 
 - Flash-Next requests use `--kv-cache-dtype fp8` and `--max-model-len 262144` after the canary passes.
-- The 0.67 allocation provides a 5.19 GiB cache for 383,350 tokens, or 1.46 concurrent native-length requests.
+- The 0.67 canary provided a 5.19 GiB cache for 383,350 tokens. The clean production launch provided 5.88 GiB for 434,087 tokens, or 1.66 concurrent native-length requests.
 - Attention K/V is FP8; the hybrid GDN/Mamba recurrent cache remains float32 under vLLM's `auto` setting.
 - The PLE mmap patch follows the current `Qwen4ExpNGramEmbedding` interface.
 - The Thor top-k patch follows the moved `ops/qsa_indexer.py` path.

@@ -1,6 +1,6 @@
 # Current Status
 
-**Snapshot:** 2026-06-22
+**Snapshot:** 2026-09-10
 **Posture:** Production stack is llama.cpp (TheTom turboquant fork, turbo4 KV). Recent work is operational tuning of that stack — always-on embedder/reranker GPU co-location and gateway proxy throughput. vLLM/AWQ migration remains an open parallel research track (DEC-20260528-001), not the current focus.
 **Focus:** Operate and tune the llama.cpp gateway (co-location, proxy throughput, per-model ctx/KV tuning).
 
@@ -23,6 +23,7 @@ Patch chain in `patches/atomic-llama-cpp/`, applied in order by `Dockerfile`:
 
 ## Recent Changes
 
+- 2026-09-10: **Qwen3.8 Flash-Next now serves native 262K context with FP8 QSA KV on Jetson Thor** — pinned vLLM PR #55557 at `5fd5dd5`, retained the SSD-backed 95.4 GiB PLE table and SM110 top-k fallback, and raised the model allocation to 0.67. Production allocated 5.88 GiB for 434,087 cache tokens (1.66x native context) and passed a deterministic chat smoke. The canary completed an exact 262,144-token request in 1,642.64 seconds with zero preemptions or request errors. Attention KV is FP8; the GDN/Mamba recurrent cache remains float32. (`DEC-20260909-003`, `RSH-20260909-002`)
 - 2026-09-09: **Qwen3.8 Flash-Next ported to Jetson Thor with SSD-backed PLE** — ported Blazux's PLE mmap approach to vLLM v0.29's `Qwen4Exp` implementation while retaining the Thor-native `sm_110a` image. The 95.4 GiB BF16 PLE table remains on NVMe; the rest of the model uses 71.11 GiB. Added Thor fallbacks for incompatible FlashInfer autotuning and QSA cooperative top-k kernels. (`RSH-20260909-001`)
 - 2026-06-22: **Multi-process gateway + data-parallel GPU replicas** — split the gateway into a stateful manager (internal :9000, owns lifecycle + chat) and N stateless proxy workers (:9001) that round-robin encoder endpoints across per-GPU replicas. Embedder + reranker each get an always-on GPU-0 replica; one model name fans out across both GPUs. Production embeddings 115 → **224 req/s** (full 2x). Cost: ~2.9 GiB/GPU headroom (both GPUs ~21 GiB free), capping large-ctx chat models. (DEC-20260622-002, RSH-20260622-001, commit `8031d6e`)
 - 2026-06-22: **Gateway proxy throughput fix** — every proxy path created a fresh per-request `httpx.AsyncClient` (no keepalive), capping high-RPS endpoints at ~30 req/s. Switched to a shared connection-pooled client (`proxy/client.py`); gateway rerank 29.2 → 64.4 req/s. Also confirmed reranker `--parallel` does not help (prefill-only encoder; parallel=1 optimal). Corrects the chat-only conclusion of RSH-20260518-006. (RSH-20260622-001, commit `4c37298`)
