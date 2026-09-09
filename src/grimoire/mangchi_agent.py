@@ -10,6 +10,13 @@ unified-memory budget, with LRU eviction and pinning.
 
 The agent is the single authority on what is running on the Thor. It does not
 track grimoire's state and grimoire does not track mangchi's memory.
+
+Known limitation: residency is tracked in this process's memory. If shutdown
+cannot confirm a model's process group is dead, the reservation is retained for
+the running manager but is lost when the agent exits — a fresh agent has no
+record of surviving workers. Cross-restart reconciliation (scanning for and
+reaping orphaned vLLM processes at startup before admitting models) is a
+deliberate follow-up; see DEC-20260909-002.
 """
 
 from __future__ import annotations
@@ -403,7 +410,10 @@ class ResidencyManager:
         self._closing = True
         pending = [t for t in list(self._load_tasks.values()) + list(self._stop_tasks.values()) if not t.done()]
         if pending:
-            await asyncio.gather(*pending, return_exceptions=True)
+            # Shield the drain: cancelling shutdown must not cancel the in-flight
+            # lifecycle tasks (bare gather would propagate cancellation to them).
+            drain = asyncio.gather(*pending, return_exceptions=True)
+            await asyncio.shield(drain)
         for name in list(self.resident.keys()):
             try:
                 await self._stop(name)
