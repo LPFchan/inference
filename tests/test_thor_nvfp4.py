@@ -16,6 +16,44 @@ from thor_nvfp4.install import HOOK, PATCHED_HOOK, adapt_python, device_body, pa
 
 
 class ThorNvfp4Contracts(unittest.TestCase):
+    def test_all_cases_gate_stages_and_replay_graphs(self):
+        source = ast.parse((ROOT / "docker/mangchi-vllm/thor_nvfp4/check.py").read_text())
+        case_loop = next(node for node in ast.walk(source) if isinstance(node, ast.For)
+                         and isinstance(node.target, ast.Tuple)
+                         and all(isinstance(item, ast.Name) for item in node.target.elts)
+                         and [item.id for item in node.target.elts] == ["tokens", "pattern"])
+        self.assertEqual(ast.literal_eval(case_loop.iter),
+                         ((1, "shared"), (10, "shared"), (129, "shared"), (32, "scattered")))
+        calls = [node for node in ast.walk(case_loop) if isinstance(node, ast.Call)]
+        self.assertTrue(any(isinstance(node.func, ast.Name) and node.func.id == "validate_case" for node in calls))
+        self.assertTrue(any(isinstance(node.func, ast.Attribute) and node.func.attr == "replay" for node in calls))
+        gates = ast.parse((ROOT / "docker/mangchi-vllm/thor_nvfp4/diagnose.py").read_text())
+        calls = [node for node in ast.walk(gates) if isinstance(node, ast.Call)
+                 and isinstance(node.func, ast.Name) and node.args and isinstance(node.args[0], ast.Constant)]
+        collected = [node for node in ast.walk(gates) if isinstance(node, ast.Call)
+                     and isinstance(node.func, ast.Attribute) and node.func.attr == "check"
+                     and len(node.args) > 1 and isinstance(node.args[0], ast.Name)]
+        enforced = {node.args[1].value for node in collected if node.args[0].id == "require_quality"
+                    and isinstance(node.args[1], ast.Constant)}
+        self.assertTrue({"input_quantization", "fc1_swiglu_requant_using_native_input",
+                         "fc2_finalize_using_native_intermediate", "scatter_vs_sum_of_isolated_native_slots"} <= enforced)
+        informational = [node for node in calls if node.args[0].value == "informational_end_to_end_quantization_sensitivity"]
+        self.assertEqual(len(informational), 1)
+        self.assertEqual(informational[0].func.id, "metrics")
+        self.assertTrue(any(node.args[0].id == "require_repeat_stable" for node in collected))
+
+    def test_fc2_uses_register_atomic_epilogue(self):
+        source = ('def export(args):\n    kernel = Kernel(\n        use_blkred=True,\n    )\n'
+                  '    compiled = compile_kernel(kernel)\n'
+                  '    compiled.export_to_c(args.output_dir, args.file_name, args.function_prefix)\n'
+                  '    return verify_export(args.output_dir, args.file_name)\n')
+        adapted = adapt_python("export_fc2_kernel.py", source)
+        self.assertIn("use_blkred=False", adapted)
+        self.assertNotIn("use_blkred=True", adapted)
+        compile(adapted, "fc2-fixture", "exec")
+        with self.assertRaisesRegex(ValueError, "epilogue selection"):
+            adapt_python("export_fc2_kernel.py", source.replace("use_blkred=True", "use_blkred=unknown"))
+
     def test_compiled_launches_pass_only_runtime_arguments(self):
         source = (ROOT / "docker/mangchi-vllm/thor_nvfp4/runtime.py").read_text()
         calls = {node.func.id: node for node in ast.walk(ast.parse(source))

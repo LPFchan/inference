@@ -1,9 +1,59 @@
-"""Stage isolation for the standalone correctness test; never used by serving."""
+"""Stage acceptance for the standalone correctness test; never used by serving."""
+import math
+
 import torch
 
 from .check import quant_dequant, reference, unpack
 from .contract import HIDDEN, INTERMEDIATE, TOP_K, fc1_row_order
 from .runtime import _run_impl
+
+MAX_RELATIVE_RMSE = .02
+MIN_COSINE = .999
+# BF16 unit roundoff is 2**-8. For two top-k=10 sums, an independent,
+# uniform-rounding estimate is u*sqrt(2*(TOP_K-1)/3) = 0.00957.
+# Round to 1% as a separate repeat-stability screening limit. This is not a
+# worst-case bound (cancellation and correlated rounding can exceed it).
+MAX_REPEAT_RELATIVE_DRIFT = .01
+# The CUDA input pack uses FP32 reciprocal/multiply operations, including
+# rcp.approx.ftz, while the independent emulator divides. Eight FP32 epsilons
+# allow their few rounding steps near an E2M1 midpoint; they do not allow a
+# nonadjacent code or a wrong FP8 block scale. The aggregate 2% gate also applies.
+INPUT_BOUNDARY_RTOL = 8 * 2**-23
+
+
+class GateCollector:
+    """Diagnostic mode records numerical failures until all stages are measured."""
+    def __init__(self, collect_failures):
+        self.collect_failures = collect_failures
+        self.failures = []
+
+    def check(self, function, *args):
+        try:
+            return function(*args)
+        except AssertionError as error:
+            if not self.collect_failures:
+                raise
+            self.failures.append(str(error))
+            print(f"FAIL: {error}")
+
+    def finish(self):
+        if self.failures:
+            raise AssertionError("Collected native MoE gate failures:\n" + "\n".join(self.failures))
+
+
+def require_repeat_stable(name, actual, previous):
+    metrics(name, actual, previous)
+    differing = (actual != previous).sum().item()
+    # Symmetric normalization makes pair order immaterial. A zero pair has
+    # zero drift; a zero/nonzero pair has unit drift and cannot pass.
+    actual32, previous32 = actual.float(), previous.float()
+    scale = torch.maximum(actual32.norm(), previous32.norm()).clamp_min(1e-30)
+    drift = ((actual32 - previous32).norm() / scale).item()
+    print(f"diagnostic {name}: bitwise_equal={torch.equal(actual, previous)} "
+          f"differing_elements={differing} pairwise_relative_drift={drift:.6g}")
+    if (not torch.isfinite(actual).all() or not torch.isfinite(previous).all()
+            or not math.isfinite(drift) or drift > MAX_REPEAT_RELATIVE_DRIFT):
+        raise AssertionError(f"{name}: same-input output failed the 1% pairwise repeat-stability gate")
 
 
 def unswizzle_scales(value, rows, cols):
@@ -43,10 +93,43 @@ def metrics(name, actual, expected):
     error = (actual - expected).norm()
     expected_norm = expected.norm()
     rmse = (error / expected_norm.clamp_min(1e-30)).item()
-    cosine = torch.nn.functional.cosine_similarity(actual, expected, dim=0).item()
+    cosine = (1.0 if expected_norm.item() == 0 and actual.norm().item() == 0 else
+              torch.nn.functional.cosine_similarity(actual, expected, dim=0).item())
     max_abs = (actual - expected).abs().max().item()
     print(f"diagnostic {name}: relative_rmse={rmse:.6g} cosine={cosine:.6g} max_abs={max_abs:.6g}")
-    return rmse
+    return rmse, cosine
+
+
+def require_quality(name, actual, expected):
+    rmse, cosine = metrics(name, actual, expected)
+    if (not torch.isfinite(actual).all() or not torch.isfinite(expected).all()
+            or not math.isfinite(rmse) or not math.isfinite(cosine)
+            or rmse > MAX_RELATIVE_RMSE or cosine < MIN_COSINE):
+        raise AssertionError(f"{name} failed the 2% relative-RMSE / 0.999 cosine gate")
+
+
+def validate_input_rounding(value, global_scale, actual_codes, actual_sf,
+                            expected_codes, expected_sf):
+    if not torch.equal(actual_sf, expected_sf):
+        raise AssertionError("Input FP8 block scales must match the independent emulator exactly")
+    actual_magnitude, expected_magnitude = actual_codes & 7, expected_codes & 7
+    signed_zero = (actual_magnitude == 0) & (expected_magnitude == 0)
+    changed = (actual_codes != expected_codes) & ~signed_zero
+    if not changed.any():
+        return
+    adjacent = (actual_magnitude - expected_magnitude).abs() == 1
+    same_sign = (actual_codes >> 3) == (expected_codes >> 3)
+    if not (adjacent[changed] & same_sign[changed]).all():
+        raise AssertionError("Input FP4 differences must preserve sign and select adjacent levels")
+    mids = torch.tensor([.25, .75, 1.25, 1.75, 2.5, 3.5, 5.0], device=value.device)
+    lower_code = torch.minimum(actual_magnitude, expected_magnitude).clamp(max=6).long()
+    midpoint = mids[lower_code]
+    scale = (expected_sf.view(torch.float8_e4m3fn).float()
+             * torch.as_tensor(global_scale, device=value.device).reshape(-1, 1)).repeat_interleave(16, -1)
+    normalized = torch.where(scale > 0, value.abs() / scale, 0)
+    tolerance = INPUT_BOUNDARY_RTOL * midpoint.clamp_min(1)
+    if not ((normalized - midpoint).abs()[changed] <= tolerance[changed]).all():
+        raise AssertionError("Input FP4 difference is outside the FP32 rounding-boundary allowance")
 
 
 def codes(packed):
@@ -60,11 +143,12 @@ def report_fields(name, packed, sf, reference_codes, reference_sf):
     print(f"diagnostic {name}: differing_fp4_codes={code_error:.6%} differing_fp8_scales={scale_error:.6%}")
 
 
-def diagnose(x, ids, routes, original, prepared):
-    """Keep the failing gate intact while locating the first divergent stage."""
+def validate_case(x, ids, routes, original, prepared, *, verbose=False):
+    """Require every native stage to pass against its actual input representation."""
     trace = {}
     actual = _run_impl(x, ids, routes, prepared, trace=trace)
     torch.cuda.synchronize()
+    gates = GateCollector(collect_failures=verbose)
     rows, expanded = validate_layout(trace, ids)
     print("diagnostic routing: every expanded row appears once under the correct expert")
     inverse = torch.argsort(torch.tensor(fc1_row_order(), device=x.device))
@@ -84,8 +168,11 @@ def diagnose(x, ids, routes, original, prepared):
     native_input = unpack(trace["input_packed"], trace["input_sf"].view(torch.float8_e4m3fn), input_scale)
     expanded_input = x.repeat_interleave(TOP_K, dim=0).float()
     expected_input, input_codes, input_sf = quant_dequant(expanded_input, input_scale, return_fields=True)
-    metrics("input_quantization", native_input, expected_input)
-    report_fields("input_quantization", trace["input_packed"], trace["input_sf"], input_codes, input_sf)
+    gates.check(validate_input_rounding, expanded_input, input_scale, codes(trace["input_packed"]),
+                trace["input_sf"], input_codes, input_sf)
+    gates.check(require_quality, "input_quantization", native_input, expected_input)
+    if verbose:
+        report_fields("input_quantization", trace["input_packed"], trace["input_sf"], input_codes, input_sf)
 
     reference_trace = {}
     reference(x, ids, routes, original, input_override=native_input, trace=reference_trace)
@@ -94,15 +181,16 @@ def diagnose(x, ids, routes, original, prepared):
     down_scale = prepared[7][expert_ids, None]
     native_intermediate[expanded] = unpack(
         trace["intermediate_packed"][rows], linear_sf[rows].view(torch.float8_e4m3fn), down_scale[expanded])
-    metrics("fc1_swiglu_requant_using_native_input", native_intermediate, reference_trace["intermediate"])
+    gates.check(require_quality, "fc1_swiglu_requant_using_native_input", native_intermediate, reference_trace["intermediate"])
     _, intermediate_codes, intermediate_sf = quant_dequant(
         reference_trace["activated"], down_scale, return_fields=True)
-    report_fields("fc1_swiglu_requant", trace["intermediate_packed"][rows], linear_sf[rows],
-                  intermediate_codes[expanded], intermediate_sf[expanded])
+    if verbose:
+        report_fields("fc1_swiglu_requant", trace["intermediate_packed"][rows], linear_sf[rows],
+                      intermediate_codes[expanded], intermediate_sf[expanded])
     # Supplying the native intermediate removes both earlier quantization stages
     # from the FC2/finalize comparison.
     expected_fc2 = reference(x, ids, routes, original, intermediate_override=native_intermediate)
-    metrics("fc2_finalize_using_native_intermediate", actual, expected_fc2)
+    gates.check(require_quality, "fc2_finalize_using_native_intermediate", actual, expected_fc2)
 
     # One nonzero slot per token removes cross-expert accumulation. These are
     # diagnostic launches only; zero-weight slots still run through the kernel.
@@ -112,7 +200,26 @@ def diagnose(x, ids, routes, original, prepared):
         one_slot[:, slot] = routes[:, slot]
         contribution = _run_impl(x, ids, one_slot, prepared)
         expected = reference(x, ids, one_slot, original, intermediate_override=native_intermediate)
-        metrics(f"fc2_slot_{slot}", contribution, expected)
+        gates.check(require_quality, f"fc2_slot_{slot}", contribution, expected)
         isolated_sum.add_(contribution.float())
-    metrics("scatter_vs_sum_of_isolated_native_slots", actual, isolated_sum)
-    print("diagnostic complete; original acceptance thresholds remain unchanged")
+    gates.check(require_quality, "scatter_vs_sum_of_isolated_native_slots", actual, isolated_sum)
+    # Keep all outputs alive and compare every pair, so allocator reuse cannot
+    # make a previous result silently alias the next one. BF16 atomic reduction
+    # does not promise a fixed summation order; gate numerical stability and
+    # report bitwise equality as an informational diagnostic.
+    repeats = [actual]
+    for repeat in range(1, 4):
+        current = _run_impl(x, ids, routes, prepared)
+        torch.cuda.synchronize()
+        gates.check(require_quality, f"repeat_{repeat}_fc2_reference", current, expected_fc2)
+        for prior, previous in enumerate(repeats):
+            gates.check(require_repeat_stable, f"repeat_{repeat}_vs_{prior}", current, previous)
+        repeats.append(current)
+    # Independently quantizing the input can choose the opposite side of an
+    # E2M1 midpoint; SwiGLU can amplify that difference through the MoE. The
+    # stage gates above determine acceptance, while this remains a sensitivity
+    # measurement for the complete quantized pipeline.
+    metrics("informational_end_to_end_quantization_sensitivity", actual, reference(x, ids, routes, original))
+    gates.finish()
+    print("PASS: routed input, FC1, FC2, and scatter stage gates")
+    return actual

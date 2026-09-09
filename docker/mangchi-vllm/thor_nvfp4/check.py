@@ -63,7 +63,7 @@ def reference(x, ids, routes, original, *, input_override=None, intermediate_ove
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--compile-only", action="store_true")
-    parser.add_argument("--diagnose", action="store_true", help="Isolate native stages on the first numerical failure")
+    parser.add_argument("--diagnose", action="store_true", help="Also report per-stage FP4 code and FP8 scale differences")
     args = parser.parse_args()
     torch.manual_seed(42)
     torch.backends.cuda.matmul.allow_tf32 = False
@@ -93,6 +93,8 @@ def main():
     names = list(specs)
     original = [getattr(layer, name) for name in names]
     prepared = prepare_weights(layer)
+    from .diagnose import require_quality, validate_case
+
     for tokens, pattern in ((1, "shared"), (10, "shared"), (129, "shared"), (32, "scattered")):
         x = (torch.randn(tokens, HIDDEN, device="cuda") * .25).to(torch.bfloat16)
         ids = torch.arange(TOP_K, device="cuda").expand(tokens, -1)
@@ -100,30 +102,22 @@ def main():
             ids = (ids + torch.arange(tokens, device="cuda")[:, None] * TOP_K) % EXPERTS
         ids = ids.to(torch.int32).contiguous()
         routes = torch.softmax(torch.randn(tokens, TOP_K, device="cuda"), dim=-1)
-        expected = reference(x, ids, routes, original)
-        actual = run(x, ids, routes, prepared).float()
+        print(f"case tokens={tokens} routing={pattern}")
+        actual = validate_case(x, ids, routes, original, prepared, verbose=args.diagnose)
+        # Capture/replay checks the serving custom op at every tested shape.
+        graph = torch.cuda.CUDAGraph()
+        capture_stream = torch.cuda.Stream()
+        capture_stream.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(capture_stream):
+            run(x, ids, routes, prepared)
+        torch.cuda.current_stream().wait_stream(capture_stream)
+        with torch.cuda.graph(graph, stream=capture_stream):
+            captured = run(x, ids, routes, prepared)
+        for _ in range(3):
+            graph.replay()
         torch.cuda.synchronize()
-        relative_rmse = ((actual - expected).square().mean() / expected.square().mean()).sqrt().item()
-        cosine = torch.nn.functional.cosine_similarity(actual.flatten(), expected.flatten(), dim=0).item()
-        print(f"tokens={tokens} routing={pattern} relative_rmse={relative_rmse:.6f} cosine={cosine:.6f}")
-        if not torch.isfinite(actual).all() or relative_rmse > .02 or cosine < .999:
-            if args.diagnose:
-                from .diagnose import diagnose
-                diagnose(x, ids, routes, original, prepared)
-            raise RuntimeError("Native kernel failed the NVFP4 reference accuracy gate")
-    # Capture/replay exercises pointer lifetime and caller-owned scratch storage.
-    graph = torch.cuda.CUDAGraph()
-    capture_stream = torch.cuda.Stream()
-    capture_stream.wait_stream(torch.cuda.current_stream())
-    with torch.cuda.stream(capture_stream):
-        run(x, ids, routes, prepared)
-    torch.cuda.current_stream().wait_stream(capture_stream)
-    with torch.cuda.graph(graph, stream=capture_stream):
-        captured = run(x, ids, routes, prepared)
-    for _ in range(3):
-        graph.replay()
-    torch.cuda.synchronize()
-    torch.testing.assert_close(captured.float(), actual, rtol=.02, atol=.002)
+        require_quality("graph_replay", captured, actual)
+        torch.testing.assert_close(captured.float(), actual.float(), rtol=.02, atol=.002)
     print("PASS: exact-geometry numerical comparisons and CUDA graph replay")
 
 

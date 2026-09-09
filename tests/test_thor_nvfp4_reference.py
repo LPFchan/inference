@@ -1,5 +1,7 @@
 """CPU numerical tests; run with the candidate image's Torch installation."""
 from pathlib import Path
+import contextlib
+import io
 import sys
 import unittest
 from unittest.mock import patch
@@ -15,11 +17,93 @@ if torch is not None:
     from thor_nvfp4.adapter import swizzle_scales
     from thor_nvfp4.check import quant_dequant, unpack
     from thor_nvfp4 import check
-    from thor_nvfp4.diagnose import unswizzle_scales, validate_layout
+    from thor_nvfp4.diagnose import GateCollector, require_quality, require_repeat_stable, unswizzle_scales, validate_input_rounding, validate_layout
 
 
 @unittest.skipIf(torch is None, "Requires Torch; runnable on CPU inside the candidate image")
 class ThorReferenceTests(unittest.TestCase):
+    def test_diagnostic_collector_keeps_later_failures_and_then_raises(self):
+        gates = GateCollector(collect_failures=True)
+        def fail(message):
+            raise AssertionError(message)
+        with contextlib.redirect_stdout(io.StringIO()):
+            gates.check(fail, "FC2 failure")
+            self.assertEqual(gates.check(lambda: "later slot executed"), "later slot executed")
+            gates.check(fail, "repeat failure")
+        with self.assertRaisesRegex(AssertionError, "(?s)FC2 failure.*repeat failure"):
+            gates.finish()
+        with self.assertRaisesRegex(AssertionError, "immediate"):
+            GateCollector(collect_failures=False).check(fail, "immediate")
+
+    def test_repeat_gate_reports_but_accepts_small_atomic_order_changes(self):
+        first = torch.tensor([1., 2.], dtype=torch.bfloat16)
+        changed = torch.tensor([1.0078125, 2.], dtype=torch.bfloat16)
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            require_repeat_stable("same", first, first.clone())
+            require_quality("small error", changed, first)
+            require_repeat_stable("different", changed, first)
+            require_repeat_stable("reverse", first, changed)
+        self.assertIn("bitwise_equal=False", output.getvalue())
+
+    def test_repeat_stability_is_stricter_than_stage_quality(self):
+        first = torch.ones(16, dtype=torch.bfloat16)
+        with contextlib.redirect_stdout(io.StringIO()):
+            # Two BF16 ULPs pass the 2% stage gate but exceed 1% repeat drift.
+            changed = first + .015625
+            require_quality("stage", changed, first)
+            with self.assertRaisesRegex(AssertionError, "1% pairwise repeat-stability"):
+                require_repeat_stable("repeat", changed, first)
+            for delta in (.03, .05):
+                with self.assertRaises(AssertionError):
+                    require_repeat_stable("race-sized drift", first + delta, first)
+
+    def test_repeat_stability_rejects_nonfinite_and_handles_zero(self):
+        zeros = torch.zeros(16)
+        with contextlib.redirect_stdout(io.StringIO()):
+            require_repeat_stable("zeros", zeros, zeros.clone())
+            for value in (float("nan"), float("inf"), 1.):
+                with self.assertRaises(AssertionError):
+                    require_repeat_stable("invalid", torch.full_like(zeros, value), zeros)
+
+    def test_input_boundary_exception_is_adjacent_local_and_scale_exact(self):
+        values = torch.zeros(1, 16)
+        values[0, :2] = torch.tensor([.25, 6])
+        _, expected_codes, sf = quant_dequant(values, 1.0, return_fields=True)
+        adjacent = expected_codes.clone()
+        adjacent[0, 0] = 1
+        validate_input_rounding(values, 1.0, adjacent, sf, expected_codes, sf)
+        distant = expected_codes.clone()
+        distant[0, 0] = 2
+        with self.assertRaisesRegex(AssertionError, "adjacent"):
+            validate_input_rounding(values, 1.0, distant, sf, expected_codes, sf)
+        wrong_sign = adjacent.clone()
+        wrong_sign[0, 0] |= 8
+        with self.assertRaisesRegex(AssertionError, "sign"):
+            validate_input_rounding(values, 1.0, wrong_sign, sf, expected_codes, sf)
+        with self.assertRaisesRegex(AssertionError, "scales"):
+            validate_input_rounding(values, 1.0, adjacent, sf + 1, expected_codes, sf)
+        for value, accepted in ((.25000005, True), (.251, False)):
+            values[0, 0] = value
+            _, expected_codes, sf = quant_dequant(values, 1.0, return_fields=True)
+            changed = expected_codes.clone()
+            changed[0, 0] = 0
+            if accepted:
+                validate_input_rounding(values, 1.0, changed, sf, expected_codes, sf)
+            else:
+                with self.assertRaisesRegex(AssertionError, "rounding-boundary"):
+                    validate_input_rounding(values, 1.0, changed, sf, expected_codes, sf)
+
+    def test_quality_gate_rejects_drift_and_nonfinite_values(self):
+        expected = torch.ones(16)
+        with contextlib.redirect_stdout(io.StringIO()):
+            require_quality("unchanged", expected, expected)
+            require_quality("zero", torch.zeros(16), torch.zeros(16))
+            for actual in (expected * 1.03, torch.full((16,), float("nan")),
+                           torch.full((16,), float("inf"))):
+                with self.assertRaisesRegex(AssertionError, "2%"):
+                    require_quality("bad", actual, expected)
+
     def test_fp4_midpoints_round_to_even(self):
         values = torch.tensor([[-6, -5, -3.5, -2.5, -1.75, -1.25, -.75, -.25,
                                 .25, .75, 1.25, 1.75, 2.5, 3.5, 5, 6]])

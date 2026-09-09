@@ -18,6 +18,11 @@ speed. Production acceptance remains in `records/PLANS.md`.
   kernel from NVIDIA's export wrapper. CUDA adaptations retain device code,
   replace TensorRT host dispatch with a Torch binding, and guard expert ids
   before indexing activation scales. NVIDIA's full TensorRT runtime is unnecessary.
+- The FC2 exporter selects NVIDIA's register-atomic epilogue (`use_blkred=False`).
+  Its pinned bulk-reduction path issues asynchronous shared-to-global reductions
+  without a bulk commit/wait before shared-buffer reuse or a producer barrier
+  before row reads. Register atomics avoid that shared-memory lifetime hazard;
+  this source correction still needs hardware validation.
 - Dependencies: CuTe DSL 4.7.0 with CUDA 13, CuPy CUDA 13 13.6.0, cuda-python
   13.3.1, cuda-bindings 13.3.1, and the image's existing Torch/CUDA compiler.
   The opt-in install adds official PyPI alongside the inherited Jetson index
@@ -84,23 +89,49 @@ python -m thor_nvfp4.check --compile-only
 python -m thor_nvfp4.check
 ```
 
-For a numerical failure, run `python -m thor_nvfp4.check --diagnose`. It keeps
-the same failing acceptance gate and reports routing/repacking checks, actual
-input FP4 bytes/scales versus software quantization, FC1 intermediate error
-using the native quantized input, and FC2 error using the native intermediate.
-One-slot routing runs then separate FC2 from cross-expert scatter accumulation.
-These diagnostics retain scratch buffers and synchronize; they are confined to
-the standalone test and do not run in serving. The CPU reference/layout tests
-are in `tests/test_thor_nvfp4_reference.py` and need Torch, but no GPU.
+The numerical test gates each stage separately. Routing and repacking must
+match exactly. Input quantization must have exactly matching FP8 block scales;
+any differing FP4 codes must preserve sign and choose adjacent E2M1 levels
+within `8 * float32 epsilon * max(1, abs(midpoint))` of their rounding midpoint
+in normalized FP4 units. This small allowance covers FP32 reciprocal/multiply
+rounding in CUDA versus division in the independent emulator. It cannot excuse
+wrong scales, nonadjacent levels, or differences away from a rounding boundary.
+Input dequantized values must also meet relative RMSE <= 0.02 and cosine >= 0.999.
 
-The numerical test uses exact expert geometry with single-token decode,
-shared routing, scattered routing, and a token count spanning a row tile. It
-compares against FP32 matrix multiplication with explicit NVFP4
-quantization/dequantization and exercises CUDA graph replay. It requires
-relative RMSE <= 0.02, cosine >= 0.999, and finite output. Do not relax these
-thresholds to accommodate unexplained failures. The synthetic test retains
-one original layer's weights for comparison and needs several GiB of free
-memory. It does not prove correctness on the downloaded checkpoint.
+FC1/SwiGLU/requant is compared against a reference driven by the actual native
+quantized input. FC2/finalize is compared against a reference driven by the
+actual native intermediate. Each routing slot is checked separately, and the
+combined scatter is compared with the sum of isolated native slot outputs.
+Every stage requires finite values, relative RMSE <= 0.02, and cosine >= 0.999.
+All four token/routing cases run these gates and CUDA graph replay. The complete
+pipeline comparison against independently emulated input quantization remains
+an informational sensitivity metric: SwiGLU can amplify a few valid opposite
+choices at FP4 rounding boundaries.
+
+`python -m thor_nvfp4.check --diagnose` additionally reports differing FP4 code
+and FP8 scale counts and collects numerical failures through all stages, slots,
+and repeated launches before raising. Structural routing/layout failures stop
+immediately. Four same-input outputs each pass the strict reference quality
+gate and are compared pairwise using a separate 1% repeat-stability limit:
+`norm(a-b) / max(norm(a), norm(b)) <= 0.01`. Nonfinite values fail. Bitwise
+equality and differing-element counts are informational diagnostics.
+
+BF16 unit roundoff is `u=2^-8`. Ten contributions require nine rounded
+additions after the first exact addition to zero. An independent uniform-rounding
+estimate for the difference between two sums is `u*sqrt(2*9/3) = 0.00957`;
+the screening limit rounds this to 1%. This is a practical numerical-stability
+budget, not a worst-case error theorem: correlated rounding and cancellation
+can exceed it and require investigation. It is narrower than the stage-quality
+floor and rejects 3–5% repeat drift. Hardware validation must confirm that the
+register-atomic path meets it. BF16 atomics have unspecified summation order;
+bitwise determinism is not an acceptance requirement.
+Stage validation retains scratch buffers and synchronizes
+only in the standalone test; serving does not run these checks. CPU tests in
+`tests/test_thor_nvfp4_reference.py` verify rounding, boundary rejection, and
+stage-reference helpers using Torch without a GPU. Do not relax thresholds for
+unexplained failures. The synthetic test retains one original layer's weights
+and needs several GiB of free memory; it does not prove correctness on the
+downloaded checkpoint.
 
 Next load the downloaded W4A4 checkpoint in the canary with the existing
 PLE mmap, persistent QSA top-k, FP8 attention KV, and 262144 context settings.

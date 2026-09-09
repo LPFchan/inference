@@ -44,6 +44,13 @@ def adapt_python(name, text):
                    "blockscaled_contiguous_gather_grouped_gemm_act_fusion",
                    "blockscaled_contiguous_grouped_gemm_finalize_fusion"):
         text = re.sub(rf"\bfrom {module} import", f"from .{module} import", text)
+    if name == "export_fc2_kernel.py":
+        # The pinned bulk-reduce path reuses shared output storage without a
+        # bulk commit/wait. Select its existing register-atomic epilogue, which
+        # has no asynchronous shared-memory source lifetime to manage.
+        if text.count("        use_blkred=True,") != 1:
+            raise ValueError("Pinned FC2 epilogue selection changed")
+        text = text.replace("        use_blkred=True,", "        use_blkred=False,")
     if name in ("export_fc1_kernel.py", "export_fc2_kernel.py"):
         target = "    compiled.export_to_c(args.output_dir, args.file_name, args.function_prefix)\n    return verify_export(args.output_dir, args.file_name)"
         if text.count(target) != 1:
