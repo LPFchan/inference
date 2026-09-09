@@ -107,6 +107,7 @@ class ResidencyManager:
         self.resident: dict[str, Resident] = {}
         self._lock = asyncio.Lock()
         self._stop_tasks: dict[str, "asyncio.Task"] = {}
+        self._load_tasks: dict[str, "asyncio.Task"] = {}
 
     def _used_gib(self) -> float:
         return sum(r.spec.resident_gb for r in self.resident.values())
@@ -186,43 +187,45 @@ class ResidencyManager:
             f"process group for '{r.name}' could not be confirmed dead after SIGKILL"
         )
 
-    async def _stop_owned(self, name: str) -> dict:
-        """Manager-owned stop that ALWAYS finalizes bookkeeping, independent of
-        any caller. Cancellation of a caller never reaches this task.
-
-        On confirmed group death the reservation is released and a result
-        returned. On unconfirmed death the reservation is RETAINED and a
-        RuntimeError propagates, so the model is not silently "unloaded" while
-        workers may still hold the GPU.
-        """
-        r = self.resident.get(name)
-        if not r:
-            return False
-        logger.info("stopping %s (pid %s, pgid %s)", name, r.process.pid, r.pgid)
-        await self._reap_group(r)  # raises if not confirmed dead
-        self.resident.pop(name, None)
-        self._stop_tasks.pop(name, None)
-        return True
-
     def _ensure_stop_task(self, name: str) -> "asyncio.Task":
         """Return the single in-flight stop task for name, creating it if needed.
 
-        Deduped per model so two concurrent stops don't run two reapers over the
-        same group.
+        The task OWNS the manager lock and runs the full stop to completion,
+        detached from any caller. Callers wait on it via asyncio.shield, so a
+        cancelled caller detaches without cancelling the stop.
         """
         task = self._stop_tasks.get(name)
         if task is None or task.done():
-            task = asyncio.ensure_future(self._stop_owned(name))
+            task = asyncio.ensure_future(self._stop_locked(name))
             self._stop_tasks[name] = task
+            task.add_done_callback(lambda t, n=name: self._drop_stop_task(n, t))
         return task
 
+    def _drop_stop_task(self, name: str, task: "asyncio.Task") -> None:
+        # Remove the registry entry only if it still points at THIS task, so
+        # finalization can't delete a newer task for the same model.
+        if self._stop_tasks.get(name) is task:
+            self._stop_tasks.pop(name, None)
+
+    async def _stop_locked(self, name: str) -> bool:
+        """Full stop under the manager lock. Runs to completion inside its own
+        task regardless of caller cancellation. Raises RuntimeError if the group
+        cannot be confirmed dead — the reservation is retained in that case.
+        """
+        async with self._lock:
+            r = self.resident.get(name)
+            if not r:
+                return False
+            logger.info("stopping %s (pid %s, pgid %s)", name, r.process.pid, r.pgid)
+            await self._reap_group(r)  # raises if not confirmed dead
+            self.resident.pop(name, None)
+            return True
+
     async def _stop(self, name: str) -> None:
-        # Delegate to the manager-owned stop task and wait for it WITHOUT a
-        # shield: if this caller is cancelled, the stop task keeps running to
-        # completion and finalizes bookkeeping; only the caller's view is
-        # cancelled. The reservation is released inside the task, never here.
+        """Wait for the model's stop to finish. Caller cancellation only detaches
+        the caller (via shield); the stop task itself runs to completion."""
         task = self._ensure_stop_task(name)
-        await task
+        await asyncio.shield(task)
 
     def _plan_evictions(self, need_gib: float, exclude: str) -> list[str]:
         """Compute the LRU victim list to fit need_gib WITHOUT stopping anything.
@@ -259,10 +262,25 @@ class ResidencyManager:
         return victims
 
     async def _evict_until_fits(self, need_gib: float, exclude: str) -> None:
-        """Evict the planned LRU victims to fit need_gib (feasibility pre-checked)."""
+        """Evict the planned LRU victims to fit need_gib (feasibility pre-checked).
+
+        Runs INLINE — the caller (the load task) already holds the lock, so it
+        reaps victims directly rather than going through the detached stop task
+        (which would deadlock on the same lock).
+        """
         for victim in self._plan_evictions(need_gib, exclude):
             logger.info("evicting LRU resident %s to make room", victim)
-            await self._stop(victim)
+            await self._stop_inline(victim)
+
+    async def _stop_inline(self, name: str) -> None:
+        """Stop a resident while the caller ALREADY holds the lock. Retains the
+        reservation if the group can't be confirmed dead."""
+        r = self.resident.get(name)
+        if not r:
+            return
+        logger.info("stopping %s (pid %s, pgid %s)", name, r.process.pid, r.pgid)
+        await self._reap_group(r)  # raises if not confirmed dead
+        self.resident.pop(name, None)
 
     async def _wait_healthy(self, r: Resident) -> None:
         url = f"http://127.0.0.1:{r.port}/health"
@@ -284,6 +302,18 @@ class ResidencyManager:
         raise HTTPException(status_code=504, detail=f"'{r.name}' did not become healthy in {HEALTH_TIMEOUT_S}s")
 
     async def load(self, name: str) -> dict:
+        task = self._ensure_load_task(name)
+        return await asyncio.shield(task)
+
+    def _ensure_load_task(self, name: str) -> "asyncio.Task":
+        task = self._load_tasks.get(name)
+        if task is None or task.done():
+            task = asyncio.ensure_future(self._load_locked(name))
+            self._load_tasks[name] = task
+            task.add_done_callback(lambda t, n=name: self._load_tasks.pop(n, None) if self._load_tasks.get(n) is t else None)
+        return task
+
+    async def _load_locked(self, name: str) -> dict:
         async with self._lock:
             if name not in self.specs:
                 raise HTTPException(status_code=404, detail=f"unknown model '{name}'")
@@ -309,24 +339,22 @@ class ResidencyManager:
             try:
                 await self._wait_healthy(r)
             except BaseException:
-                # Startup failed or was cancelled: shut the process group down
-                # and WAIT for it, so we never release the lock while a live
-                # process still holds GPU memory or the port. BaseException so
-                # asyncio.CancelledError takes this path too.
-                await self._stop(name)
+                # Startup failed: shut the process group down and WAIT, so the
+                # lock isn't released while a live process holds GPU/port. The
+                # caller may have been cancelled, but THIS task continues.
+                await self._stop_inline(name)
                 raise
             return {"name": name, "status": "loaded", "port": r.port, "resident_gb": spec.resident_gb}
 
     async def unload(self, name: str) -> dict:
-        async with self._lock:
-            if name not in self.resident:
-                return {"name": name, "status": "not-resident"}
-            try:
-                await self._stop(name)
-            except RuntimeError as exc:
-                # Group not confirmed dead: reservation retained, report honestly.
-                raise HTTPException(status_code=500, detail=str(exc)) from exc
-            return {"name": name, "status": "unloaded"}
+        if name not in self.resident and self._stop_tasks.get(name) is None:
+            return {"name": name, "status": "not-resident"}
+        try:
+            await self._stop(name)
+        except RuntimeError as exc:
+            # Group not confirmed dead: reservation retained, report honestly.
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        return {"name": name, "status": "unloaded"}
 
     def status(self, name: Optional[str] = None) -> dict:
         def one(r: Resident) -> dict:
@@ -357,12 +385,11 @@ class ResidencyManager:
         }
 
     async def shutdown(self) -> None:
-        async with self._lock:
-            for name in list(self.resident.keys()):
-                try:
-                    await self._stop(name)
-                except RuntimeError:
-                    logger.error("shutdown: could not confirm '%s' dead; leaving reservation", name)
+        for name in list(self.resident.keys()):
+            try:
+                await self._stop(name)
+            except RuntimeError:
+                logger.error("shutdown: could not confirm '%s' dead; leaving reservation", name)
 
 
 def create_app(manager: Optional[ResidencyManager] = None) -> FastAPI:
