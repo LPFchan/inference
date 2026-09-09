@@ -37,7 +37,10 @@ class FakeProc:
     def kill(self):
         self.returncode = -9
 
-    def wait(self):
+    def wait(self, timeout=None):
+        if timeout is not None and self.returncode is None:
+            import subprocess as _sp
+            raise _sp.TimeoutExpired(cmd="fake", timeout=timeout)
         return self.returncode
 
 
@@ -244,6 +247,34 @@ async def _instant_sleep(_):
     return None
 
 
+def test_unload_waits_for_inflight_load(mgr, monkeypatch):
+    # A load in progress must not be missed by unload: the serialized stop task
+    # waits for the load (lock ordering) and then stops the now-resident model.
+    started = agent.asyncio.Event()
+    release = agent.asyncio.Event()
+
+    async def _slow_healthy(r):
+        started.set()
+        await release.wait()
+
+    async def _scenario():
+        monkeypatch.setattr(mgr, "_wait_healthy", _slow_healthy)
+        load_task = agent.asyncio.ensure_future(mgr.load("small"))
+        await started.wait()
+        # load is mid-flight; unload must not return not-resident and miss it.
+        unload_task = agent.asyncio.ensure_future(mgr.unload("small"))
+        await agent.asyncio.sleep(0)  # let unload queue its stop
+        release.set()
+        loaded = await load_task
+        unloaded = await unload_task
+        return loaded, unloaded
+
+    loaded, unloaded = run(_scenario())
+    assert loaded["status"] == "loaded"
+    assert unloaded["status"] == "unloaded"
+    assert "small" not in mgr.resident
+
+
 def test_unconfirmed_group_death_retains_reservation(mgr, monkeypatch):
     # If the group never reports gone, unload must NOT claim success or release
     # the reservation — a replacement must not be admitted over live workers.
@@ -268,13 +299,27 @@ def test_unconfirmed_group_death_retains_reservation(mgr, monkeypatch):
 def test_zombie_launcher_does_not_block_reap(mgr, monkeypatch):
     # An exited-but-unreaped launcher is a zombie in the group; reaping it during
     # the wait lets group polling see the group as gone without SIGKILL timeout.
+    # The group's disappearance is made to DEPEND on the launcher having been
+    # reaped — so if reaping is removed, the group never "dies" and this fails.
     run(mgr.load("small"))
     r = mgr.resident["small"]
-    r.process.returncode = 0  # launcher has exited
-    reaped = []
-    monkeypatch.setattr(mgr, "_reap_launcher", lambda res: reaped.append(res.name))
-    # group reports gone right away once launcher is reaped
-    monkeypatch.setattr(mgr, "_group_alive", lambda res: False)
+    state = {"launcher_reaped": False}
+    r.process.returncode = 0  # launcher has exited (but stays a zombie until reaped)
+
+    def _reap(res):
+        state["launcher_reaped"] = True
+
+    def _alive(res):
+        # group looks alive until the launcher zombie is reaped
+        return not state["launcher_reaped"]
+
+    kills = []
+    monkeypatch.setattr(mgr, "_reap_launcher", _reap)
+    monkeypatch.setattr(mgr, "_group_alive", _alive)
+    monkeypatch.setattr(mgr, "_signal_group", lambda res, sig: kills.append(sig))
+    monkeypatch.setattr(agent.asyncio, "sleep", _instant_sleep)
     out = run(mgr.unload("small"))
     assert out["status"] == "unloaded"
     assert "small" not in mgr.resident
+    assert state["launcher_reaped"] is True
+    assert 9 not in kills  # SIGKILL was not needed once the zombie was reaped

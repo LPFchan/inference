@@ -108,6 +108,7 @@ class ResidencyManager:
         self._lock = asyncio.Lock()
         self._stop_tasks: dict[str, "asyncio.Task"] = {}
         self._load_tasks: dict[str, "asyncio.Task"] = {}
+        self._closing = False
 
     def _used_gib(self) -> float:
         return sum(r.spec.resident_gb for r in self.resident.values())
@@ -198,14 +199,8 @@ class ResidencyManager:
         if task is None or task.done():
             task = asyncio.ensure_future(self._stop_locked(name))
             self._stop_tasks[name] = task
-            task.add_done_callback(lambda t, n=name: self._drop_stop_task(n, t))
+            task.add_done_callback(lambda t, n=name: self._drop_task(self._stop_tasks, n, t))
         return task
-
-    def _drop_stop_task(self, name: str, task: "asyncio.Task") -> None:
-        # Remove the registry entry only if it still points at THIS task, so
-        # finalization can't delete a newer task for the same model.
-        if self._stop_tasks.get(name) is task:
-            self._stop_tasks.pop(name, None)
 
     async def _stop_locked(self, name: str) -> bool:
         """Full stop under the manager lock. Runs to completion inside its own
@@ -221,11 +216,12 @@ class ResidencyManager:
             self.resident.pop(name, None)
             return True
 
-    async def _stop(self, name: str) -> None:
+    async def _stop(self, name: str) -> bool:
         """Wait for the model's stop to finish. Caller cancellation only detaches
-        the caller (via shield); the stop task itself runs to completion."""
+        the caller (via shield); the stop task itself runs to completion.
+        Returns True if a resident was stopped, False if it wasn't resident."""
         task = self._ensure_stop_task(name)
-        await asyncio.shield(task)
+        return await asyncio.shield(task)
 
     def _plan_evictions(self, need_gib: float, exclude: str) -> list[str]:
         """Compute the LRU victim list to fit need_gib WITHOUT stopping anything.
@@ -310,11 +306,24 @@ class ResidencyManager:
         if task is None or task.done():
             task = asyncio.ensure_future(self._load_locked(name))
             self._load_tasks[name] = task
-            task.add_done_callback(lambda t, n=name: self._load_tasks.pop(n, None) if self._load_tasks.get(n) is t else None)
+            task.add_done_callback(lambda t, n=name: self._drop_task(self._load_tasks, n, t))
         return task
+
+    def _drop_task(self, table: dict, name: str, task: "asyncio.Task") -> None:
+        # Remove only if the entry still points at THIS task, and surface any
+        # non-cancellation exception so a detached failure isn't silently lost.
+        if table.get(name) is task:
+            table.pop(name, None)
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            logger.error("lifecycle task for %s failed: %r", name, exc)
 
     async def _load_locked(self, name: str) -> dict:
         async with self._lock:
+            if self._closing:
+                raise HTTPException(status_code=503, detail="agent is shutting down")
             if name not in self.specs:
                 raise HTTPException(status_code=404, detail=f"unknown model '{name}'")
             if name in self.resident:
@@ -347,13 +356,16 @@ class ResidencyManager:
             return {"name": name, "status": "loaded", "port": r.port, "resident_gb": spec.resident_gb}
 
     async def unload(self, name: str) -> dict:
-        if name not in self.resident and self._stop_tasks.get(name) is None:
-            return {"name": name, "status": "not-resident"}
+        # Always go through the serialized stop task: it waits for any in-flight
+        # load of this model to finish (lock ordering) before deciding residency,
+        # so an unload can't miss a model that's mid-launch.
         try:
-            await self._stop(name)
+            stopped = await self._stop(name)
         except RuntimeError as exc:
             # Group not confirmed dead: reservation retained, report honestly.
             raise HTTPException(status_code=500, detail=str(exc)) from exc
+        if not stopped:
+            return {"name": name, "status": "not-resident"}
         return {"name": name, "status": "unloaded"}
 
     def status(self, name: Optional[str] = None) -> dict:
@@ -385,6 +397,13 @@ class ResidencyManager:
         }
 
     async def shutdown(self) -> None:
+        # Stop accepting new loads, let in-flight lifecycle work settle, then
+        # stop whatever became resident — so a detached load finishing mid-
+        # shutdown isn't left running.
+        self._closing = True
+        pending = [t for t in list(self._load_tasks.values()) + list(self._stop_tasks.values()) if not t.done()]
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
         for name in list(self.resident.keys()):
             try:
                 await self._stop(name)
