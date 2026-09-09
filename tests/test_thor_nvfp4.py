@@ -1,5 +1,6 @@
 """CPU checks for the narrow native Thor adapter; hardware accuracy is separate."""
 from pathlib import Path
+import ast
 import importlib.util
 import os
 import re
@@ -15,6 +16,25 @@ from thor_nvfp4.install import HOOK, PATCHED_HOOK, adapt_python, device_body, pa
 
 
 class ThorNvfp4Contracts(unittest.TestCase):
+    def test_compiled_launches_pass_only_runtime_arguments(self):
+        source = (ROOT / "docker/mangchi-vllm/thor_nvfp4/runtime.py").read_text()
+        calls = {node.func.id: node for node in ast.walk(ast.parse(source))
+                 if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                 and node.func.id in ("fc1", "fc2")}
+        self.assertEqual(set(calls), {"fc1", "fc2"})
+        # Pinned FC1: 13 pointers + 5 Int64 dimensions. FC2: 12 pointers +
+        # 6 Int64 dimensions. Both retain dynamic cluster count and stream.
+        # Constexpr tile_size/scaling_vector_size/activation_type are pruned.
+        for name, call in calls.items():
+            with self.subTest(kernel=name):
+                self.assertEqual(len(call.args), 18)
+                self.assertEqual({kw.arg for kw in call.keywords}, {"max_active_clusters", "stream"})
+                self.assertEqual(len(call.keywords), 2)
+        self.assertEqual([ast.unparse(arg) for arg in calls["fc1"].args[-5:]],
+                         ["tokens * TOP_K", "padded", "2 * INTERMEDIATE", "HIDDEN", "EXPERTS"])
+        self.assertEqual([ast.unparse(arg) for arg in calls["fc2"].args[-6:]],
+                         ["padded", "HIDDEN", "INTERMEDIATE", "EXPERTS", "tokens", "TOP_K"])
+
     def test_cuda_dependency_pins_have_available_index_and_compatible_versions(self):
         # Published cuda-python 13.3.1 requires cuda-bindings~=13.3.1;
         # Torch 2.11's CUDA wheel requires cuda-bindings>=13.0.3,<14.

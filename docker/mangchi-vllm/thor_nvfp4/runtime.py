@@ -50,7 +50,6 @@ def run(x: torch.Tensor, ids: torch.Tensor, routes: torch.Tensor,
         weights: list[torch.Tensor]) -> torch.Tensor:
     import cuda.bindings.driver as cuda
     import cutlass as c
-    from .nvidia.export_common import resolve_activation_type
 
     if x.ndim != 2 or x.shape[1] != HIDDEN or x.dtype != torch.bfloat16 or not x.is_cuda:
         raise ValueError("Thor NVFP4 expects CUDA BF16 [T,2560]")
@@ -101,20 +100,21 @@ def run(x: torch.Tensor, ids: torch.Tensor, routes: torch.Tensor,
     p8 = lambda t: _pointer(t, c.Float8E4M3FN)
     pf = lambda t: _pointer(t, c.Float32)
     pi = lambda t: _pointer(t, c.Int32)
+    # CuTe DSL removes Constexpr parameters from the compiled callable. Tile
+    # size, scale-vector size, and activation were fixed by the export wrappers.
     fc1(
         p4(a), p4(w1), p8(a_sf), p8(s1), p4(intermediate), p8(intermediate_sf),
         pf(alpha1), pf(input_scale), pf(down_scale), pi(groups), pi(limits),
         pi(mapping), pi(tile_count), tokens * TOP_K, padded, 2 * INTERMEDIATE,
-        HIDDEN, EXPERTS, tile_size=128, scaling_vector_size=16,
+        HIDDEN, EXPERTS,
         max_active_clusters=clusters, stream=stream,
-        activation_type=resolve_activation_type("swiglu"),
     )
     fc2(
         p4(intermediate), p4(w2), p8(intermediate_sf), p8(s2),
         _pointer(result, c.BFloat16, 32), pf(alpha2), pf(down_scale),
         pi(groups), pi(limits), pi(mapping), pi(tile_count), pf(routes),
         padded, HIDDEN, INTERMEDIATE, EXPERTS, tokens, TOP_K,
-        tile_size=128, scaling_vector_size=16, max_active_clusters=clusters, stream=stream,
+        max_active_clusters=clusters, stream=stream,
     )
     return result
 
