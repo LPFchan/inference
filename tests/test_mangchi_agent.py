@@ -232,6 +232,7 @@ def test_specs_file_parses():
     assert dense.gpu_mem_util == 0.24
     assert dense.resident_gb == 31
     assert flash.resident_gb > specs["qwen3.8-27b-uncensored-nvfp4"].resident_gb
+    assert dense.resident_gb + flash.resident_gb <= agent.MEMORY_BUDGET_GIB
 
 
 def test_qsa_fp8_canary_build_is_pinned_and_thor_aware():

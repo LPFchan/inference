@@ -18,10 +18,11 @@ memory floor must be stopped by the residency agent and reported as a normal,
 actionable load failure. The operating system and unrelated services must stay
 responsive.
 
-Loading and unloading the 27B and Flash-Next models must work in every order.
+The 27B and Flash-Next models must be able to remain loaded simultaneously, not
+merely replace one another. Loading and unloading them must work in every order.
 In particular:
 
-- loading 27B and then Flash-Next must reach the same valid resident state as
+- loading 27B and then Flash-Next must leave both models resident, as must
   loading Flash-Next and then 27B;
 - unloading either model must work while the other is resident;
 - unloading a model that is still loading must cancel and clean up that load,
@@ -95,7 +96,9 @@ way to recover from a slow or unsafe load.
 
 ## Consequences
 
-- The unverified 115 GiB static budget increase must not be deployed by itself.
+- The residency admission budget is 115 GiB so the models' 114 GiB combined
+  estimate can be admitted, while the host-memory watcher remains the mandatory
+  safety boundary during the second startup.
 - Each model needs a measured startup-peak allowance in addition to its
   steady-state reservation until the loader no longer duplicates those weights.
 - The agent must monitor host available memory during startup and terminate the
@@ -104,8 +107,9 @@ way to recover from a slow or unsafe load.
   the only guard on Thor.
 - Load cancellation and unload must not be serialized behind the complete
   health-wait interval.
-- Both load orders, unload orders, cancellation during load, cleanup after
-  failure, and host-memory-floor enforcement become deployment acceptance tests.
+- Simultaneous residency in both load orders, both unload orders, cancellation
+  during load, cleanup after failure, and host-memory-floor enforcement become
+  deployment acceptance tests.
 - If both models cannot reach co-residency within the safety floor, the loader
   or its prepared checkpoint format must be changed; lowering the safety floor
   or accepting host OOM is not a valid workaround.
