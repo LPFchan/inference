@@ -18,12 +18,10 @@ memory floor must be stopped by the residency agent and reported as a normal,
 actionable load failure. The operating system and unrelated services must stay
 responsive. The operator-set host-memory floor is 6 GiB.
 
-The 27B and Flash-Next models must be able to remain loaded simultaneously, not
-merely replace one another. Loading and unloading them must work in every order.
-The co-residency profile keeps FP8 KV for both models, limits 27B to 100,000
-tokens, and keeps Flash-Next at 262,144 tokens. TurboQuant KV is deferred until
-it has separate performance, quality, and long-context validation on Thor.
-In particular:
+Loading and unloading the 27B and Flash-Next models must work in every order,
+with FP8 KV for both, 27B limited to 100,000 tokens, and Flash-Next at 262,144
+tokens. TurboQuant KV is deferred until it has separate performance, quality,
+and long-context validation on Thor. In particular:
 
 - loading 27B and then Flash-Next must leave both models resident, as must
   loading Flash-Next and then 27B;
@@ -32,6 +30,17 @@ In particular:
   rather than waiting for the full startup timeout; and
 - a failed or cancelled load must release its process, container, port, and
   memory reservation before another lifecycle operation proceeds.
+
+Simultaneous residency was an original goal but is withdrawn after measurement.
+At the required settings both models fit only at util 0.68 (Flash-Next, ~83 GiB)
+plus util 0.22 (27B, ~27 GiB), about 110 GiB against roughly 116 GiB of usable
+memory. Flash-Next's MoE startup spike is independent of its reservation and
+drove host available memory to ~3.3 GiB during guarded co-residency tests. Each
+lowered floor (6, 4, 3.5 GiB) only delayed the abort; the spike's true floor is
+below 3.3 GiB, which is not a safe host margin. The DEC's own rule applies: fix
+the loader or checkpoint rather than accept host OOM. Until Flash-Next's ~5.7
+GiB non-torch startup overhead (its PLE memory window) is reduced, the two
+models are served one at a time via the agent's LRU eviction.
 
 Static steady-state residency estimates are not sufficient admission control.
 The implementation must account for startup peak memory and observe real host
@@ -105,10 +114,11 @@ way to recover from a slow or unsafe load.
 
 ## Consequences
 
-- The residency admission budget is 115 GiB so the models' 114 GiB combined
-  pre-tuning estimate can be admitted. The tuned estimates are 25 GiB for 27B
-  and 83 GiB for Flash-Next. The host-memory watcher remains the mandatory
-  safety boundary during the second startup.
+- The residency admission budget is 115 GiB. The tuned standalone estimates are
+  27 GiB for 27B and 83 GiB for Flash-Next. Because simultaneous residency is
+  withdrawn (see Decision), the two models are never admitted together; the
+  agent's LRU eviction loads one and evicts the other. The host-memory watcher
+  remains the mandatory safety boundary during every startup.
 - Each model needs a measured startup-peak allowance in addition to its
   steady-state reservation until the loader no longer duplicates those weights.
 - The agent must monitor host available memory during startup and terminate the
@@ -117,9 +127,10 @@ way to recover from a slow or unsafe load.
   the only guard on Thor.
 - Load cancellation and unload must not be serialized behind the complete
   health-wait interval.
-- Simultaneous residency in both load orders, both unload orders, cancellation
-  during load, cleanup after failure, and host-memory-floor enforcement become
+- Both load orders with LRU eviction, both unload orders, cancellation during
+  load, cleanup after failure, and host-memory-floor enforcement become
   deployment acceptance tests.
-- If both models cannot reach co-residency above the 6 GiB floor, the loader or
-  its prepared checkpoint format must be changed; accepting host OOM is not a
-  valid workaround.
+- Simultaneous residency was tested and is not achievable at the required
+  settings: Flash-Next's startup spike crossed every floor down to 3.5 GiB.
+  Re-enabling co-residency requires reducing Flash-Next's startup overhead
+  (its PLE memory window) rather than lowering the host floor further.
