@@ -56,6 +56,59 @@ gates.
 - Deployment happens only after the native backend is both correct and faster;
   otherwise the current FP8-QSA/Marlin image remains production.
 
+### 2026-09-10 canary result
+
+The pinned NVIDIA CuTeDSL MoE path now loads the complete Flash-Next checkpoint,
+handles vLLM's padded `-1` expert routes, serves a deterministic generation, and
+retains FP8 KV with the configured 262,144-token context. The native path reached
+1,671 prompt tok/s and 10.56 decode tok/s in the initial canary. Correctness is
+accepted; performance is not yet accepted against the 4,500 prompt tok/s Thor
+report, so this remains a canary rather than the production default.
+
+## Thor-native NVFP4 dense path for Qwen3.8-27B
+
+The 27B W4A4 checkpoint now has an opt-in SM110 dense backend based on NVIDIA's
+TensorRT-Edge-LLM CuTeDSL kernel at revision `e8b2952`. It preserves each fused
+projection's checkpoint-global scale, performs one BF16-to-FP4 activation pack,
+and returns BF16 without a quantize-dequantize-quantize round trip.
+
+The measured scheduler-aware policy is intentionally narrow:
+
+- CuTeDSL handles decode, inputs below 1,568 rows, every distinct-scale fused
+  projection, and B/A. Aligned projections use the 256-column tile from 512
+  rows; B/A retains its safe 128-column per-column-scale specialization.
+- At 1,568 rows or more, FlashInfer CUTLASS is used only when preparation proves
+  the complete fused output has one exact alpha. Packed weights, swizzled block
+  scales, and the single native activation pack are shared; no checkpoint copy
+  or collapsed maximum scale is introduced.
+- Any unreviewed shape, dtype, group size, tensor-parallel layout, scale layout,
+  architecture, or tile fails before launch.
+
+Acceptance evidence: 70 static tests and 88 SM110 GPU cases passed, including
+FP64-reference comparisons, unaligned M, backend assertions, 792 repeat/graph
+comparisons with zero drift, and a maximum relative RMSE of 0.00171549. The
+full model answered `19 * 23` as 437 and retained a 262,144-token configured
+context with FP8 KV. On the matched raw-completions workload, the final exact
+hybrid reached a median 1,966.52 prompt tok/s and 10.24 decode tok/s. The old
+CUTLASS control reached 2,021.0 and 8.94 tok/s respectively, but emitted the
+fused-scale-collapse warning. The exact hybrid therefore keeps 97.3% of that
+prefill rate and improves decode by 14.5% without the accuracy compromise.
+
+## Mangchi vLLM build minimization follow-up
+
+Keep the native vLLM wheel before Python-only patches in the container build so
+adapter and telemetry edits reuse the expensive CUDA layer. Persist or bake the
+exact SM110 Torch, CuTeDSL, Triton, and FlashInfer JIT artifacts used by the two
+accepted models.
+
+After both model paths are stable, audit a minimal source build rather than
+removing extensions by file size alone. FA3 is unused on SM110 and can be
+removed. FA2 is required by the current vision encoder; either retain only the
+BF16 head-size variants used by these checkpoints, or remove FA2 only after an
+operator decision to run `--language-model-only`. Remove other quant/kernel
+families only after import, symbol, startup, text, vision, 262K-context, and
+rollback tests prove that neither target model reaches them.
+
 ## Backlog (Future Interest)
 
 | Priority | Item | Why Deferred | Prerequisite |

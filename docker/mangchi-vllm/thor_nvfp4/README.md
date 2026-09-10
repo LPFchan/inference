@@ -153,3 +153,122 @@ changes; also record the existing W4A16 production baseline separately.
 Use CUDA events for isolated layer timings and client timing for full-model
 prefill/decode. FlashInfer can serve as an additional control when usable.
 Preserve the production image until all correctness and performance gates pass.
+# Dense Qwen3.8-27B W4A4 opt-in
+
+The dense adapter is separate from the Flash-Next MoE adapter. Build the existing
+`THOR_CUTEDSL_MOE=1` image variant to install both pinned kernel families, then
+set `VLLM_THOR_CUTEDSL_DENSE=1` only for the dense candidate. It uses NVIDIA
+TensorRT-Edge-LLM `e8b29522938901f6df19ebeedd4b69bc8edbcd97`'s
+`gemm_cutedsl/gemm_blackwell_nvfp4_ws.py`, with a per-column FP32 global-scale
+epilogue and BF16 output. Imported source hashes and Apache-2.0 originals remain
+auditable through `install.py`. This is experimental until hardware acceptance.
+
+The initial contract is SM110, visible device 0, TP=1, BF16 input/output,
+NVFP4 W4A4 group-16, and these `(N,K)` pairs:
+`(34816,5120)`, `(5120,17408)`, `(14336,5120)`, `(5120,6144)`,
+`(16384,5120)`, `(96,5120)`. The 96-row B/A projection pads weights, scales, and
+alpha to 128 rows with zeros and slices the result back to 96. All other shapes
+fail after explicit opt-in. W4A16, non-SM110 devices, and opt-out keep the original
+vLLM selection. The switch does not affect MoE dispatch. Existing BF16 state,
+convolution, norm, vision, embedding, and lm-head paths remain unchanged.
+Use the default `--linear-backend=auto`; conflicting backend selection and
+`VLLM_BATCH_INVARIANT` are rejected. The raw GEMM launch has six pointers
+`A,B,SFA,SFB,C,alpha`, runtime Int64 `M,N,K`, Int32 `max_active_clusters`, and
+the caller's `CUstream`. Scale-vector size 16 is specialized at compilation.
+
+Compressed-tensors divisors and ModelOpt multipliers are intercepted before
+vLLM reduces fused globals. Each logical slice retains its own weight global;
+activation globals must agree exactly across slices or loading fails. Packed
+FP4 weight bytes are retained, FP8 block scales are losslessly swizzled, and
+each invocation performs one NVIDIA BF16-to-FP4 activation quantization.
+Column alpha is the product of forward activation and weight scales and is
+applied in the FP32 accumulator before BF16 conversion. Every non-B/A logical
+boundary must align to both 128- and 256-column tiles. Each such tile loads its
+exact alpha once per epilogue thread and broadcasts it across its accumulator
+values. Distinct fused slices retain distinct products. Padded B/A uses
+per-column alpha because its 48-column boundary crosses a tile. Preparation
+rejects unaudited or misaligned layouts. No FP16 intermediate or weight
+requantization is used.
+
+The dense backend uses CUTLASS through the pinned FlashInfer interface only
+when M>=1568 and preparation proves every output column has exactly the same
+positive FP32 alpha. CuTeDSL handles smaller M, distinct fused globals, and
+padded B/A. Both branches share the packed weights, 128x4-swizzled FP8 scales,
+and one NVIDIA activation pack. CUTLASS receives a scalar view of the exact
+prepared alpha; no maximum or approximate equality is permitted. Its module
+is warmed before serving, and errors propagate without a backend fallback.
+The shared CUTLASS workspace is 32 MiB; no second checkpoint copy is retained.
+
+Validation commands inside a candidate image:
+
+```sh
+python -m thor_nvfp4.install --check-sources
+python -m thor_nvfp4.dense_check --compile-only
+python -m thor_nvfp4.dense_check
+```
+
+The numerical gate covers all six shape classes at M=1,7,129,512,608,1568,2048,2205 with deliberately
+different fused weight globals, plus five uniform-alpha hybrid shape profiles
+at those same sizes. It checks backend selection, pointwise-valid activation rounding, an
+independent FP64 GEMM reference driven by the native quantized input, repeated
+launches, and poisoned-output CUDA graph replay. It retains the 2%/.999 output-quality floor
+and separate 1% pairwise stability screen. This standalone gate allocates large
+FP64 reference matrices; allow several GiB of free GPU memory. It does not
+execute on the serving path.
+
+Full-model acceptance used the exact preetpatel checkpoint at 262144 context,
+confirmed the `THOR_DENSE_BACKEND ready` marker, checked health and a coherent
+437 answer for `19 * 23`, and benchmarked identical raw completion requests
+against the preserved CUTLASS control. Kernel compilation or a healthy HTTP
+endpoint alone is not sufficient evidence.
+
+## Dense tactic policy
+
+Serving precompiles three variants before graph capture: tile-broadcast alpha
+with N-tile 128 and 256, and per-column alpha with N-tile 128 for B/A.
+It selects 256 for `(N,K)=(5120,6144)` at every nonempty M and for
+other N-divisible-by-256 projections at M>=512. All remaining cases use 128,
+including padded B/A.
+This tile policy applies when the hybrid dispatcher selects CuTeDSL.
+
+The pinned scheduler uses 1568-token Mamba-aligned cache blocks with prefix
+caching enabled. A fresh 2176-token request therefore executes 1568 and 608
+token chunks. These actual call sizes are covered by the dispatch and GPU
+gates. Matched component measurements support tile256 for both chunks and
+uniform-alpha CUTLASS for the 1568-token chunk. The 608-token output projection
+keeps CuTeDSL because its eager full launch path is faster there.
+No serving-time tuning or first-launch compilation is permitted. The first
+successfully prepared layer prints `THOR_DENSE_BACKEND ready` with source,
+precision, scale semantics, and policy, independent of vLLM's early rank logger.
+
+Compare the accepted variants with `python -m thor_nvfp4.dense_bench`. It
+compiles N-tiles 128 and 256, excludes incomplete epilogue tiles,
+checks numerical output/repeats/graphs, then records seven shuffled rounds of
+20 CUDA-graph replays per compatible tactic. The 192 variant failed its first
+unrestricted check (17.3% RMSE); complete per-column alpha coverage is now a
+launch requirement. Production compilation and launch reject every tile except
+128 and 256. Tile 256 is excluded for B/A. Tile 64's small B/A savings did not
+justify another tile width.
+
+Two disposable Thor sweeps with the per-column epilogue agreed on the selected
+tile-width improvements. Median times
+from the repeat sweep, including activation packing and output slicing:
+
+| Projection | M | Tile 128 (µs) | Tile 256 (µs) |
+|---|---:|---:|---:|
+| gate/up | 2048 | 3003.3 | 2300.6 |
+| down | 2048 | 1663.8 | 1366.6 |
+| attention QKV | 2048 | 1317.8 | 1026.6 |
+| GDN QKV/Z | 2048 | 1473.5 | 1171.4 |
+| attention/GDN output | 2048 | 639.7 | 533.5 |
+| attention/GDN output | 1 | 51.35 | 39.07 |
+
+Weighted by the model's projection counts, these component timings initially
+implied 20.7% less dense-projection time at M=2048 and 1.2% at M=1. Scheduler
+tracing later showed that prefix-enabled serving actually splits the matched
+prompt into M=1568 and M=608, which produced the final policy above. The final
+whole-model medians were 1966.52 prompt tok/s and 10.24 decode tok/s, versus
+2021.0 and 8.94 for the old CUTLASS control. No clocks or power settings were
+altered. The cold CUDA helper build remains about 41 seconds and should be
+baked into the production image rather than paid at every fresh-container
+startup.

@@ -11,6 +11,8 @@ from thor_nvfp4.contract import SOURCE_SHA
 
 KERNEL_DIR = "kernelSrcs/nvfp4_moe_cutedsl/"
 SOURCES = {
+    "kernelSrcs/gemm_cutedsl/gemm_blackwell_nvfp4_ws.py": "a74e79be79a0b2e67f6432370ed8742a5c6cfaaabeee123f453a8ee3799b2cbd",
+    "kernelSrcs/gemm_cutedsl/common.py": "95983027908e8049216f947167817ec75a55659f729c7dbbd52582c9b7c43c51",
     KERNEL_DIR + "blockscaled_contiguous_gather_grouped_gemm_act_fusion.py": "9a1c08088b1614870c6e411eca2107875cdf35b1e54663e5011cff3ccc8f815d",
     KERNEL_DIR + "blockscaled_contiguous_grouped_gemm_finalize_fusion.py": "d441aff45d23eb043f993fb7f1e839473bdba38665d3a69732a69785021c95ba",
     KERNEL_DIR + "custom_pipeline.py": "6c15e7f4473a3e33c5b93f55e1a185f214ab15602b08f18f071e9d8bd1d46b39",
@@ -39,6 +41,9 @@ def patch_vllm(text):
 
 
 def adapt_python(name, text):
+    if name == "gemm_blackwell_nvfp4_ws.py":
+        from .dense_source import adapt_dense_source
+        return adapt_dense_source(text)
     # Keep helpers private to this package; no generic names added to sys.path.
     for module in ("moe_compat", "custom_pipeline", "cute_utils", "export_common",
                    "blockscaled_contiguous_gather_grouped_gemm_act_fusion",
@@ -60,6 +65,42 @@ def adapt_python(name, text):
         text = text.replace("    os.makedirs(args.output_dir, exist_ok=True)\n", "")
         text = text.replace(target, "    return compiled")
     return text
+
+
+def patch_dense_vllm(name, text):
+    from .dense_source import replace_once
+    marker = "# Thor dense NVFP4 integration"
+    if name == "linear":
+        old = "    config = NvFp4LinearLayerConfig()"
+        new = """    # Thor dense NVFP4 integration
+    from thor_nvfp4.dense_adapter import select_dense_kernel
+    thor_kernel = select_dense_kernel(use_a16)
+    if thor_kernel is not None:
+        return thor_kernel
+    config = NvFp4LinearLayerConfig()"""
+    elif name == "ct":
+        old = "    def process_weights_after_loading(self, layer: torch.nn.Module) -> None:\n        # Rename CT checkpoint names"
+        new = """    def process_weights_after_loading(self, layer: torch.nn.Module) -> None:
+        # Thor dense NVFP4 integration
+        from thor_nvfp4.dense_adapter import prepare_dense_method
+        if prepare_dense_method(self, layer, divisors=True):
+            return
+        # Rename CT checkpoint names"""
+    elif name == "modelopt":
+        old = "    def process_weights_after_loading(self, layer) -> None:\n        self.fmt.pre_process(layer)"
+        new = """    def process_weights_after_loading(self, layer) -> None:
+        # Thor dense NVFP4 integration
+        from thor_nvfp4.dense_adapter import prepare_dense_method
+        if prepare_dense_method(self, layer, divisors=False):
+            return
+        self.fmt.pre_process(layer)"""
+    else:
+        raise ValueError(f"Unknown dense patch target: {name}")
+    if marker in text:
+        if text.count(marker) != 1 or text.count(new) != 1:
+            raise ValueError("Malformed or duplicate Thor dense integration")
+        return text
+    return replace_once(text, old, new)
 
 
 def device_body(text):
@@ -106,7 +147,11 @@ def main():
     if args.vllm_root is None:
         parser.error("--vllm-root is required for installation")
     target = args.vllm_root / "model_executor/layers/quantization/modelopt.py"
-    patched = patch_vllm(target.read_text())
+    patched = patch_dense_vllm("modelopt", patch_vllm(target.read_text()))
+    linear_target = args.vllm_root / "model_executor/kernels/linear/__init__.py"
+    ct_target = args.vllm_root / "model_executor/layers/quantization/compressed_tensors/schemes/compressed_tensors_w4a4_nvfp4.py"
+    linear_patched = patch_dense_vllm("linear", linear_target.read_text())
+    ct_patched = patch_dense_vllm("ct", ct_target.read_text())
     root = Path(__file__).parent / "nvidia"
     original = root / "original"
     original.mkdir(parents=True, exist_ok=True)
@@ -114,13 +159,16 @@ def main():
         name = Path(path).name
         (original / name).write_text(source)
         if name.endswith(".py"):
-            (root / name).write_text(adapt_python(name, source))
+            installed_name = "dense_common.py" if path == "kernelSrcs/gemm_cutedsl/common.py" else name
+            (root / installed_name).write_text(adapt_python(name, source))
         elif name.endswith(".cu"):
             (root / (name + ".inc")).write_text(device_body(source))
         else:
             (root / name).write_text(source)
     (root / "__init__.py").write_text('"""NVIDIA source adapted at the pinned revision."""\n')
     target.write_text(patched)
+    linear_target.write_text(linear_patched)
+    ct_target.write_text(ct_patched)
 
 
 if __name__ == "__main__":
