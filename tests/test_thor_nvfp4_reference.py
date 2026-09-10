@@ -14,14 +14,41 @@ except ImportError:
     torch = None
 
 if torch is not None:
-    from thor_nvfp4.adapter import swizzle_scales
+    from thor_nvfp4.adapter import plain_parameter, swizzle_scales
     from thor_nvfp4.check import quant_dequant, unpack
     from thor_nvfp4 import check
     from thor_nvfp4.diagnose import GateCollector, require_quality, require_repeat_stable, unswizzle_scales, validate_input_rounding, validate_layout
+    try:
+        import vllm.model_executor.parameter as vllm_parameter
+    except ImportError:
+        vllm_parameter = None
 
 
 @unittest.skipIf(torch is None, "Requires Torch; runnable on CPU inside the candidate image")
 class ThorReferenceTests(unittest.TestCase):
+    @unittest.skipIf(
+        torch is None or vllm_parameter is None,
+        "Requires the candidate image's vLLM parameter classes",
+    )
+    def test_plain_parameter_strips_vllm_subclass_without_copying_storage(self):
+        with (
+            patch.object(vllm_parameter, "get_tensor_model_parallel_rank", return_value=0),
+            patch.object(
+                vllm_parameter,
+                "get_tensor_model_parallel_world_size",
+                return_value=1,
+            ),
+        ):
+            source = vllm_parameter.ModelWeightParameter(
+                data=torch.arange(24, dtype=torch.uint8).reshape(2, 3, 4),
+                input_dim=1,
+                output_dim=2,
+                weight_loader=lambda *args: None,
+            )
+        result = plain_parameter(source)
+        self.assertIs(type(result), torch.nn.Parameter)
+        self.assertEqual(result.data_ptr(), source.data_ptr())
+
     def test_diagnostic_collector_keeps_later_failures_and_then_raises(self):
         gates = GateCollector(collect_failures=True)
         def fail(message):

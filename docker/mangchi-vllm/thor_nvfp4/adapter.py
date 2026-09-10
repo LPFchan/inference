@@ -15,6 +15,12 @@ def swizzle_scales(scales):
             .permute(0, 1, 4, 3, 2, 5).contiguous())
 
 
+def plain_parameter(value):
+    """Register a tensor without retaining vLLM parameter-subclass behavior."""
+    plain = value.as_subclass(torch.Tensor)
+    return torch.nn.Parameter(plain, requires_grad=False)
+
+
 def prepare_weights(layer):
     expected = {
         "w13_weight": ((EXPERTS, 2 * INTERMEDIATE, HIDDEN // 2), torch.uint8),
@@ -55,7 +61,7 @@ def prepare_weights(layer):
     names = ["w13_weight", "w2_weight", "w13_weight_scale", "w2_weight_scale",
              "w13_weight_scale_2", "w13_input_scale", "w2_weight_scale_2", "w2_input_scale"]
     for name, value in zip(names, values):
-        setattr(layer, name, torch.nn.Parameter(value, requires_grad=False))
+        setattr(layer, name, plain_parameter(value))
     return [getattr(layer, name) for name in names]
 
 
