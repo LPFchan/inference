@@ -81,6 +81,22 @@ def test_load_unknown_model_404(mgr):
     assert e.value.status_code == 404
 
 
+def test_container_exit_detail_captures_state_and_logs(mgr, monkeypatch, caplog):
+    calls = []
+
+    def fake_docker(args):
+        calls.append(args)
+        if args[0] == "inspect":
+            return 0, 'exit=1 oom=false error=""'
+        return 0, "fatal startup error"
+
+    monkeypatch.setattr(mgr, "_docker", fake_docker)
+
+    assert mgr._container_exit_detail("model-container") == 'exit=1 oom=false error=""'
+    assert calls[1] == ["logs", "--tail", "80", "model-container"]
+    assert "fatal startup error" in caplog.text
+
+
 def test_load_within_budget(mgr):
     out = run(mgr.load("small"))
     assert out["status"] == "loaded"

@@ -218,6 +218,23 @@ class ResidencyManager:
         rc, out = self._docker(["inspect", "-f", "{{.State.Running}}", name])
         return rc == 0 and out == "true"
 
+    def _container_exit_detail(self, name: str) -> str:
+        """Capture a stopped container's real exit state before cleanup."""
+        rc, state = self._docker(
+            [
+                "inspect",
+                "-f",
+                "exit={{.State.ExitCode}} oom={{.State.OOMKilled}} error={{json .State.Error}}",
+                name,
+            ]
+        )
+        if rc != 0:
+            return "container state unavailable"
+        logs_rc, logs = self._docker(["logs", "--tail", "80", name])
+        if logs_rc == 0 and logs:
+            logger.error("final logs for failed container %s:\n%s", name, logs)
+        return state
+
     def _stop_container(self, name: str, timeout_s: int) -> None:
         # docker stop sends SIGTERM then SIGKILL after the timeout — graceful
         # first, matching the Thor's SIGKILL-avoidance need.
@@ -435,9 +452,13 @@ class ResidencyManager:
                 now = time.time()
                 if now >= next_health_probe:
                     if not self._group_alive(r):
+                        if r.container:
+                            exit_detail = self._container_exit_detail(r.container)
+                        else:
+                            exit_detail = f"exit={r.process.returncode}"
                         raise HTTPException(
                             status_code=500,
-                            detail=f"vLLM for '{r.name}' exited during startup (rc={r.process.returncode})",
+                            detail=f"vLLM for '{r.name}' exited during startup ({exit_detail})",
                         )
                     try:
                         resp = await client.get(url)
