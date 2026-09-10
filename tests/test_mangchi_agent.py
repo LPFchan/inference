@@ -209,9 +209,8 @@ def test_specs_file_parses():
     assert "qwen3.8-flash-next-uncensored-nvfp4" in specs
     flash = specs["qwen3.8-flash-next-uncensored-nvfp4"]
     dense = specs["qwen3.8-27b-uncensored-nvfp4"]
-    expected_image = "mangchi-vllm:thor-dense-candidate-v6-vision-minfa"
-    assert dense.vllm_docker_image == expected_image
-    assert flash.vllm_docker_image == expected_image
+    assert dense.vllm_docker_image == "mangchi-vllm:thor-dense-candidate-v7-memorysafe"
+    assert flash.vllm_docker_image == "mangchi-vllm:thor-dense-candidate-v6-vision-minfa"
     for spec in (dense, flash):
         assert "--enable-per-request-metrics" in spec.serve_args
         assert "--enable-prompt-tokens-details" in spec.serve_args
@@ -255,6 +254,9 @@ def test_qsa_fp8_canary_build_is_pinned_and_thor_aware():
     assert "VLLM_FLASH_ATTN_SHA=506341a143fcabd4bb79052a7605ada727d6b3f5" in dockerfile
     assert "id=mangchi-vllm-build,target=/build/vllm/build" in dockerfile
     assert "find build -type f -name CMakeCache.txt -delete" in dockerfile
+    assert "target=/build/vllm/rust/target" in dockerfile
+    assert "target=/root/.cargo/registry" in dockerfile
+    assert "target=/root/.cargo/git" in dockerfile
     assert "VLLM_FLASH_ATTN_SRC_DIR=/build/vllm-flash-attn" in dockerfile
     assert "git -C vllm-flash-attn submodule update --init --depth 1 csrc/cutlass" in dockerfile
     assert "submodule update --init --recursive" not in dockerfile
@@ -500,6 +502,31 @@ def test_status_reports_live_host_memory(mgr):
     status = mgr.status()
     assert status["host_available_gib"] == 42.12
     assert status["host_memory_floor_gib"] == 12
+
+
+def test_status_reports_lowest_host_memory_seen_during_startup(mgr, monkeypatch):
+    resident = agent.Resident(
+        name="small", spec=_specs()["small"], process=FakeProc(), port=8001
+    )
+    mgr.resident["small"] = resident
+    mgr._available_gib = lambda: 42.125
+
+    class HealthyClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def get(self, _url):
+            return type("Response", (), {"status_code": 200})()
+
+    monkeypatch.setattr(mgr, "_group_alive", lambda _resident: True)
+    monkeypatch.setattr(agent.httpx, "AsyncClient", lambda **_kwargs: HealthyClient())
+    run(agent.ResidencyManager._wait_healthy(mgr, resident))
+
+    status = mgr.status("small")
+    assert status["min_host_available_gib"] == 42.12
 
 
 def test_unconfirmed_group_death_retains_reservation(mgr, monkeypatch):

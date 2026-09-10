@@ -111,6 +111,7 @@ class Resident:
     status: str = "loading"
     started_at: float = field(default_factory=time.time)
     last_used: float = field(default_factory=time.time)
+    min_host_available_gib: Optional[float] = None
 
 
 def load_specs(path: str = SPECS_PATH) -> dict[str, LaunchSpec]:
@@ -399,6 +400,8 @@ class ResidencyManager:
                         status_code=503,
                         detail=f"cannot verify host memory safety while loading '{r.name}': {exc}",
                     ) from exc
+                if r.min_host_available_gib is None or available < r.min_host_available_gib:
+                    r.min_host_available_gib = available
                 if available < self.memory_floor_gib:
                     logger.error(
                         "aborting %s startup: host available memory %.2f GiB is below %.2f GiB floor",
@@ -562,6 +565,11 @@ class ResidencyManager:
                 "status": r.status,
                 "pinned": r.spec.pinned,
                 "resident_gb": r.spec.resident_gb,
+                "min_host_available_gib": (
+                    round(r.min_host_available_gib, 2)
+                    if r.min_host_available_gib is not None
+                    else None
+                ),
                 "uptime_s": round(time.time() - r.started_at, 1),
                 "url": f"http://127.0.0.1:{r.port}/v1",
             }
