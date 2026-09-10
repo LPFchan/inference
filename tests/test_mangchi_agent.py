@@ -188,19 +188,24 @@ def test_specs_file_parses():
     assert "qwen3.8-flash-next-uncensored-nvfp4" in specs
     flash = specs["qwen3.8-flash-next-uncensored-nvfp4"]
     dense = specs["qwen3.8-27b-uncensored-nvfp4"]
-    assert dense.vllm_docker_image == "mangchi-vllm:thor-qsa-fp8-5fd5dd5"
-    assert flash.vllm_docker_image == "mangchi-vllm:thor-qsa-fp8-5fd5dd5"
+    expected_image = "mangchi-vllm:thor-dense-candidate-v6-vision-minfa"
+    assert dense.vllm_docker_image == expected_image
+    assert flash.vllm_docker_image == expected_image
     for spec in (dense, flash):
         assert "--enable-per-request-metrics" in spec.serve_args
         assert "--enable-prompt-tokens-details" in spec.serve_args
     assert flash.env.get("VLLM_PLE_MMAP") == "1"
+    assert flash.env.get("VLLM_THOR_CUTEDSL_MOE") == "1"
+    assert dense.env.get("VLLM_THOR_CUTEDSL_DENSE") == "1"
     assert "VLLM_PLE_CPU_OFFLOAD" not in flash.env
     assert "--enforce-eager" in flash.serve_args
     assert "--no-enable-flashinfer-autotune" in flash.serve_args
     assert flash.serve_args[flash.serve_args.index("--max-model-len") + 1] == "262144"
     assert flash.serve_args[flash.serve_args.index("--kv-cache-dtype") + 1] == "fp8"
-    assert flash.gpu_mem_util == 0.67
-    assert flash.resident_gb == 82
+    assert flash.serve_args[flash.serve_args.index("--max-num-batched-tokens") + 1] == "8192"
+    assert dense.serve_args[dense.serve_args.index("--max-num-batched-tokens") + 1] == "2048"
+    assert flash.gpu_mem_util == 0.68
+    assert flash.resident_gb == 83
     assert flash.resident_gb > specs["qwen3.8-27b-uncensored-nvfp4"].resident_gb
 
 
@@ -260,8 +265,8 @@ def test_docker_launch_command_shape():
     joined = " ".join(cmd)
     assert "-p 8001:8001" in joined
     assert ":ro" in joined
-    assert "vllm serve /models/qwen3.8-27b-uncensored" in joined
-    assert "--gpu-memory-utilization 0.22" in joined
+    assert "vllm serve /models/qwen3.8-27b-uncensored-w4a4-preetpatel" in joined
+    assert "--gpu-memory-utilization 0.5" in joined
 
 
 def test_container_resident_alive_and_reap(mgr, monkeypatch):

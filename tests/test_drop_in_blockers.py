@@ -922,15 +922,18 @@ class DropInBlockerTests(unittest.TestCase):
         self.assertIn("*.egg-info/", dockerignore)
 
     def test_projector_and_multimodal_capability_agree(self):
-        """A projector and a multimodal capability have to come as a pair.
+        """A llama.cpp projector and multimodal capability come as a pair.
 
         An mmproj on a model that does not declare multimodal loads a projector
         into VRAM that nothing will ever use. A multimodal declaration without
         one advertises image input the backend cannot serve, so requests fail
-        only once an image is actually sent.
+        only once an image is actually sent. Remote vLLM checkpoints bundle
+        their vision projector and therefore do not carry a separate mmproj.
         """
         data = json.loads((ROOT / "etc" / "models.grimoire.json").read_text())
         for name, cfg in data["models"].items():
+            if cfg.get("backend") == "vllm-remote":
+                continue
             declares_images = bool({"multimodal", "vision"} & set(cfg.get("capabilities") or []))
             carries_projector = bool(cfg.get("mmproj"))
             self.assertEqual(

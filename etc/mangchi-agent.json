@@ -1,30 +1,43 @@
 {
   "models": {
     "qwen3.8-27b-uncensored-nvfp4": {
-      "model_path": "/models/qwen3.8-27b-uncensored",
-      "model_path_host": "/home/yeowool/models/nvfp4/qwen3.8-27b-uncensored",
-      "resident_gb": 30,
-      "gpu_mem_util": 0.22,
+      "model_path": "/models/qwen3.8-27b-uncensored-w4a4-preetpatel",
+      "model_path_host": "/home/yeowool/models/nvfp4/qwen3.8-27b-uncensored-w4a4-preetpatel",
+      "resident_gb": 62,
+      "gpu_mem_util": 0.5,
       "port": 8001,
       "pinned": false,
-      "vllm_docker_image": "mangchi-vllm:thor-qsa-fp8-5fd5dd5",
+      "vllm_docker_image": "mangchi-vllm:thor-dense-candidate-v6-vision-minfa",
       "models_dir_host": "/home/yeowool/models/nvfp4",
+      "env": {
+        "VLLM_THOR_CUTEDSL_DENSE": "1",
+        "VLLM_USE_FLASHINFER_SAMPLER": "0"
+      },
       "serve_args": [
         "--enable-per-request-metrics",
         "--enable-prompt-tokens-details",
-        "--max-model-len", "32768"
+        "--max-model-len", "262144",
+        "--kv-cache-dtype", "fp8",
+        "--max-num-seqs", "1",
+        "--max-num-batched-tokens", "2048",
+        "--no-enable-flashinfer-autotune",
+        "--enforce-eager",
+        "--limit-mm-per-prompt", "{\"image\":2,\"video\":0}",
+        "--mm-processor-kwargs", "{\"max_pixels\":2097152}",
+        "--reasoning-parser", "qwen3"
       ]
     },
     "qwen3.8-flash-next-uncensored-nvfp4": {
-      "model_path": "/models/qwen3.8-flash-next-uncensored",
-      "model_path_host": "/home/yeowool/models/nvfp4/qwen3.8-flash-next-uncensored",
-      "resident_gb": 82,
-      "gpu_mem_util": 0.67,
+      "model_path": "/models/qwen3.8-flash-next-abliterated-w4a4",
+      "model_path_host": "/home/yeowool/models/nvfp4/qwen3.8-flash-next-abliterated-w4a4",
+      "resident_gb": 83,
+      "gpu_mem_util": 0.68,
       "port": 8002,
       "pinned": false,
-      "vllm_docker_image": "mangchi-vllm:thor-qsa-fp8-5fd5dd5",
+      "vllm_docker_image": "mangchi-vllm:thor-dense-candidate-v6-vision-minfa",
       "models_dir_host": "/home/yeowool/models/nvfp4",
       "env": {
+        "VLLM_THOR_CUTEDSL_MOE": "1",
         "VLLM_PLE_MMAP": "1",
         "VLLM_PLE_MMAP_PREWARM": "0"
       },
@@ -34,7 +47,8 @@
         "--max-model-len", "262144",
         "--kv-cache-dtype", "fp8",
         "--max-num-seqs", "1",
-        "--max-num-batched-tokens", "2048",
+        "--max-num-batched-tokens", "8192",
+        "--moe-backend", "auto",
         "--no-enable-flashinfer-autotune",
         "--enforce-eager"
       ]

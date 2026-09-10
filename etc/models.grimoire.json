@@ -5,17 +5,18 @@
       "remote-agent-url": "http://mangchi.lost.plus:9700",
       "remote-model-id": "qwen3.8-27b-uncensored-nvfp4",
       "remote-url": "http://mangchi.lost.plus:8001",
-      "backend-model-id": "/models/qwen3.8-27b-uncensored",
+      "backend-model-id": "/models/qwen3.8-27b-uncensored-w4a4-preetpatel",
       "family": "qwen",
       "capabilities": [
-        "completion"
+        "completion",
+        "multimodal"
       ],
       "cost": {
         "input": 0.33,
         "output": 3.25,
         "cache_read": 0.1
       },
-      "ctx-size": 32768,
+      "ctx-size": 262144,
       "startup-timeout": 900
     },
     "qwen3.8-flash-next-uncensored-nvfp4": {
@@ -23,7 +24,7 @@
       "remote-agent-url": "http://mangchi.lost.plus:9700",
       "remote-model-id": "qwen3.8-flash-next-uncensored-nvfp4",
       "remote-url": "http://mangchi.lost.plus:8002",
-      "backend-model-id": "/models/qwen3.8-flash-next-uncensored",
+      "backend-model-id": "/models/qwen3.8-flash-next-abliterated-w4a4",
       "family": "qwen",
       "capabilities": [
         "completion"
