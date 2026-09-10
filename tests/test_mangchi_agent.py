@@ -204,6 +204,7 @@ def test_status_reports_loading_until_health_check_completes(mgr, monkeypatch):
 
 
 def test_specs_file_parses():
+    assert agent.HOST_MEMORY_FLOOR_GIB == 6
     specs = agent.load_specs()
     assert "qwen3.8-27b-uncensored-nvfp4" in specs
     assert "qwen3.8-flash-next-uncensored-nvfp4" in specs

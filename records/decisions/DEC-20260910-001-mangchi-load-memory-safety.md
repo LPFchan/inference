@@ -16,7 +16,7 @@ Mangchi must never rely on Linux's host OOM killer to stop an oversized or
 temporarily memory-hungry vLLM load. A load that approaches the machine's safe
 memory floor must be stopped by the residency agent and reported as a normal,
 actionable load failure. The operating system and unrelated services must stay
-responsive.
+responsive. The operator-set host-memory floor is 6 GiB.
 
 The 27B and Flash-Next models must be able to remain loaded simultaneously, not
 merely replace one another. Loading and unloading them must work in every order.
@@ -53,6 +53,12 @@ creates prepared packed and swizzled tensors before the source tensors are
 released. These allocations all consume Thor's shared physical RAM. The
 temporary peak is therefore materially larger than the final 31 GiB residency
 estimate.
+
+After reducing 27B to a 100,000-token FP8 KV profile, a guarded 27B-first
+co-residency test stopped Flash-Next at the original 12 GiB floor with 11.77 GiB
+available. The host stayed responsive and the already-loaded 27B model remained
+healthy. The operator subsequently reduced the floor to 6 GiB for the next
+co-residency test.
 
 Docker's ordinary memory limit is not a complete safety boundary on unified-
 memory NVIDIA systems: CUDA allocations may not be charged to the container's
@@ -114,6 +120,6 @@ way to recover from a slow or unsafe load.
 - Simultaneous residency in both load orders, both unload orders, cancellation
   during load, cleanup after failure, and host-memory-floor enforcement become
   deployment acceptance tests.
-- If both models cannot reach co-residency within the safety floor, the loader
-  or its prepared checkpoint format must be changed; lowering the safety floor
-  or accepting host OOM is not a valid workaround.
+- If both models cannot reach co-residency above the 6 GiB floor, the loader or
+  its prepared checkpoint format must be changed; accepting host OOM is not a
+  valid workaround.

@@ -54,7 +54,7 @@ STOP_TIMEOUT_S = float(os.environ.get("MANGCHI_AGENT_STOP_TIMEOUT_S", "60"))
 # CUDA allocations on Thor share physical RAM with the host and are not fully
 # visible to Docker's memory cgroup. Keep enough host memory available for the
 # kernel, agent, and an orderly vLLM shutdown.
-HOST_MEMORY_FLOOR_GIB = float(os.environ.get("MANGCHI_AGENT_HOST_MEMORY_FLOOR_GIB", "12"))
+HOST_MEMORY_FLOOR_GIB = float(os.environ.get("MANGCHI_AGENT_HOST_MEMORY_FLOOR_GIB", "6"))
 HOST_MEMORY_POLL_S = float(os.environ.get("MANGCHI_AGENT_HOST_MEMORY_POLL_S", "0.25"))
 STARTUP_ABORT_TIMEOUT_S = int(os.environ.get("MANGCHI_AGENT_STARTUP_ABORT_TIMEOUT_S", "3"))
 
