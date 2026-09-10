@@ -1,0 +1,86 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -5,7 +5,14 @@ set(CMAKE_CXX_STANDARD 20)
+ set(CMAKE_CXX_EXTENSIONS OFF)
+
+ set(FA2_ENABLED ON)
+-set(FA3_ENABLED ON)
++option(VLLM_FLASH_ATTN_THOR_VISION_ONLY
++       "Build only the BF16 FA2 kernels used by Mangchi's Thor vision models"
++       OFF)
++if (VLLM_FLASH_ATTN_THOR_VISION_ONLY)
++    set(FA3_ENABLED OFF)
++else()
++    set(FA3_ENABLED ON)
++endif()
+
+ # CUDA by default, can be overridden by using -DVLLM_TARGET_DEVICE=... (used by setup.py)
+ set(VLLM_TARGET_DEVICE "cuda" CACHE STRING "Target device backend for vLLM")
+@@ -133,7 +140,16 @@ string(REPLACE "-O2" "-O3" CMAKE_CUDA_FLAGS_RELWITHDEBINFO "${CMAKE_CUDA_FLAGS_R
+ #
+
+ if (FA2_ENABLED)
+-    file(GLOB FA2_GEN_SRCS "csrc/flash_attn/src/flash_fwd_*.cu")
++    if (VLLM_FLASH_ATTN_THOR_VISION_ONLY)
++        file(GLOB FA2_GEN_SRCS
++            "csrc/flash_attn/src/flash_fwd_*hdim96_bf16*.cu"
++            "csrc/flash_attn/src/flash_fwd_*hdim256_bf16*.cu"
++            "csrc/flash_attn/src/flash_fwd_sparse_hdim128_bf16*.cu")
++        message(STATUS
++            "Mangchi Thor vision build: BF16 FA2 hdim 96/256 plus sparse hdim 128; FA3 disabled")
++    else()
++        file(GLOB FA2_GEN_SRCS "csrc/flash_attn/src/flash_fwd_*.cu")
++    endif()
+
+     # For CUDA we set the architectures on a per file basis
+     if (VLLM_GPU_LANG STREQUAL "CUDA")
+@@ -178,6 +194,10 @@ if (FA2_ENABLED)
+         # TORCH_TARGET_VERSION pins torch 2.10+ and bans unstable usage
+         TORCH_TARGET_VERSION=0x020A000000000000ULL
+     )
++    if (VLLM_FLASH_ATTN_THOR_VISION_ONLY)
++        target_compile_definitions(_vllm_fa2_C PRIVATE
++            VLLM_FLASH_ATTN_THOR_VISION_ONLY)
++    endif()
+
+     # Pin the C++ standard on the target itself. When flash-attn is built as a
+     # vLLM subproject (FetchContent), the directory-level CMAKE_CXX_STANDARD set
+diff --git a/csrc/flash_attn/src/static_switch.h b/csrc/flash_attn/src/static_switch.h
+--- a/csrc/flash_attn/src/static_switch.h
++++ b/csrc/flash_attn/src/static_switch.h
+@@ -76,6 +76,29 @@
+   #define LOCAL_SWITCH BOOL_SWITCH
+ #endif
+
++#ifdef VLLM_FLASH_ATTN_THOR_VISION_ONLY
++#define FP16_SWITCH(COND, ...)                                      \
++  [&] {                                                             \
++    STD_TORCH_CHECK(!(COND),                                        \
++                    "This Thor vision build supports BF16 only.");  \
++    using elem_type = cutlass::bfloat16_t;                           \
++    return __VA_ARGS__();                                           \
++  }()
++
++#define HEADDIM_SWITCH(HEADDIM, ...)                                    \
++  [&] {                                                                \
++    if ((HEADDIM) > 64 && (HEADDIM) <= 96) {                           \
++      constexpr static int kHeadDim = 96;                              \
++      return __VA_ARGS__();                                            \
++    } else if ((HEADDIM) > 192 && (HEADDIM) <= 256) {                  \
++      constexpr static int kHeadDim = 256;                             \
++      return __VA_ARGS__();                                            \
++    }                                                                  \
++    STD_TORCH_CHECK(false,                                             \
++                    "This Thor vision build supports head dimensions " \
++                    "65-96 and 193-256 only.");                        \
++  }()
++#else
+ #define FP16_SWITCH(COND, ...)               \
+   [&] {                                      \
+     if (COND) {                              \
+@@ -109,3 +132,4 @@
+       return __VA_ARGS__();                \
+     }                                      \
+   }()
++#endif

@@ -101,13 +101,15 @@ adapter and telemetry edits reuse the expensive CUDA layer. Persist or bake the
 exact SM110 Torch, CuTeDSL, Triton, and FlashInfer JIT artifacts used by the two
 accepted models.
 
-After both model paths are stable, audit a minimal source build rather than
-removing extensions by file size alone. FA3 is unused on SM110 and can be
-removed. FA2 is required by the current vision encoder; either retain only the
-BF16 head-size variants used by these checkpoints, or remove FA2 only after an
-operator decision to run `--language-model-only`. Remove other quant/kernel
-families only after import, symbol, startup, text, vision, 262K-context, and
-rollback tests prove that neither target model reaches them.
+The first safe reduction keeps vision: retain FA2 BF16 head-size 96 and 256,
+plus BF16 sparse head-size 128, and remove FA3 because it cannot run on SM110.
+Unsupported FA2 dtypes and head sizes fail explicitly. Do not remove other
+quant/kernel families until import, symbol, startup, text, vision, 262K-context,
+and rollback tests prove that neither target model reaches them. The SM110 build
+also skips external FA3, FlashMLA, FlashKDA, DeepGEMM, QuTLASS, FMHA-SM100, and
+Triton-MLIR FA4 targets because their own configure checks reject SM110; keep
+the core stable-ABI CUDA/MoE extensions, FA2, Triton kernels, CUTLASS, and the
+separately installed FlashInfer and CuTeDSL paths used by the accepted models.
 
 ## Backlog (Future Interest)
 

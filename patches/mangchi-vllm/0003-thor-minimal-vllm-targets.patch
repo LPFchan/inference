@@ -1,0 +1,62 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -29,6 +29,10 @@
+ endif()
+
+
++option(VLLM_THOR_MINIMAL_BUILD
++       "Skip external CUDA projects that do not support SM110"
++       OFF)
++
+ # CUDA by default, can be overridden by using -DVLLM_TARGET_DEVICE=... (used by setup.py)
+ set(VLLM_TARGET_DEVICE "cuda" CACHE STRING "Target device backend for vLLM")
+ message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
+@@ -1555,12 +1559,14 @@
+
+ # For CUDA we also build and ship some external projects.
+ if (VLLM_GPU_LANG STREQUAL "CUDA")
+-    include(cmake/external_projects/deepgemm.cmake)
+-    include(cmake/external_projects/fmha_sm100.cmake)
+-    include(cmake/external_projects/flashmla.cmake)
+-    include(cmake/external_projects/flashkda.cmake)
+-    include(cmake/external_projects/qutlass.cmake)
+-    include(cmake/external_projects/tml_fa4.cmake)
++    if (NOT VLLM_THOR_MINIMAL_BUILD)
++        include(cmake/external_projects/deepgemm.cmake)
++        include(cmake/external_projects/fmha_sm100.cmake)
++        include(cmake/external_projects/flashmla.cmake)
++        include(cmake/external_projects/flashkda.cmake)
++        include(cmake/external_projects/qutlass.cmake)
++        include(cmake/external_projects/tml_fa4.cmake)
++    endif()
+
+     # vllm-flash-attn should be last as it overwrites some CMake functions
+     include(cmake/external_projects/vllm_flash_attn.cmake)
+diff --git a/setup.py b/setup.py
+--- a/setup.py
++++ b/setup.py
+@@ -1413,6 +1413,23 @@
+         ext_modules.append(CMakeExtension(name="vllm._C_stable_libtorch"))
+         ext_modules.append(CMakeExtension(name="vllm._moe_C_stable_libtorch"))
+
++if os.getenv("VLLM_THOR_MINIMAL_BUILD") == "1":
++    unsupported_on_sm110 = {
++        "vllm.vllm_flash_attn._vllm_fa3_C",
++        "vllm._flashmla_C",
++        "vllm._flashmla_extension_C",
++        "vllm._flashkda_C",
++        "vllm._deep_gemm_C",
++        "vllm._qutlass_C",
++        "vllm.fmha_sm100",
++        "vllm.tml_fa4",
++    }
++    ext_modules = [
++        extension
++        for extension in ext_modules
++        if extension.name not in unsupported_on_sm110
++    ]
++
+ package_data = {
+     "vllm": [
+         "py.typed",

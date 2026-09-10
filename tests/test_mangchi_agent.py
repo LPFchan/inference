@@ -211,10 +211,33 @@ def test_qsa_fp8_canary_build_is_pinned_and_thor_aware():
     ).read_text()
     thor_patch = (ROOT / "docker/mangchi-vllm/patch_thor_qsa.py").read_text()
     ple_patch = (ROOT / "docker/mangchi-vllm/vllm_ple_mmap.py").read_text()
+    flash_attention_patch = (
+        ROOT / "patches/mangchi-vllm/0002-thor-vision-flash-attention.patch"
+    ).read_text()
+    minimal_targets_patch = (
+        ROOT / "patches/mangchi-vllm/0003-thor-minimal-vllm-targets.patch"
+    ).read_text()
 
     assert "VLLM_REF=refs/pull/55557/head" in dockerfile
     assert "VLLM_SHA=5fd5dd5cf4ac8e9f09b6fae3f3603e9a3cb88aaa" in dockerfile
     assert 'test "$(git -C vllm rev-parse HEAD)" = "${VLLM_SHA}"' in dockerfile
+    assert "VLLM_FLASH_ATTN_SHA=506341a143fcabd4bb79052a7605ada727d6b3f5" in dockerfile
+    assert "id=mangchi-vllm-build,target=/build/vllm/build" in dockerfile
+    assert "VLLM_FLASH_ATTN_SRC_DIR=/build/vllm-flash-attn" in dockerfile
+    assert "git -C vllm-flash-attn submodule update --init --depth 1 csrc/cutlass" in dockerfile
+    assert "submodule update --init --recursive" not in dockerfile
+    assert "VLLM_THOR_MINIMAL_BUILD=1" in dockerfile
+    assert "-DVLLM_THOR_MINIMAL_BUILD=ON" in dockerfile
+    assert "-DVLLM_FLASH_ATTN_THOR_VISION_ONLY=ON" in dockerfile
+    assert "git -C vllm-flash-attn apply --check" in dockerfile
+    assert "git -C vllm apply --check /tmp/thor-minimal-vllm-targets.patch" in dockerfile
+    assert '"csrc/flash_attn/src/flash_fwd_*hdim96_bf16*.cu"' in flash_attention_patch
+    assert '"csrc/flash_attn/src/flash_fwd_*hdim256_bf16*.cu"' in flash_attention_patch
+    assert '"csrc/flash_attn/src/flash_fwd_sparse_hdim128_bf16*.cu"' in flash_attention_patch
+    assert "set(FA3_ENABLED OFF)" in flash_attention_patch
+    assert "This Thor vision build supports BF16 only." in flash_attention_patch
+    assert "if (NOT VLLM_THOR_MINIMAL_BUILD)" in minimal_targets_patch
+    assert 'os.getenv("VLLM_THOR_MINIMAL_BUILD") == "1"' in minimal_targets_patch
     assert "git apply --check /tmp/vllm-live-timings.patch" in dockerfile
     assert 'prefill_progress: tuple[int, int, int] | None = None' in metrics_patch
     assert '"prompt_progress": {' in metrics_patch

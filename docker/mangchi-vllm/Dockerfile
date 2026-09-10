@@ -2,7 +2,9 @@
 # Adapted from RobotFlow-Labs/anima-vllm-thor (Apache-2.0). The vLLM source is
 # pinned to PR #55557, which contains current main plus FP8 main-QSA KV support.
 # Built on NVIDIA's Thor base (CUDA 13.0, sm_110a kernels).
-# Build: ~60-75 min cold, needs most of the 128GB unified memory free. Don't build while serving.
+# Native wheel: ~21 min measured on Thor; a cold image build needs most of the
+# 128GB unified memory free. Persistent BuildKit caches speed up later rebuilds.
+# Don't build while serving.
 #   DOCKER_BUILDKIT=1 docker build -t mangchi-vllm:thor-qsa-fp8-5fd5dd5 \
 #     -f docker/mangchi-vllm/Dockerfile .
 FROM ghcr.io/nvidia-ai-iot/vllm:latest-jetson-thor
@@ -35,10 +37,28 @@ RUN git init vllm \
  && git -C vllm fetch --depth 1 origin "${VLLM_REF}" \
  && git -C vllm checkout --detach FETCH_HEAD \
  && test "$(git -C vllm rev-parse HEAD)" = "${VLLM_SHA}"
+COPY patches/mangchi-vllm/0003-thor-minimal-vllm-targets.patch /tmp/thor-minimal-vllm-targets.patch
+RUN git -C vllm apply --check /tmp/thor-minimal-vllm-targets.patch \
+ && git -C vllm apply /tmp/thor-minimal-vllm-targets.patch
+ARG VLLM_FLASH_ATTN_SHA=506341a143fcabd4bb79052a7605ada727d6b3f5
+RUN git init vllm-flash-attn \
+ && git -C vllm-flash-attn remote add origin https://github.com/vllm-project/flash-attention.git \
+ && git -C vllm-flash-attn fetch --depth 1 origin "${VLLM_FLASH_ATTN_SHA}" \
+ && git -C vllm-flash-attn checkout --detach FETCH_HEAD \
+ && test "$(git -C vllm-flash-attn rev-parse HEAD)" = "${VLLM_FLASH_ATTN_SHA}" \
+ && git -C vllm-flash-attn submodule update --init --depth 1 csrc/cutlass
+COPY patches/mangchi-vllm/0002-thor-vision-flash-attention.patch /tmp/thor-vision-flash-attention.patch
+RUN git -C vllm-flash-attn apply --check /tmp/thor-vision-flash-attention.patch \
+ && git -C vllm-flash-attn apply /tmp/thor-vision-flash-attention.patch
 WORKDIR /build/vllm
 RUN python use_existing_torch.py || true
 RUN pip install --no-cache-dir "setuptools-scm>=8"
-RUN MAX_JOBS=${MAX_JOBS} pip wheel --no-build-isolation --no-deps -w /build/dist .
+RUN --mount=type=cache,id=mangchi-vllm-build,target=/build/vllm/build \
+    --mount=type=cache,id=mangchi-vllm-deps,target=/build/vllm/.deps \
+    VLLM_FLASH_ATTN_SRC_DIR=/build/vllm-flash-attn \
+    VLLM_THOR_MINIMAL_BUILD=1 \
+    CMAKE_ARGS="-DVLLM_THOR_MINIMAL_BUILD=ON -DVLLM_FLASH_ATTN_THOR_VISION_ONLY=ON" \
+    MAX_JOBS=${MAX_JOBS} pip wheel --no-build-isolation --no-deps -w /build/dist .
 RUN set -eux; WHL="$(find /build -name 'vllm-*.whl' | head -1)"; echo "WHEEL=$WHL"; test -n "$WHL"; \
     pip install --no-cache-dir --no-deps "$WHL"
 
