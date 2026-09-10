@@ -1403,7 +1403,7 @@
         "medium",
         "low"
       ],
-      "vllm-default-effort": "xhigh"
+      "vllm-default-effort": "medium"
     }
   }
 }

@@ -27,7 +27,7 @@
         "--limit-mm-per-prompt", "{\"image\":2,\"video\":0}",
         "--mm-processor-kwargs", "{\"max_pixels\":2097152}",
         "--reasoning-parser", "qwen3",
-        "--default-chat-template-kwargs", "{\"reasoning_effort\":\"xhigh\"}"
+        "--default-chat-template-kwargs", "{\"reasoning_effort\":\"medium\"}"
       ]
     },
     "qwen3.8-flash-next-uncensored-nvfp4": {
@@ -57,7 +57,7 @@
         "--moe-backend", "auto",
         "--no-enable-flashinfer-autotune",
         "--enforce-eager",
-        "--default-chat-template-kwargs", "{\"reasoning_effort\":\"xhigh\"}"
+        "--default-chat-template-kwargs", "{\"reasoning_effort\":\"medium\"}"
       ]
     }
   }
