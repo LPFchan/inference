@@ -49,6 +49,14 @@ class DenseScaleTests(unittest.TestCase):
         for actual, expected in zip(ct, mo):
             torch.testing.assert_close(actual, expected, rtol=0, atol=0)
 
+    def test_aligned_weight_reuses_checkpoint_storage(self):
+        w = torch.zeros((5120, 3072), dtype=torch.uint8)
+        sf = torch.ones((5120, 384), dtype=torch.float8_e4m3fn)
+        packed, _, _, _ = prepare_tensors(
+            w, sf, torch.ones(1), torch.ones(1), [5120], divisors=True
+        )
+        self.assertEqual(packed.data_ptr(), w.data_ptr())
+
     def test_distinct_fused_alpha_is_exact_with_each_tile_broadcast(self):
         from thor_nvfp4.dense_contract import LOGICAL_WIDTHS, validate_alpha_layout
         for (n, k), widths in LOGICAL_WIDTHS.items():

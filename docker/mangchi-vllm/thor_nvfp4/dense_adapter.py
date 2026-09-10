@@ -57,8 +57,10 @@ def prepare_tensors(weight, block_scales, weight_globals, input_globals, widths,
         raise ValueError("Global scales must be finite and positive")
     if not torch.equal(ag, ag[0].expand_as(ag)):
         raise ValueError("Fused input global scales differ; one activation quantization cannot represent them")
-    if not torch.isfinite(block_scales.float()).all() or not (block_scales.float() >= 0).all():
+    block_scales_fp32 = block_scales.float()
+    if not torch.isfinite(block_scales_fp32).all() or not (block_scales_fp32 >= 0).all():
         raise ValueError("Block scales must be finite and nonnegative")
+    del block_scales_fp32
     if divisors:
         wg, ag = wg.reciprocal(), ag.reciprocal()
     products = wg * ag
@@ -66,8 +68,14 @@ def prepare_tensors(weight, block_scales, weight_globals, input_globals, widths,
         raise ValueError("Global scale products overflow or underflow")
     alpha = torch.zeros(padded_n, dtype=torch.float32, device=weight.device)
     alpha[:n] = torch.repeat_interleave(products, torch.tensor(widths, device=weight.device))
-    packed = torch.zeros((padded_n, packed_k), dtype=torch.uint8, device=weight.device)
-    packed[:n] = weight
+    if padded_n == n:
+        # Every normal 27B projection is already packed in the kernel's exact
+        # row shape. Reuse that storage; copying it briefly duplicates nearly
+        # the complete checkpoint in Thor's unified memory during preparation.
+        packed = weight
+    else:
+        packed = torch.zeros((padded_n, packed_k), dtype=torch.uint8, device=weight.device)
+        packed[:n] = weight
     sf = torch.zeros((padded_n, packed_k // 8), dtype=torch.uint8, device=weight.device)
     sf[:n] = block_scales.view(torch.uint8)
     swizzled = swizzle_scales(sf.view(torch.float8_e4m3fn).unsqueeze(0))[0]
