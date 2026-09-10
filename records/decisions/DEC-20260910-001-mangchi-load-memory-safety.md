@@ -20,6 +20,9 @@ responsive.
 
 The 27B and Flash-Next models must be able to remain loaded simultaneously, not
 merely replace one another. Loading and unloading them must work in every order.
+The co-residency profile keeps FP8 KV for both models, limits 27B to 100,000
+tokens, and keeps Flash-Next at 262,144 tokens. TurboQuant KV is deferred until
+it has separate performance, quality, and long-context validation on Thor.
 In particular:
 
 - loading 27B and then Flash-Next must leave both models resident, as must
@@ -97,7 +100,8 @@ way to recover from a slow or unsafe load.
 ## Consequences
 
 - The residency admission budget is 115 GiB so the models' 114 GiB combined
-  estimate can be admitted, while the host-memory watcher remains the mandatory
+  pre-tuning estimate can be admitted. The tuned estimates are 25 GiB for 27B
+  and 83 GiB for Flash-Next. The host-memory watcher remains the mandatory
   safety boundary during the second startup.
 - Each model needs a measured startup-peak allowance in addition to its
   steady-state reservation until the loader no longer duplicates those weights.

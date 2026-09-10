@@ -224,13 +224,14 @@ def test_specs_file_parses():
     assert "--enforce-eager" in flash.serve_args
     assert "--no-enable-flashinfer-autotune" in flash.serve_args
     assert flash.serve_args[flash.serve_args.index("--max-model-len") + 1] == "262144"
+    assert dense.serve_args[dense.serve_args.index("--max-model-len") + 1] == "100000"
     assert flash.serve_args[flash.serve_args.index("--kv-cache-dtype") + 1] == "fp8"
     assert flash.serve_args[flash.serve_args.index("--max-num-batched-tokens") + 1] == "8192"
     assert dense.serve_args[dense.serve_args.index("--max-num-batched-tokens") + 1] == "2048"
     assert flash.gpu_mem_util == 0.68
     assert flash.resident_gb == 83
-    assert dense.gpu_mem_util == 0.24
-    assert dense.resident_gb == 31
+    assert dense.gpu_mem_util == 0.20
+    assert dense.resident_gb == 25
     assert flash.resident_gb > specs["qwen3.8-27b-uncensored-nvfp4"].resident_gb
     assert dense.resident_gb + flash.resident_gb <= agent.MEMORY_BUDGET_GIB
 
@@ -296,7 +297,7 @@ def test_docker_launch_command_shape():
     assert "-p 8001:8001" in joined
     assert ":ro" in joined
     assert "vllm serve /models/qwen3.8-27b-uncensored-w4a4-preetpatel" in joined
-    assert "--gpu-memory-utilization 0.24" in joined
+    assert "--gpu-memory-utilization 0.2" in joined
 
 
 def test_container_resident_alive_and_reap(mgr, monkeypatch):
