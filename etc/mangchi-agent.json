@@ -3,8 +3,8 @@
     "qwen3.8-27b-uncensored-nvfp4": {
       "model_path": "/models/qwen3.8-27b-uncensored-w4a4-preetpatel",
       "model_path_host": "/home/yeowool/models/nvfp4/qwen3.8-27b-uncensored-w4a4-preetpatel",
-      "resident_gb": 27,
-      "gpu_mem_util": 0.22,
+      "resident_gb": 30,
+      "gpu_mem_util": 0.245,
       "port": 8001,
       "pinned": false,
       "vllm_docker_image": "mangchi-vllm:thor-dense-candidate-v7-memorysafe",
@@ -16,7 +16,7 @@
       "serve_args": [
         "--enable-per-request-metrics",
         "--enable-prompt-tokens-details",
-        "--max-model-len", "100000",
+        "--max-model-len", "262144",
         "--kv-cache-dtype", "fp8",
         "--max-num-seqs", "1",
         "--max-num-batched-tokens", "2048",
