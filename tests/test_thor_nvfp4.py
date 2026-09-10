@@ -214,6 +214,7 @@ class ThorNvfp4Contracts(unittest.TestCase):
             os.environ["VLLM_THOR_CUTEDSL_MOE"] = "1"
             native = method(config, moe)
             self.assertIs(type(native), method)
+            self.assertIn("ModelOpt", method.__name__)
             self.assertFalse(native.supports_eplb)
             self.assertIsNone(native.get_fused_moe_quant_config(None))
             config.quant_method = "W4A16_NVFP4"

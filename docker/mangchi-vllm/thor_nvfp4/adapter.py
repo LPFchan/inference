@@ -63,7 +63,7 @@ def make_method(base):
     from vllm.model_executor.layers.fused_moe.fused_moe_method_base import FusedMoEMethodBase
     from vllm.logger import init_logger
 
-    class ThorNvfp4MoEMethod(base):
+    class ThorModelOptNvfp4MoEMethod(base):
         def __new__(cls, quant_config, moe_config):
             if os.environ.get("VLLM_THOR_CUTEDSL_MOE") != "1":
                 return base(quant_config, moe_config)
@@ -118,4 +118,4 @@ def make_method(base):
             return run(x.contiguous(), topk_ids.to(torch.int32).contiguous(),
                        topk_weights.to(torch.float32).contiguous(), self._weights)
 
-    return ThorNvfp4MoEMethod
+    return ThorModelOptNvfp4MoEMethod
