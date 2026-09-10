@@ -89,11 +89,29 @@ def test_load_within_budget(mgr):
     assert "small" in [r["name"] for r in st["resident"]]
 
 
-def test_reload_is_idempotent(mgr):
+def test_reload_is_idempotent(mgr, monkeypatch):
     run(mgr.load("small"))
+    monkeypatch.setattr(mgr, "_group_alive", lambda _resident: True)
     out = run(mgr.load("small"))
     assert out["status"] == "already-resident"
     assert len(mgr.resident) == 1
+
+
+def test_reload_discards_dead_resident(mgr, monkeypatch):
+    run(mgr.load("small"))
+    old_resident = mgr.resident["small"]
+    reaped = []
+
+    async def _reap(resident):
+        reaped.append(resident)
+
+    monkeypatch.setattr(mgr, "_group_alive", lambda _resident: False)
+    monkeypatch.setattr(mgr, "_reap_group", _reap)
+    out = run(mgr.load("small"))
+
+    assert out["status"] == "loaded"
+    assert reaped == [old_resident]
+    assert mgr.resident["small"] is not old_resident
 
 
 def test_lru_eviction_makes_room(mgr):

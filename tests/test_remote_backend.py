@@ -49,6 +49,33 @@ class _Client:
         return _Response({"status": "ok"})
 
 
+class _AsyncResponse(_Response):
+    def __init__(self, payload=None, status_code=200):
+        super().__init__(payload)
+        self.status_code = status_code
+
+
+class _AsyncClient:
+    responses = {}
+    calls = []
+
+    def __init__(self, *args, **kwargs):
+        self.timeout = kwargs.get("timeout")
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        return False
+
+    async def get(self, url):
+        self.calls.append(url)
+        response = self.responses[url]
+        if isinstance(response, BaseException):
+            raise response
+        return response
+
+
 def test_remote_active_model_controls_agent_and_exposes_backend_url():
     _Client.calls = []
     active = ActiveModel("alias", dict(REMOTE), port=None, gpu=None)
@@ -82,6 +109,9 @@ def test_registry_accepts_remote_backend_and_rejects_local_gpu_fields(tmp_path):
 
 
 class _Registry:
+    def list_all(self):
+        return ["remote"]
+
     def resolve(self, name):
         return name if name == "remote" else None
 
@@ -117,3 +147,107 @@ def test_manager_remote_start_bypasses_local_gpu_allocator():
     assert active.gpu is None
     assert active.port is None
     assert manager.list_active() == ["remote"]
+
+
+def test_remote_health_probe_requires_agent_residency_and_backend_health():
+    active = ActiveModel("alias", dict(REMOTE), port=None, gpu=None)
+    agent_url = "http://mangchi.lost.plus:9700/models/remote%2Fmodel/status"
+    backend_url = "http://mangchi.lost.plus:8001/health"
+    _AsyncClient.calls = []
+    _AsyncClient.responses = {
+        agent_url: _AsyncResponse({"resident": True, "alive": True}),
+        backend_url: _AsyncResponse(status_code=200),
+    }
+
+    with patch.object(mm.httpx, "AsyncClient", _AsyncClient):
+        assert asyncio.run(active.probe_remote_health()) is True
+
+    assert _AsyncClient.calls == [agent_url, backend_url]
+
+
+def test_remote_health_probe_treats_confirmed_absence_as_offline():
+    active = ActiveModel("alias", dict(REMOTE), port=None, gpu=None)
+    agent_url = "http://mangchi.lost.plus:9700/models/remote%2Fmodel/status"
+    _AsyncClient.calls = []
+    _AsyncClient.responses = {
+        agent_url: _AsyncResponse({"resident": False, "registered": True}),
+    }
+
+    with patch.object(mm.httpx, "AsyncClient", _AsyncClient):
+        assert asyncio.run(active.probe_remote_health()) is False
+
+    assert _AsyncClient.calls == [agent_url]
+
+
+def test_remote_health_probe_keeps_previous_value_when_agent_times_out():
+    active = ActiveModel("alias", dict(REMOTE), port=None, gpu=None)
+    agent_url = "http://mangchi.lost.plus:9700/models/remote%2Fmodel/status"
+    _AsyncClient.calls = []
+    _AsyncClient.responses = {
+        agent_url: mm.httpx.ReadTimeout("agent timed out"),
+    }
+
+    with patch.object(mm.httpx, "AsyncClient", _AsyncClient):
+        assert asyncio.run(active.probe_remote_health()) is None
+
+    assert _AsyncClient.calls == [agent_url]
+
+
+def test_remote_status_refresh_keeps_previous_value_when_probe_is_ambiguous():
+    manager = ModelManager(gpu_count=1)
+    active = ActiveModel("remote", dict(REMOTE), port=None, gpu=None)
+    active.remote_running = True
+    active.status = "loaded"
+    manager.active["remote"] = active
+
+    with (
+        patch.object(mm, "registry", _Registry()),
+        patch.object(active, "probe_remote_health", AsyncMock(return_value=None)),
+        patch.object(manager, "_publish_routes") as publish,
+    ):
+        refreshed = asyncio.run(manager.refresh_remote_statuses())
+
+    assert refreshed == {}
+    assert active.remote_running is True
+    assert active.status == "loaded"
+    publish.assert_not_called()
+
+
+def test_remote_status_refresh_applies_confirmed_offline_value():
+    manager = ModelManager(gpu_count=1)
+    active = ActiveModel("remote", dict(REMOTE), port=None, gpu=None)
+    active.remote_running = True
+    active.status = "loaded"
+    manager.active["remote"] = active
+
+    with (
+        patch.object(mm, "registry", _Registry()),
+        patch.object(active, "probe_remote_health", AsyncMock(return_value=False)),
+        patch.object(manager, "_publish_routes") as publish,
+    ):
+        refreshed = asyncio.run(manager.refresh_remote_statuses())
+
+    assert refreshed == {"remote": "unloaded"}
+    assert active.remote_running is False
+    assert active.status == "unloaded"
+    publish.assert_called_once_with()
+
+
+def test_remote_status_refresh_recovers_untracked_healthy_resident():
+    manager = ModelManager(gpu_count=1)
+
+    with (
+        patch.object(mm, "registry", _Registry()),
+        patch.object(
+            ActiveModel,
+            "probe_remote_health",
+            AsyncMock(return_value=True),
+        ),
+        patch.object(manager, "_publish_routes") as publish,
+    ):
+        refreshed = asyncio.run(manager.refresh_remote_statuses())
+
+    assert refreshed == {"remote": "loaded"}
+    assert manager.active["remote"].remote_running is True
+    assert manager.active["remote"].status == "loaded"
+    publish.assert_called_once_with()

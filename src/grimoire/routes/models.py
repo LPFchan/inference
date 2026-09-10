@@ -312,10 +312,12 @@ def _validate_model_config(data: dict, gpu_count=None) -> None:
 
 
 @router.get("/v1/models")
-async def get_v1_models(request: Request):
+async def get_v1_models(request: Request, refresh_remote: bool = False):
     """Return all registry models in OpenAI-compatible + llama.cpp router shape."""
     require_api(request)
     manager = _get_manager()
+    if refresh_remote:
+        await manager.refresh_remote_statuses()
     data = registry.list_metadata()
     for item in data:
         name = item["id"]

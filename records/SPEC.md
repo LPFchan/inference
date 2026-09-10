@@ -103,6 +103,9 @@ These decisions were locked before Phase 1 and are not subject to renegotiation 
 - Registered Mangchi vLLM images emit live chunked-prefill progress, cumulative
   decode timing, and final timing statistics through the llama.cpp-compatible
   `prompt_progress` and `timings` SSE fields consumed by the web UI.
+- Opening the web UI model selector refreshes remote model health. The previous
+  displayed status remains visible while checking and on ambiguous probe
+  failures; only confirmed health or confirmed absence replaces it.
 - vLLM automatic prefix caching replaces conversation slot save/restore on the
   remote path. Identical token prefixes reuse resident content-addressed KV
   blocks, but the cache is LRU-managed and process-local; it is not persisted

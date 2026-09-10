@@ -138,6 +138,25 @@ class RouterModeContractTests(unittest.TestCase):
         self.assertEqual(loaded["status"]["value"], entrypoint.MODEL_STATUS_LOADED)
         self.assertTrue(loaded["active"])
 
+    def test_v1_models_refreshes_remote_health_only_when_requested(self):
+        with patch.object(
+            entrypoint.manager,
+            "refresh_remote_statuses",
+            AsyncMock(),
+        ) as refresh:
+            response = self.client.get(
+                "/v1/models",
+                params={"refresh_remote": "true"},
+                headers=self.auth,
+            )
+            self.assertEqual(response.status_code, 200)
+            refresh.assert_awaited_once_with()
+
+            refresh.reset_mock()
+            response = self.client.get("/v1/models", headers=self.auth)
+            self.assertEqual(response.status_code, 200)
+            refresh.assert_not_awaited()
+
     def test_status_and_switch_preserve_primary_gpu_and_add_full_placement(self):
         registry_aliases = entrypoint.registry.list_all()
         if not registry_aliases:

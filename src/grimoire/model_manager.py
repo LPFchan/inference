@@ -455,6 +455,39 @@ class ActiveModel:
             logger.info(f"Could not resolve backend model id for {self.name}: {e}")
         return self.backend_model_id or self.name
 
+    async def probe_remote_health(self):
+        """Return definitive remote health, or None when it cannot be proven."""
+        if self.backend_type != BACKEND_VLLM_REMOTE:
+            return None
+
+        model_id = quote(self.cfg["remote-model-id"], safe="")
+        agent_url = (
+            f"{self.cfg['remote-agent-url'].rstrip('/')}"
+            f"/models/{model_id}/status"
+        )
+        try:
+            async with httpx.AsyncClient(
+                timeout=config.DEFAULT_REMOTE_HEALTH_TIMEOUT
+            ) as client:
+                agent_response = await client.get(agent_url)
+                agent_response.raise_for_status()
+                agent_status = agent_response.json()
+                if agent_status.get("resident") is False:
+                    return False
+                if agent_status.get("resident") is not True:
+                    return None
+                if agent_status.get("alive") is False:
+                    return False
+                if agent_status.get("alive") is not True:
+                    return None
+
+                backend_response = await client.get(self.backend_url("health"))
+                if backend_response.status_code == 200:
+                    return True
+        except (httpx.HTTPError, ValueError, TypeError):
+            return None
+        return None
+
     def stop(self):
         """Stop the configured local or remote backend."""
         if getattr(self, "backend_type", BACKEND_LLAMA) == BACKEND_VLLM_REMOTE:
@@ -1249,6 +1282,54 @@ class ModelManager:
         if not active:
             return config.MODEL_STATUS_UNLOADED
         return active.status
+
+    async def refresh_remote_statuses(self):
+        """Refresh remote models without replacing ambiguous status."""
+        candidates = []
+        for name in registry.list_all():
+            cfg = registry.get(name) or {}
+            if cfg.get("backend") != BACKEND_VLLM_REMOTE:
+                continue
+            active = self.active.get(name)
+            if active is not None and active.status == config.MODEL_STATUS_LOADING:
+                continue
+            candidates.append(
+                (name, active or ActiveModel(name, cfg, port=None, gpu=None))
+            )
+        if not candidates:
+            return {}
+
+        results = await asyncio.gather(
+            *(active.probe_remote_health() for _, active in candidates),
+            return_exceptions=True,
+        )
+        refreshed = {}
+        changed = False
+        for (name, active), result in zip(candidates, results):
+            if isinstance(result, BaseException) or result is None:
+                continue
+            current = self.active.get(name)
+            if current is not None and current is not active:
+                continue
+            status = (
+                config.MODEL_STATUS_LOADED
+                if result
+                else config.MODEL_STATUS_UNLOADED
+            )
+            refreshed[name] = status
+            if current is None and result:
+                self.active[name] = active
+                current = active
+                changed = True
+            if current is None:
+                continue
+            if current.remote_running != result or current.status != status:
+                current.remote_running = result
+                current.status = status
+                changed = True
+        if changed:
+            self._publish_routes()
+        return refreshed
 
     async def stop_model(self, model_name, _preset_bypass=False):
         """Stop an active model."""

@@ -416,8 +416,12 @@ class ResidencyManager:
                 raise HTTPException(status_code=404, detail=f"unknown model '{name}'")
             if name in self.resident:
                 r = self.resident[name]
-                r.last_used = time.time()
-                return {"name": name, "status": "already-resident", "port": r.port}
+                if self._group_alive(r):
+                    r.last_used = time.time()
+                    return {"name": name, "status": "already-resident", "port": r.port}
+                logger.warning("discarding dead resident %s before reload", name)
+                await self._reap_group(r)
+                self.resident.pop(name, None)
             spec = self.specs[name]
             await self._evict_until_fits(spec.resident_gb, exclude=name)
             cmd = build_launch_command(name, spec)
