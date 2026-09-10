@@ -52,6 +52,7 @@
         "--max-num-batched-tokens", "8192",
         "--enable-auto-tool-choice",
         "--tool-call-parser", "qwen3_xml",
+        "--reasoning-parser", "qwen3",
         "--moe-backend", "auto",
         "--no-enable-flashinfer-autotune",
         "--enforce-eager"
