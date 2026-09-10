@@ -3,8 +3,8 @@
     "qwen3.8-27b-uncensored-nvfp4": {
       "model_path": "/models/qwen3.8-27b-uncensored-w4a4-preetpatel",
       "model_path_host": "/home/yeowool/models/nvfp4/qwen3.8-27b-uncensored-w4a4-preetpatel",
-      "resident_gb": 23,
-      "gpu_mem_util": 0.19,
+      "resident_gb": 27,
+      "gpu_mem_util": 0.22,
       "port": 8001,
       "pinned": false,
       "vllm_docker_image": "mangchi-vllm:thor-dense-candidate-v7-memorysafe",
@@ -33,8 +33,8 @@
     "qwen3.8-flash-next-uncensored-nvfp4": {
       "model_path": "/models/qwen3.8-flash-next-abliterated-w4a4",
       "model_path_host": "/home/yeowool/models/nvfp4/qwen3.8-flash-next-abliterated-w4a4",
-      "resident_gb": 81,
-      "gpu_mem_util": 0.655,
+      "resident_gb": 83,
+      "gpu_mem_util": 0.68,
       "port": 8002,
       "pinned": false,
       "vllm_docker_image": "mangchi-vllm:thor-dense-candidate-v6-vision-minfa",
