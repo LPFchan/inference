@@ -32,7 +32,7 @@ import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
@@ -51,6 +51,12 @@ MEMORY_BUDGET_GIB = float(os.environ.get("MANGCHI_AGENT_BUDGET_GIB", "110"))
 # cold storage and kernel-cache variation while keeping the timeout bounded.
 HEALTH_TIMEOUT_S = float(os.environ.get("MANGCHI_AGENT_HEALTH_TIMEOUT_S", "900"))
 STOP_TIMEOUT_S = float(os.environ.get("MANGCHI_AGENT_STOP_TIMEOUT_S", "60"))
+# CUDA allocations on Thor share physical RAM with the host and are not fully
+# visible to Docker's memory cgroup. Keep enough host memory available for the
+# kernel, agent, and an orderly vLLM shutdown.
+HOST_MEMORY_FLOOR_GIB = float(os.environ.get("MANGCHI_AGENT_HOST_MEMORY_FLOOR_GIB", "12"))
+HOST_MEMORY_POLL_S = float(os.environ.get("MANGCHI_AGENT_HOST_MEMORY_POLL_S", "0.25"))
+STARTUP_ABORT_TIMEOUT_S = int(os.environ.get("MANGCHI_AGENT_STARTUP_ABORT_TIMEOUT_S", "3"))
 
 # Trusted source networks: loopback, the LAN, and the tailnet. The agent exposes
 # process lifecycle (load/unload), so it must not answer arbitrary internet
@@ -63,6 +69,14 @@ TRUSTED_NETWORKS = [
     for x in os.environ.get("MANGCHI_AGENT_TRUSTED_CIDRS", _DEFAULT_TRUSTED).split(",")
     if x.strip()
 ]
+
+
+def host_available_gib(path: str = "/proc/meminfo") -> float:
+    """Read Linux MemAvailable, including reclaimable cache, in GiB."""
+    for line in Path(path).read_text().splitlines():
+        if line.startswith("MemAvailable:"):
+            return int(line.split()[1]) / (1024**2)
+    raise RuntimeError(f"MemAvailable is missing from {path}")
 
 
 @dataclass
@@ -148,9 +162,17 @@ def build_launch_command(name: str, spec: LaunchSpec) -> list[str]:
 class ResidencyManager:
     """Owns vLLM processes on the Thor. Single-device budget + LRU + pinning."""
 
-    def __init__(self, specs: dict[str, LaunchSpec], budget_gib: float = MEMORY_BUDGET_GIB):
+    def __init__(
+        self,
+        specs: dict[str, LaunchSpec],
+        budget_gib: float = MEMORY_BUDGET_GIB,
+        memory_floor_gib: float = HOST_MEMORY_FLOOR_GIB,
+        available_gib: Callable[[], float] = host_available_gib,
+    ):
         self.specs = specs
         self.budget_gib = budget_gib
+        self.memory_floor_gib = memory_floor_gib
+        self._available_gib = available_gib
         self.resident: dict[str, Resident] = {}
         self._lock = asyncio.Lock()
         self._stop_tasks: dict[str, "asyncio.Task"] = {}
@@ -367,28 +389,73 @@ class ResidencyManager:
     async def _wait_healthy(self, r: Resident) -> None:
         url = f"http://127.0.0.1:{r.port}/health"
         deadline = time.time() + HEALTH_TIMEOUT_S
-        async with httpx.AsyncClient(timeout=5.0) as client:
+        next_health_probe = 0.0
+        async with httpx.AsyncClient(timeout=1.0) as client:
             while time.time() < deadline:
+                try:
+                    available = self._available_gib()
+                except Exception as exc:
+                    raise HTTPException(
+                        status_code=503,
+                        detail=f"cannot verify host memory safety while loading '{r.name}': {exc}",
+                    ) from exc
+                if available < self.memory_floor_gib:
+                    logger.error(
+                        "aborting %s startup: host available memory %.2f GiB is below %.2f GiB floor",
+                        r.name,
+                        available,
+                        self.memory_floor_gib,
+                    )
+                    # Begin shutdown before returning to the generic cleanup
+                    # path. Waiting a normal 60 seconds here would let a CUDA
+                    # allocation continue pushing the unified-memory host.
+                    if r.container:
+                        loop = asyncio.get_running_loop()
+                        await loop.run_in_executor(
+                            None,
+                            self._stop_container,
+                            r.container,
+                            STARTUP_ABORT_TIMEOUT_S,
+                        )
+                    else:
+                        self._signal_group(r, signal.SIGTERM)
+                    raise HTTPException(
+                        status_code=507,
+                        detail=(
+                            f"stopped '{r.name}' during startup: host available memory "
+                            f"fell to {available:.2f} GiB (safety floor {self.memory_floor_gib:.2f} GiB)"
+                        ),
+                    )
                 # `docker run -d` exits successfully as soon as it creates the
                 # sibling container. For container residents, inspect that
                 # container instead of treating the launcher exit as failure.
-                if not self._group_alive(r):
-                    raise HTTPException(
-                        status_code=500,
-                        detail=f"vLLM for '{r.name}' exited during startup (rc={r.process.returncode})",
-                    )
-                try:
-                    resp = await client.get(url)
-                    if resp.status_code == 200:
-                        return
-                except httpx.HTTPError:
-                    pass
-                await asyncio.sleep(3)
+                now = time.time()
+                if now >= next_health_probe:
+                    if not self._group_alive(r):
+                        raise HTTPException(
+                            status_code=500,
+                            detail=f"vLLM for '{r.name}' exited during startup (rc={r.process.returncode})",
+                        )
+                    try:
+                        resp = await client.get(url)
+                        if resp.status_code == 200:
+                            return
+                    except httpx.HTTPError:
+                        pass
+                    next_health_probe = now + 3
+                await asyncio.sleep(HOST_MEMORY_POLL_S)
         raise HTTPException(status_code=504, detail=f"'{r.name}' did not become healthy in {HEALTH_TIMEOUT_S}s")
 
     async def load(self, name: str) -> dict:
         task = self._ensure_load_task(name)
-        return await asyncio.shield(task)
+        try:
+            return await asyncio.shield(task)
+        except asyncio.CancelledError:
+            # A cancelled caller must not cancel a shared lifecycle task. A
+            # task cancelled by unload, however, is an ordinary API outcome.
+            if task.cancelled():
+                raise HTTPException(status_code=409, detail=f"load for '{name}' was cancelled")
+            raise
 
     def _ensure_load_task(self, name: str) -> "asyncio.Task":
         task = self._load_tasks.get(name)
@@ -464,15 +531,24 @@ class ResidencyManager:
             return {"name": name, "status": "loaded", "port": r.port, "resident_gb": spec.resident_gb}
 
     async def unload(self, name: str) -> dict:
-        # Always go through the serialized stop task: it waits for any in-flight
-        # load of this model to finish (lock ordering) before deciding residency,
-        # so an unload can't miss a model that's mid-launch.
+        # Unload is also the emergency brake for a slow or unsafe startup. Do
+        # not queue behind the complete health wait: cancel the owned load task,
+        # which performs full inline cleanup before releasing the manager lock.
+        cancelled_load = False
+        load_task = self._load_tasks.get(name)
+        if load_task is not None and not load_task.done():
+            cancelled_load = True
+            load_task.cancel()
+            try:
+                await asyncio.shield(load_task)
+            except asyncio.CancelledError:
+                pass
         try:
             stopped = await self._stop(name)
         except RuntimeError as exc:
             # Group not confirmed dead: reservation retained, report honestly.
             raise HTTPException(status_code=500, detail=str(exc)) from exc
-        if not stopped:
+        if not stopped and not cancelled_load:
             return {"name": name, "status": "not-resident"}
         return {"name": name, "status": "unloaded"}
 
@@ -501,6 +577,8 @@ class ResidencyManager:
             "budget_gib": self.budget_gib,
             "used_gib": round(self._used_gib(), 2),
             "free_gib": round(self._free_gib(), 2),
+            "host_available_gib": round(self._available_gib(), 2),
+            "host_memory_floor_gib": self.memory_floor_gib,
             "registered": sorted(self.specs.keys()),
             "resident": [one(r) for r in self.resident.values()],
         }

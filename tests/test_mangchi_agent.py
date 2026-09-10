@@ -64,7 +64,7 @@ def mgr(monkeypatch):
     # re-stub these to observe calls.
     monkeypatch.setattr(agent.os, "getpgid", lambda pid: pid)
     monkeypatch.setattr(agent.os, "killpg", lambda pgid, sig: None)
-    m = ResidencyManager(_specs(), budget_gib=110)
+    m = ResidencyManager(_specs(), budget_gib=110, available_gib=lambda: 1000)
 
     async def _no_healthy(r):
         return None
@@ -433,32 +433,72 @@ async def _instant_sleep(_):
     return None
 
 
-def test_unload_waits_for_inflight_load(mgr, monkeypatch):
-    # A load in progress must not be missed by unload: the serialized stop task
-    # waits for the load (lock ordering) and then stops the now-resident model.
+def test_unload_cancels_inflight_load(mgr, monkeypatch):
+    # An unload request is the recovery path for a long startup. It must cancel
+    # and clean up immediately rather than wait for health or its timeout.
     started = agent.asyncio.Event()
-    release = agent.asyncio.Event()
 
     async def _slow_healthy(r):
         started.set()
-        await release.wait()
+        await agent.asyncio.Event().wait()
 
     async def _scenario():
         monkeypatch.setattr(mgr, "_wait_healthy", _slow_healthy)
         load_task = agent.asyncio.ensure_future(mgr.load("small"))
         await started.wait()
-        # load is mid-flight; unload must not return not-resident and miss it.
-        unload_task = agent.asyncio.ensure_future(mgr.unload("small"))
-        await agent.asyncio.sleep(0)  # let unload queue its stop
-        release.set()
-        loaded = await load_task
-        unloaded = await unload_task
-        return loaded, unloaded
+        unloaded = await mgr.unload("small")
+        with pytest.raises(HTTPException) as exc:
+            await load_task
+        return exc.value, unloaded
 
-    loaded, unloaded = run(_scenario())
-    assert loaded["status"] == "loaded"
+    load_error, unloaded = run(_scenario())
+    assert load_error.status_code == 409
     assert unloaded["status"] == "unloaded"
     assert "small" not in mgr.resident
+
+
+def test_memory_floor_aborts_startup_and_cleans_up(mgr, monkeypatch):
+    readings = iter([1000, 11])
+    mgr.memory_floor_gib = 12
+    mgr._available_gib = lambda: next(readings, 11)
+    monkeypatch.setattr(
+        mgr,
+        "_wait_healthy",
+        agent.ResidencyManager._wait_healthy.__get__(mgr),
+    )
+    monkeypatch.setattr(mgr, "_group_alive", lambda _resident: True)
+
+    async def _reap(_resident):
+        return None
+
+    monkeypatch.setattr(mgr, "_reap_group", _reap)
+    monkeypatch.setattr(agent.asyncio, "sleep", _instant_sleep)
+
+    class UnhealthyClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def get(self, _url):
+            raise agent.httpx.ConnectError("not ready")
+
+    monkeypatch.setattr(agent.httpx, "AsyncClient", lambda **_kwargs: UnhealthyClient())
+    with pytest.raises(HTTPException) as exc:
+        run(mgr.load("small"))
+    assert exc.value.status_code == 507
+    assert "safety floor" in exc.value.detail
+    assert "small" not in mgr.resident
+    assert mgr.status()["used_gib"] == 0
+
+
+def test_status_reports_live_host_memory(mgr):
+    mgr._available_gib = lambda: 42.125
+    mgr.memory_floor_gib = 12
+    status = mgr.status()
+    assert status["host_available_gib"] == 42.12
+    assert status["host_memory_floor_gib"] == 12
 
 
 def test_unconfirmed_group_death_retains_reservation(mgr, monkeypatch):
