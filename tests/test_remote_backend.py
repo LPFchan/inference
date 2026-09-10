@@ -179,6 +179,21 @@ def test_remote_health_probe_treats_confirmed_absence_as_offline():
     assert _AsyncClient.calls == [agent_url]
 
 
+def test_remote_health_probe_reports_agent_loading_without_backend_probe():
+    active = ActiveModel("alias", dict(REMOTE), port=None, gpu=None)
+    active.status = "loaded"
+    agent_url = "http://mangchi.lost.plus:9700/models/remote%2Fmodel/status"
+    _AsyncClient.calls = []
+    _AsyncClient.responses = {
+        agent_url: _AsyncResponse({"resident": True, "alive": True, "status": "loading"}),
+    }
+
+    with patch.object(mm.httpx, "AsyncClient", _AsyncClient):
+        assert asyncio.run(active.probe_remote_health()) == "loading"
+
+    assert _AsyncClient.calls == [agent_url]
+
+
 def test_remote_health_probe_keeps_previous_value_when_agent_times_out():
     active = ActiveModel("alias", dict(REMOTE), port=None, gpu=None)
     agent_url = "http://mangchi.lost.plus:9700/models/remote%2Fmodel/status"
@@ -251,3 +266,24 @@ def test_remote_status_refresh_recovers_untracked_healthy_resident():
     assert manager.active["remote"].remote_running is True
     assert manager.active["remote"].status == "loaded"
     publish.assert_called_once_with()
+
+
+def test_remote_status_refresh_tracks_loading_then_loaded():
+    manager = ModelManager(gpu_count=1)
+    active = ActiveModel("remote", dict(REMOTE), port=None, gpu=None)
+    active.remote_running = True
+    active.status = "loaded"
+    manager.active["remote"] = active
+
+    with (
+        patch.object(mm, "registry", _Registry()),
+        patch.object(active, "probe_remote_health", AsyncMock(side_effect=["loading", True])),
+        patch.object(manager, "_publish_routes") as publish,
+    ):
+        first = asyncio.run(manager.refresh_remote_statuses())
+        second = asyncio.run(manager.refresh_remote_statuses())
+
+    assert first == {"remote": "loading"}
+    assert second == {"remote": "loaded"}
+    assert active.status == "loaded"
+    assert publish.call_count == 2

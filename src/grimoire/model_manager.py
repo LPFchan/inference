@@ -456,7 +456,7 @@ class ActiveModel:
         return self.backend_model_id or self.name
 
     async def probe_remote_health(self):
-        """Return definitive remote health, or None when it cannot be proven."""
+        """Return definitive remote health/loading, or None when it cannot be proven."""
         if self.backend_type != BACKEND_VLLM_REMOTE:
             return None
 
@@ -480,6 +480,8 @@ class ActiveModel:
                     return False
                 if agent_status.get("alive") is not True:
                     return None
+                if agent_status.get("status") == config.MODEL_STATUS_LOADING:
+                    return config.MODEL_STATUS_LOADING
 
                 backend_response = await client.get(self.backend_url("health"))
                 if backend_response.status_code == 200:
@@ -1291,7 +1293,11 @@ class ModelManager:
             if cfg.get("backend") != BACKEND_VLLM_REMOTE:
                 continue
             active = self.active.get(name)
-            if active is not None and active.status == config.MODEL_STATUS_LOADING:
+            if (
+                active is not None
+                and active.status == config.MODEL_STATUS_LOADING
+                and not active.remote_running
+            ):
                 continue
             candidates.append(
                 (name, active or ActiveModel(name, cfg, port=None, gpu=None))
@@ -1312,19 +1318,22 @@ class ModelManager:
             if current is not None and current is not active:
                 continue
             status = (
-                config.MODEL_STATUS_LOADED
+                config.MODEL_STATUS_LOADING
+                if result == config.MODEL_STATUS_LOADING
+                else config.MODEL_STATUS_LOADED
                 if result
                 else config.MODEL_STATUS_UNLOADED
             )
             refreshed[name] = status
-            if current is None and result:
+            if current is None and status != config.MODEL_STATUS_UNLOADED:
                 self.active[name] = active
                 current = active
                 changed = True
             if current is None:
                 continue
-            if current.remote_running != result or current.status != status:
-                current.remote_running = result
+            remote_running = status != config.MODEL_STATUS_UNLOADED
+            if current.remote_running != remote_running or current.status != status:
+                current.remote_running = remote_running
                 current.status = status
                 changed = True
         if changed:

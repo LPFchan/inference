@@ -94,6 +94,7 @@ class Resident:
     port: int
     pgid: Optional[int] = None
     container: Optional[str] = None  # set when launched as a docker container
+    status: str = "loading"
     started_at: float = field(default_factory=time.time)
     last_used: float = field(default_factory=time.time)
 
@@ -459,6 +460,7 @@ class ResidencyManager:
                 # caller may have been cancelled, but THIS task continues.
                 await self._stop_inline(name)
                 raise
+            r.status = "loaded"
             return {"name": name, "status": "loaded", "port": r.port, "resident_gb": spec.resident_gb}
 
     async def unload(self, name: str) -> dict:
@@ -481,6 +483,7 @@ class ResidencyManager:
                 "port": r.port,
                 "pid": r.process.pid,
                 "alive": self._group_alive(r),
+                "status": r.status,
                 "pinned": r.spec.pinned,
                 "resident_gb": r.spec.resident_gb,
                 "uptime_s": round(time.time() - r.started_at, 1),

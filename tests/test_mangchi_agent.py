@@ -174,12 +174,33 @@ def test_status_reports_registered_and_resident(mgr):
     run(mgr.load("small"))
     st = mgr.status("small")
     assert st["resident"] is True
+    assert st["status"] == "loaded"
     assert st["url"].endswith("/v1")
     missing = mgr.status("large")
     assert missing["resident"] is False
     assert missing["registered"] is True
     unreg = mgr.status("ghost")
     assert unreg["registered"] is False
+
+
+def test_status_reports_loading_until_health_check_completes(mgr, monkeypatch):
+    async def scenario():
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def wait_healthy(_resident):
+            started.set()
+            await release.wait()
+
+        monkeypatch.setattr(mgr, "_wait_healthy", wait_healthy)
+        load_task = asyncio.create_task(mgr.load("small"))
+        await started.wait()
+        assert mgr.status("small")["status"] == "loading"
+        release.set()
+        await load_task
+        assert mgr.status("small")["status"] == "loaded"
+
+    run(scenario())
 
 
 def test_specs_file_parses():
