@@ -3,7 +3,8 @@
 # pinned to PR #55557, which contains current main plus FP8 main-QSA KV support.
 # Built on NVIDIA's Thor base (CUDA 13.0, sm_110a kernels).
 # Build: ~60-75 min cold, needs most of the 128GB unified memory free. Don't build while serving.
-#   DOCKER_BUILDKIT=1 docker build -t mangchi-vllm:thor-qsa-fp8-5fd5dd5 -f Dockerfile .
+#   DOCKER_BUILDKIT=1 docker build -t mangchi-vllm:thor-qsa-fp8-5fd5dd5 \
+#     -f docker/mangchi-vllm/Dockerfile .
 FROM ghcr.io/nvidia-ai-iot/vllm:latest-jetson-thor
 
 # the base bakes PIP_CONSTRAINT=torch==2.10.0 -> unset it so the torch upgrade isn't blocked
@@ -35,6 +36,9 @@ RUN git init vllm \
  && git -C vllm checkout --detach FETCH_HEAD \
  && test "$(git -C vllm rev-parse HEAD)" = "${VLLM_SHA}"
 WORKDIR /build/vllm
+COPY patches/mangchi-vllm/0001-live-prefill-and-generation-timings.patch /tmp/vllm-live-timings.patch
+RUN git apply --check /tmp/vllm-live-timings.patch \
+ && git apply /tmp/vllm-live-timings.patch
 RUN python use_existing_torch.py || true
 RUN pip install --no-cache-dir "setuptools-scm>=8"
 RUN MAX_JOBS=${MAX_JOBS} pip wheel --no-build-isolation --no-deps -w /build/dist .
@@ -62,18 +66,18 @@ RUN pip install --no-cache-dir "compressed-tensors==0.17.1" numba
 
 # vLLM eagerly imports ALL quant backends; guard the ones not packaged for arm64 so
 # NVFP4/compressed-tensors still load (humming/inc/fp_quant/torchao/quark/deepseek_v4/mxfp4)
-COPY patch_quant.py /tmp/patch_quant.py
+COPY docker/mangchi-vllm/patch_quant.py /tmp/patch_quant.py
 RUN python /tmp/patch_quant.py
 
 # Keep Qwen3.8 Flash-Next's 102.4GB BF16 PLE table on SSD. This is a Thor port
 # of blazux/qwen3.8-Flash-DGX's mmap loader; it is opt-in via VLLM_PLE_MMAP=1.
-COPY vllm_ple_mmap.py /opt/venv/lib/python3.12/site-packages/vllm_ple_mmap.py
-COPY patch_ple_mmap.py /tmp/patch_ple_mmap.py
+COPY docker/mangchi-vllm/vllm_ple_mmap.py /opt/venv/lib/python3.12/site-packages/vllm_ple_mmap.py
+COPY docker/mangchi-vllm/patch_ple_mmap.py /tmp/patch_ple_mmap.py
 RUN python /tmp/patch_ple_mmap.py
 
 # SM110 supports CUDA clusters in general, but rejects the cooperative top-k launch shape
 # used by Qwen3.8's QSA indexer. Route Thor through vLLM's persistent fallback.
-COPY patch_thor_qsa.py /tmp/patch_thor_qsa.py
+COPY docker/mangchi-vllm/patch_thor_qsa.py /tmp/patch_thor_qsa.py
 RUN python /tmp/patch_thor_qsa.py
 
 # Optional experimental NVIDIA SM110 W4A4 MoE adapter. Sources are fetched by
@@ -82,7 +86,7 @@ RUN python /tmp/patch_thor_qsa.py
 # canary tag with --build-arg THOR_CUTEDSL_MOE=1 and opt in at runtime with
 # VLLM_THOR_CUTEDSL_MOE=1. The default image preserves its existing dependencies.
 ARG THOR_CUTEDSL_MOE=0
-COPY thor_nvfp4 /opt/venv/lib/python3.12/site-packages/thor_nvfp4
+COPY docker/mangchi-vllm/thor_nvfp4 /opt/venv/lib/python3.12/site-packages/thor_nvfp4
 RUN if [ "${THOR_CUTEDSL_MOE}" = "1" ]; then \
       pip install --no-cache-dir --extra-index-url https://pypi.org/simple \
         "nvidia-cutlass-dsl[cu13]==4.7.0" "cupy-cuda13x==13.6.0" \

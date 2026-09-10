@@ -169,7 +169,12 @@ def test_specs_file_parses():
     assert "qwen3.8-27b-uncensored-nvfp4" in specs
     assert "qwen3.8-flash-next-uncensored-nvfp4" in specs
     flash = specs["qwen3.8-flash-next-uncensored-nvfp4"]
+    dense = specs["qwen3.8-27b-uncensored-nvfp4"]
+    assert dense.vllm_docker_image == "mangchi-vllm:thor-qsa-fp8-5fd5dd5"
     assert flash.vllm_docker_image == "mangchi-vllm:thor-qsa-fp8-5fd5dd5"
+    for spec in (dense, flash):
+        assert "--enable-per-request-metrics" in spec.serve_args
+        assert "--enable-prompt-tokens-details" in spec.serve_args
     assert flash.env.get("VLLM_PLE_MMAP") == "1"
     assert "VLLM_PLE_CPU_OFFLOAD" not in flash.env
     assert "--enforce-eager" in flash.serve_args
@@ -183,12 +188,19 @@ def test_specs_file_parses():
 
 def test_qsa_fp8_canary_build_is_pinned_and_thor_aware():
     dockerfile = (ROOT / "docker/mangchi-vllm/Dockerfile").read_text()
+    metrics_patch = (
+        ROOT / "patches/mangchi-vllm/0001-live-prefill-and-generation-timings.patch"
+    ).read_text()
     thor_patch = (ROOT / "docker/mangchi-vllm/patch_thor_qsa.py").read_text()
     ple_patch = (ROOT / "docker/mangchi-vllm/vllm_ple_mmap.py").read_text()
 
     assert "VLLM_REF=refs/pull/55557/head" in dockerfile
     assert "VLLM_SHA=5fd5dd5cf4ac8e9f09b6fae3f3603e9a3cb88aaa" in dockerfile
     assert 'test "$(git -C vllm rev-parse HEAD)" = "${VLLM_SHA}"' in dockerfile
+    assert "git apply --check /tmp/vllm-live-timings.patch" in dockerfile
+    assert 'prefill_progress: tuple[int, int, int] | None = None' in metrics_patch
+    assert '"prompt_progress": {' in metrics_patch
+    assert 'chunk_data["timings"]' in metrics_patch
     assert "nvidia/ops/qsa_indexer.py" in thor_patch
     assert "is_device_capability_family(110)" in thor_patch
     assert "max_total_tokens" not in ple_patch

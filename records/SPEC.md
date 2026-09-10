@@ -100,6 +100,13 @@ These decisions were locked before Phase 1 and are not subject to renegotiation 
   credentials.
 - Remote models do not participate in Grimoire GPU allocation, eviction,
   pinning, cloning, or llama.cpp KV-slot persistence.
+- Registered Mangchi vLLM images emit live chunked-prefill progress, cumulative
+  decode timing, and final timing statistics through the llama.cpp-compatible
+  `prompt_progress` and `timings` SSE fields consumed by the web UI.
+- vLLM automatic prefix caching replaces conversation slot save/restore on the
+  remote path. Identical token prefixes reuse resident content-addressed KV
+  blocks, but the cache is LRU-managed and process-local; it is not persisted
+  across model unloads or agent restarts.
 - Mangchi owns its unified-memory budget, LRU eviction, pinning, launch specs,
   and process health. Grimoire owns the public registry and client-facing state.
 

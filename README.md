@@ -103,7 +103,7 @@ curl -X POST "$GRIMOIRE_ORIGIN/models/qwen/unpin" -H "Authorization: Bearer $GRI
 `clone` runs one llama-server process sharded across the ordered GPUs; it does not create a replica. Clone/declone reload active models with rollback on failure. Pin reloads only when residency must move; unpin changes eviction protection without moving a running model. `/status` keeps `gpu`/`gpus` for actual residency and reports requested placement, placement/pin sources, and runtime overrides separately. Locked presets clear runtime overrides and reconcile target models; manual-control presets retain them but enforce their GPU mask.
 - Dynamic allocation: free GPU preferred, oldest non-pinned evicted when all busy
 - `backend: "llama"` starts a local llama-server and participates in Grimoire's GPU allocator.
-- `backend: "vllm-remote"` asks the Mangchi residency agent to load or unload `remote-model-id`, forwards inference to `remote-url`, and does not consume or evict Grimoire GPU residency.
+- `backend: "vllm-remote"` asks the Mangchi residency agent to load or unload `remote-model-id`, forwards inference to `remote-url`, and does not consume or evict Grimoire GPU residency. The pinned Mangchi image emits live prefill progress, live decode speed, and final timing statistics in the same SSE fields used by the web UI's llama.cpp path.
 - Grimoire keeps the public API key boundary. Mangchi's agent accepts only its configured private source CIDRs and does not receive the client credential.
 
 ### Prompt Cache Reuse
@@ -111,6 +111,12 @@ curl -X POST "$GRIMOIRE_ORIGIN/models/qwen/unpin" -H "Authorization: Bearer $GRI
 Grimoire applies `reasoning_effort` and Muse Glimmer's `reasoning_strength` from model `--chat-template-kwargs` to each request. Model aliases that produce the same llama-server command share one running process, so changing reasoning level keeps the existing KV cache. Other template defaults are merged into one startup argument.
 
 The web UI pre-encodes the final conversation branch after each response, including reasoning and tool messages. This keeps the next user turn aligned with the serialized prompt already in the server cache. The production Compose profile reserves 4 GiB per llama-server process for its RAM prompt cache through `LLAMA_ARG_CACHE_RAM`.
+
+Mangchi vLLM models use vLLM's automatic prefix cache instead. Matching token
+prefixes reuse content-addressed KV blocks already held by the running engine;
+there is no conversation slot to save or restore. Those blocks are evicted as
+the engine needs cache space and disappear when the model process exits, so
+this is fast in-process reuse rather than llama.cpp's RAM/disk persistence.
 
 ### KV Cache Store (Content-Hash)
 

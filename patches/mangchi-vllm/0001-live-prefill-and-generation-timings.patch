@@ -1,0 +1,303 @@
+diff --git a/vllm/entrypoints/openai/chat_completion/serving.py b/vllm/entrypoints/openai/chat_completion/serving.py
+index 06e7315..39a9112 100644
+--- a/vllm/entrypoints/openai/chat_completion/serving.py
++++ b/vllm/entrypoints/openai/chat_completion/serving.py
+@@ -2,6 +2,7 @@
+ # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+ 
+ import asyncio
++import json
+ import time
+ from collections.abc import AsyncGenerator, AsyncIterator
+ from collections.abc import Sequence as GenericSequence
+@@ -460,6 +461,7 @@ class OpenAIServingChat(GenerateBaseServing):
+         mm_token_counts: dict[str, int] | None = None,
+     ) -> AsyncGenerator[str, None]:
+         created_time = int(time.time())
++        stream_started = time.monotonic()
+         chunk_object_type: Final = "chat.completion.chunk"
+         first_iteration = True
+ 
+@@ -515,6 +517,31 @@ class OpenAIServingChat(GenerateBaseServing):
+         try:
+             async for res in result_generator:
+                 last_res = res
++                if res.prefill_progress is not None:
++                    total, processed, cached = res.prefill_progress
++                    elapsed_ms = max((time.monotonic() - stream_started) * 1000, 0.001)
++                    progress_data = {
++                        "id": request_id,
++                        "object": chunk_object_type,
++                        "created": created_time,
++                        "choices": [],
++                        "model": model_name,
++                        "prompt_progress": {
++                            "total": total,
++                            "processed": processed,
++                            "cache": cached,
++                            "time_ms": elapsed_ms,
++                        },
++                        "timings": {
++                            "prompt_n": max(processed - cached, 0),
++                            "prompt_ms": elapsed_ms,
++                            "predicted_n": 0,
++                            "predicted_ms": 0,
++                            "cache_n": cached,
++                        },
++                    }
++                    yield f"data: {json.dumps(progress_data)}\n\n"
++                    continue
+                 if res.prompt_token_ids is not None:
+                     num_prompt_tokens = len(res.prompt_token_ids)
+                     if res.encoder_prompt_token_ids is not None:
+@@ -574,7 +601,30 @@ class OpenAIServingChat(GenerateBaseServing):
+                                 ),
+                             )
+ 
+-                        data = chunk.model_dump_json(exclude_unset=True)
++                        chunk_data = chunk.model_dump(mode="json", exclude_unset=True)
++                        elapsed_ms = max(
++                            (res.metrics.first_token_latency * 1000)
++                            if res.metrics is not None
++                            and res.metrics.first_token_latency > 0
++                            else (time.monotonic() - stream_started) * 1000,
++                            0.001,
++                        )
++                        chunk_data["prompt_progress"] = {
++                            "total": num_prompt_tokens,
++                            "processed": num_prompt_tokens,
++                            "cache": num_cached_tokens or 0,
++                            "time_ms": elapsed_ms,
++                        }
++                        chunk_data["timings"] = {
++                            "prompt_n": max(
++                                num_prompt_tokens - (num_cached_tokens or 0), 0
++                            ),
++                            "prompt_ms": elapsed_ms,
++                            "predicted_n": 0,
++                            "predicted_ms": 0,
++                            "cache_n": num_cached_tokens or 0,
++                        }
++                        data = json.dumps(chunk_data)
+                         yield f"data: {data}\n\n"
+ 
+                     # Send response to echo the input portion of the
+@@ -810,7 +860,31 @@ class OpenAIServingChat(GenerateBaseServing):
+                             ),
+                         )
+ 
+-                    data = chunk.model_dump_json(exclude_unset=True)
++                    chunk_data = chunk.model_dump(mode="json", exclude_unset=True)
++                    prompt_ms = max(
++                        (res.metrics.first_token_latency * 1000)
++                        if res.metrics is not None
++                        and res.metrics.first_token_latency > 0
++                        else (time.monotonic() - stream_started) * 1000,
++                        0.001,
++                    )
++                    predicted_ms = 0.0
++                    if res.metrics is not None and res.metrics.first_token_ts > 0:
++                        predicted_ms = max(
++                            (res.metrics.last_token_ts - res.metrics.first_token_ts)
++                            * 1000,
++                            0.0,
++                        )
++                    chunk_data["timings"] = {
++                        "prompt_n": max(
++                            num_prompt_tokens - (num_cached_tokens or 0), 0
++                        ),
++                        "prompt_ms": prompt_ms,
++                        "predicted_n": previous_num_tokens[i],
++                        "predicted_ms": predicted_ms,
++                        "cache_n": num_cached_tokens or 0,
++                    }
++                    data = json.dumps(chunk_data)
+                     yield f"data: {data}\n\n"
+ 
+             # once the final token is handled, if stream_options.include_usage
+@@ -864,9 +938,39 @@ class OpenAIServingChat(GenerateBaseServing):
+                     system_fingerprint=self.system_fingerprint,
+                     metrics=stream_per_request_metrics,
+                 )
+-                final_usage_data = final_usage_chunk.model_dump_json(
+-                    exclude_unset=True, exclude_none=True
++                final_usage_payload = final_usage_chunk.model_dump(
++                    mode="json", exclude_unset=True, exclude_none=True
++                )
++                prompt_ms = max(
++                    (last_res.metrics.first_token_latency * 1000)
++                    if last_res is not None
++                    and last_res.metrics is not None
++                    and last_res.metrics.first_token_latency > 0
++                    else (time.monotonic() - stream_started) * 1000,
++                    0.001,
+                 )
++                predicted_ms = 0.0
++                if (
++                    last_res is not None
++                    and last_res.metrics is not None
++                    and last_res.metrics.first_token_ts > 0
++                ):
++                    predicted_ms = max(
++                        (
++                            last_res.metrics.last_token_ts
++                            - last_res.metrics.first_token_ts
++                        )
++                        * 1000,
++                        0.0,
++                    )
++                final_usage_payload["timings"] = {
++                    "prompt_n": max(num_prompt_tokens - (num_cached_tokens or 0), 0),
++                    "prompt_ms": prompt_ms,
++                    "predicted_n": completion_tokens,
++                    "predicted_ms": predicted_ms,
++                    "cache_n": num_cached_tokens or 0,
++                }
++                final_usage_data = json.dumps(final_usage_payload)
+                 yield f"data: {final_usage_data}\n\n"
+ 
+             # report to FastAPI middleware aggregate usage across all choices
+diff --git a/vllm/outputs.py b/vllm/outputs.py
+index 84b9fcc..7827a5d 100644
+--- a/vllm/outputs.py
++++ b/vllm/outputs.py
+@@ -144,6 +144,7 @@ class RequestOutput:
+         encoder_prompt_token_ids: list[int] | None = None,
+         num_cached_tokens: int | None = None,
+         num_cache_creation_tokens: int | None = None,
++        prefill_progress: tuple[int, int, int] | None = None,
+         *,
+         kv_transfer_params: dict[str, Any] | None = None,
+         ec_transfer_params: dict[str, Any] | None = None,
+@@ -167,6 +168,7 @@ class RequestOutput:
+         self.encoder_prompt_token_ids = encoder_prompt_token_ids
+         self.num_cached_tokens = num_cached_tokens
+         self.num_cache_creation_tokens = num_cache_creation_tokens
++        self.prefill_progress = prefill_progress
+         self.kv_transfer_params = kv_transfer_params
+         self.ec_transfer_params = ec_transfer_params
+ 
+@@ -176,6 +178,7 @@ class RequestOutput:
+         self.finished |= next_output.finished
+         self.kv_transfer_params = next_output.kv_transfer_params
+         self.ec_transfer_params = next_output.ec_transfer_params
++        self.prefill_progress = next_output.prefill_progress
+ 
+         for next_completion in next_output.outputs:
+             for i, completion in enumerate(self.outputs):
+diff --git a/vllm/v1/core/sched/scheduler.py b/vllm/v1/core/sched/scheduler.py
+index 77e495b..b6761a2 100644
+--- a/vllm/v1/core/sched/scheduler.py
++++ b/vllm/v1/core/sched/scheduler.py
+@@ -2119,6 +2119,11 @@ class Scheduler(SchedulerInterface):
+             should_emit_output = bool(
+                 new_token_ids or pooler_output is not None or stopped
+             )
++            is_partial_prefill = bool(
++                request.sampling_params is not None
++                and not should_emit_output
++                and request.num_computed_tokens < request.num_prompt_tokens
++            )
+             if should_emit_output:
+                 prefill_stats = request.take_prefill_stats()
+                 if prefill_stats is not None:
+@@ -2160,8 +2165,20 @@ class Scheduler(SchedulerInterface):
+ 
+             # Get prompt logprobs for this request.
+             prompt_logprobs_tensors = prompt_logprobs_dict.get(req_id)
+-            if should_emit_output:
++            if should_emit_output or is_partial_prefill:
+                 # Add EngineCoreOutput for this Request.
++                progress = None
++                if is_partial_prefill:
++                    cached_tokens = (
++                        request.prefill_stats.num_cached_tokens
++                        if request.prefill_stats is not None
++                        else 0
++                    )
++                    progress = (
++                        request.num_prompt_tokens,
++                        min(request.num_computed_tokens, request.num_prompt_tokens),
++                        cached_tokens,
++                    )
+                 outputs[request.client_index].append(
+                     EngineCoreOutput(
+                         request_id=req_id,
+@@ -2172,7 +2189,7 @@ class Scheduler(SchedulerInterface):
+                         new_prompt_logprobs_tensors=prompt_logprobs_tensors,
+                         pooling_output=pooler_output,
+                         stop_reason=request.stop_reason,
+-                        events=request.take_events(),
++                        events=None if is_partial_prefill else request.take_events(),
+                         prefill_stats=prefill_stats,
+                         spec_decode_metrics=(
+                             request.spec_decode_metrics
+@@ -2184,6 +2201,7 @@ class Scheduler(SchedulerInterface):
+                         trace_headers=request.trace_headers,
+                         routed_experts=routed_experts,
+                         num_nans_in_logits=request.num_nans_in_logits,
++                        prefill_progress=progress,
+                     )
+                 )
+             else:
+diff --git a/vllm/v1/engine/__init__.py b/vllm/v1/engine/__init__.py
+index 5ae9ee0..01e0d4e 100644
+--- a/vllm/v1/engine/__init__.py
++++ b/vllm/v1/engine/__init__.py
+@@ -233,6 +233,10 @@ class EngineCoreOutput(
+     # Appended last so `array_like` positional serialization stays compatible.
+     spec_decode_metrics: RequestSpecDecodeMetrics | None = None
+ 
++    # (total prompt tokens, processed prompt tokens, cached prompt tokens).
++    # Present on partial chunked-prefill updates before the first output token.
++    prefill_progress: tuple[int, int, int] | None = None
++
+     @property
+     def finished(self) -> bool:
+         return self.finish_reason is not None
+diff --git a/vllm/v1/engine/output_processor.py b/vllm/v1/engine/output_processor.py
+index 419e3aa..0d721b5 100644
+--- a/vllm/v1/engine/output_processor.py
++++ b/vllm/v1/engine/output_processor.py
+@@ -656,10 +656,17 @@ class OutputProcessor:
+                 # Ignore output for already-aborted request.
+                 continue
+ 
+-            # 1) Compute stats for this iteration.
+-            self._update_stats_from_output(
+-                req_state, engine_core_output, engine_core_timestamp, iteration_stats
+-            )
++            is_partial_prefill = engine_core_output.prefill_progress is not None
++
++            # Partial prefill updates carry no generated token and must not be
++            # counted as the request's first output token.
++            if not is_partial_prefill:
++                self._update_stats_from_output(
++                    req_state,
++                    engine_core_output,
++                    engine_core_timestamp,
++                    iteration_stats,
++                )
+ 
+             new_token_ids = engine_core_output.new_token_ids
+             pooling_output = engine_core_output.pooling_output
+@@ -672,7 +679,7 @@ class OutputProcessor:
+                     engine_core_output.routed_experts
+                 )
+ 
+-            if req_state.is_prefilling:
++            if req_state.is_prefilling and not is_partial_prefill:
+                 if engine_core_output.prefill_stats is not None:
+                     req_state.num_cached_tokens = (
+                         engine_core_output.prefill_stats.num_cached_tokens
+@@ -713,6 +720,10 @@ class OutputProcessor:
+                 kv_transfer_params,
+                 ec_transfer_params,
+             ):
++                if isinstance(request_output, RequestOutput):
++                    request_output.prefill_progress = (
++                        engine_core_output.prefill_progress
++                    )
+                 if req_state.streaming_input:
+                     request_output.finished = False
+ 

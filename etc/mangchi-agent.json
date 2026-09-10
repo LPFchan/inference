@@ -7,9 +7,11 @@
       "gpu_mem_util": 0.22,
       "port": 8001,
       "pinned": false,
-      "vllm_docker_image": "ghcr.io/nvidia-ai-iot/vllm:latest-jetson-thor",
+      "vllm_docker_image": "mangchi-vllm:thor-qsa-fp8-5fd5dd5",
       "models_dir_host": "/home/yeowool/models/nvfp4",
       "serve_args": [
+        "--enable-per-request-metrics",
+        "--enable-prompt-tokens-details",
         "--max-model-len", "32768"
       ]
     },
@@ -27,6 +29,8 @@
         "VLLM_PLE_MMAP_PREWARM": "0"
       },
       "serve_args": [
+        "--enable-per-request-metrics",
+        "--enable-prompt-tokens-details",
         "--max-model-len", "262144",
         "--kv-cache-dtype", "fp8",
         "--max-num-seqs", "1",
