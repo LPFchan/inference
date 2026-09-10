@@ -20,6 +20,8 @@
         "--kv-cache-dtype", "fp8",
         "--max-num-seqs", "1",
         "--max-num-batched-tokens", "2048",
+        "--enable-auto-tool-choice",
+        "--tool-call-parser", "qwen3_xml",
         "--no-enable-flashinfer-autotune",
         "--enforce-eager",
         "--limit-mm-per-prompt", "{\"image\":2,\"video\":0}",
@@ -48,6 +50,8 @@
         "--kv-cache-dtype", "fp8",
         "--max-num-seqs", "1",
         "--max-num-batched-tokens", "8192",
+        "--enable-auto-tool-choice",
+        "--tool-call-parser", "qwen3_xml",
         "--moe-backend", "auto",
         "--no-enable-flashinfer-autotune",
         "--enforce-eager"

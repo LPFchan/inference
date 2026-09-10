@@ -194,6 +194,8 @@ def test_specs_file_parses():
     for spec in (dense, flash):
         assert "--enable-per-request-metrics" in spec.serve_args
         assert "--enable-prompt-tokens-details" in spec.serve_args
+        assert "--enable-auto-tool-choice" in spec.serve_args
+        assert spec.serve_args[spec.serve_args.index("--tool-call-parser") + 1] == "qwen3_xml"
     assert flash.env.get("VLLM_PLE_MMAP") == "1"
     assert flash.env.get("VLLM_THOR_CUTEDSL_MOE") == "1"
     assert dense.env.get("VLLM_THOR_CUTEDSL_DENSE") == "1"
