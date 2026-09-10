@@ -16,8 +16,9 @@ speed. Production acceptance remains in `records/PLANS.md`.
   inside the installed `thor_nvfp4/nvidia/original` directory.
 - Python adaptations make imports package-relative and return the compiled
   kernel from NVIDIA's export wrapper. CUDA adaptations retain device code,
-  replace TensorRT host dispatch with a Torch binding, and guard expert ids
-  before indexing activation scales. NVIDIA's full TensorRT runtime is unnecessary.
+  replace TensorRT host dispatch with a Torch binding, and skip vLLM's `-1`
+  padded-route sentinel before indexing activation scales. NVIDIA's full
+  TensorRT runtime is unnecessary.
 - The FC2 exporter selects NVIDIA's register-atomic epilogue (`use_blkred=False`).
   Its pinned bulk-reduction path issues asynchronous shared-to-global reductions
   without a bulk commit/wait before shared-buffer reuse or a producer barrier

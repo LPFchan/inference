@@ -118,6 +118,17 @@ def main():
         torch.cuda.synchronize()
         require_quality("graph_replay", captured, actual)
         torch.testing.assert_close(captured.float(), actual.float(), rtol=.02, atol=.002)
+    x = (torch.randn(1, HIDDEN, device="cuda") * .25).to(torch.bfloat16)
+    control_ids = torch.arange(TOP_K, device="cuda", dtype=torch.int32)[None].contiguous()
+    sentinel_ids = control_ids.clone()
+    sentinel_ids[0, -1] = -1
+    routes = torch.softmax(torch.randn(1, TOP_K, device="cuda"), dim=-1)
+    routes[0, -1] = 0
+    control = run(x, control_ids, routes, prepared)
+    sentinel = run(x, sentinel_ids, routes, prepared)
+    require_quality("negative_expert_sentinel", sentinel, control)
+    torch.testing.assert_close(sentinel.float(), control.float(), rtol=.02, atol=.002)
+    print("PASS: -1 padded-route sentinel")
     print("PASS: exact-geometry numerical comparisons and CUDA graph replay")
 
 

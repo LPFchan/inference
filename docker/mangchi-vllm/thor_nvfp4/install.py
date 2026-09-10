@@ -70,9 +70,10 @@ def device_body(text):
     license_header = text[:text.index("*/") + 2]
     body = text.split(start, 1)[1].split(end, 1)[0]
     # The original host TensorRT dispatcher is replaced by prepare.cu's Torch binding.
-    # Reject malformed routing on-device before the quantizer indexes global scales.
+    # vLLM uses -1 for padded or dropped routes. Match build_layout_kernel by
+    # skipping invalid expert ids before the quantizer indexes global scales.
     marker = "        int const expert = topkIds[routedRowIdx];"
-    body = body.replace(marker, marker + "\n        if (expert < 0 || expert >= 512) { assert(false); continue; }")
+    body = body.replace(marker, marker + "\n        if (expert < 0 || expert >= 512) { continue; }")
     return license_header + "\n// Derived by thor_nvfp4/install.py from " + SOURCE_SHA + "\n" + body + "\n"
 
 
