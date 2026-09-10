@@ -36,14 +36,18 @@ RUN git init vllm \
  && git -C vllm checkout --detach FETCH_HEAD \
  && test "$(git -C vllm rev-parse HEAD)" = "${VLLM_SHA}"
 WORKDIR /build/vllm
-COPY patches/mangchi-vllm/0001-live-prefill-and-generation-timings.patch /tmp/vllm-live-timings.patch
-RUN git apply --check /tmp/vllm-live-timings.patch \
- && git apply /tmp/vllm-live-timings.patch
 RUN python use_existing_torch.py || true
 RUN pip install --no-cache-dir "setuptools-scm>=8"
 RUN MAX_JOBS=${MAX_JOBS} pip wheel --no-build-isolation --no-deps -w /build/dist .
 RUN set -eux; WHL="$(find /build -name 'vllm-*.whl' | head -1)"; echo "WHEEL=$WHL"; test -n "$WHL"; \
     pip install --no-cache-dir --no-deps "$WHL"
+
+# This patch changes Python only. Apply it to the installed package after the
+# native wheel is built so telemetry edits reuse the expensive CUDA build layer.
+COPY patches/mangchi-vllm/0001-live-prefill-and-generation-timings.patch /tmp/vllm-live-timings.patch
+RUN cd /opt/venv/lib/python3.12/site-packages \
+ && git apply --check /tmp/vllm-live-timings.patch \
+ && git apply /tmp/vllm-live-timings.patch
 
 # install vLLM's runtime python deps (xgrammar, etc.) - use_existing_torch already stripped
 # torch/flashinfer pins, so this won't downgrade the stack we just built
