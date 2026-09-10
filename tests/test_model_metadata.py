@@ -96,6 +96,67 @@ class ModelMetadataCapabilityTests(unittest.TestCase):
             {"supported": False, "supported_efforts": []},
         )
 
+    def test_vllm_remote_family_capability_lists_template_levels(self):
+        registry = self.make_registry(
+            {
+                "qwen-remote": {
+                    "backend": "vllm-remote",
+                    "family": "qwen",
+                    "remote-agent-url": "http://mangchi.lost.plus:9700",
+                    "remote-url": "http://mangchi.lost.plus:8001",
+                    "remote-model-id": "qwen-remote",
+                }
+            },
+            {
+                "qwen": {
+                    "vllm-reasoning-efforts": ["xhigh", "medium", "low"],
+                    "vllm-default-effort": "xhigh",
+                }
+            },
+        )
+        self.assertEqual(
+            registry.model_metadata("qwen-remote")["reasoning"],
+            {
+                "supported_efforts": ["xhigh", "medium", "low"],
+                "default_effort": "xhigh",
+                "default_enabled": True,
+                "mandatory": False,
+            },
+        )
+
+    def test_vllm_remote_without_family_capability_is_unsupported(self):
+        registry = self.make_registry(
+            {
+                "plain-remote": {
+                    "backend": "vllm-remote",
+                    "family": "qwen",
+                    "remote-agent-url": "http://mangchi.lost.plus:9700",
+                    "remote-url": "http://mangchi.lost.plus:8002",
+                    "remote-model-id": "plain-remote",
+                }
+            },
+            {"qwen": {"extra-args": ["--chat-template-kwargs", "{}"]}},
+        )
+        self.assertEqual(
+            registry.model_metadata("plain-remote")["reasoning"],
+            {"supported": False, "supported_efforts": []},
+        )
+
+    def test_vllm_remote_malformed_capability_is_unknown(self):
+        registry = self.make_registry(
+            {
+                "bad-remote": {
+                    "backend": "vllm-remote",
+                    "family": "qwen",
+                    "remote-agent-url": "http://mangchi.lost.plus:9700",
+                    "remote-url": "http://mangchi.lost.plus:8001",
+                    "remote-model-id": "bad-remote",
+                }
+            },
+            {"qwen": {"vllm-reasoning-efforts": "xhigh"}},
+        )
+        self.assertEqual(registry.model_metadata("bad-remote")["reasoning"], {})
+
     def test_malformed_or_conflicting_reasoning_configuration_is_unknown(self):
         registry = self.make_registry(
             {

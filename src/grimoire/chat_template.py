@@ -137,6 +137,45 @@ def configured_reasoning_capability(
     }
 
 
+def vllm_remote_reasoning_capability(
+    cfg: Mapping, family_defaults: Mapping | None = None
+) -> dict:
+    """Describe the template-native reasoning levels of a vllm-remote model.
+
+    vLLM backends are not launched by the gateway and do not accept
+    llama.cpp-style ``--chat-template-kwargs`` aliases, so the strict
+    llama-config path cannot describe them.  What can be stated without
+    guessing: a remote model whose family declares
+    ``vllm-reasoning-efforts`` exposes exactly those template levels per
+    request (``reasoning_effort`` or ``chat_template_kwargs``), with the
+    family ``vllm-default-effort`` or the first listed level as default.
+    A remote model without the family capability advertises no reasoning
+    control.
+    """
+    defaults = family_defaults if isinstance(family_defaults, Mapping) else {}
+    efforts = defaults.get("vllm-reasoning-efforts")
+    if efforts is None:
+        return {"supported": False, "supported_efforts": []}
+    if (
+        not isinstance(efforts, (list, tuple))
+        or not efforts
+        or not all(
+            isinstance(value, str) and value and value.strip() == value
+            for value in efforts
+        )
+    ):
+        return {}
+    default = defaults.get("vllm-default-effort", efforts[0])
+    if default not in efforts:
+        return {}
+    return {
+        "supported_efforts": list(efforts),
+        "default_effort": default,
+        "default_enabled": True,
+        "mandatory": False,
+    }
+
+
 def apply_chat_template_kwargs(payload: dict, cfg: Mapping, family_defaults: Mapping | None = None) -> dict:
     """Apply configured defaults while preserving explicit request overrides."""
     configured = configured_chat_template_kwargs(cfg, family_defaults)

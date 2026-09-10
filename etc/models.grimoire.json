@@ -1397,7 +1397,13 @@
       "extra-args": [
         "--chat-template-kwargs",
         "{\"preserve_thinking\":true}"
-      ]
+      ],
+      "vllm-reasoning-efforts": [
+        "xhigh",
+        "medium",
+        "low"
+      ],
+      "vllm-default-effort": "xhigh"
     }
   }
 }

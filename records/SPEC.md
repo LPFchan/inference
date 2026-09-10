@@ -88,6 +88,11 @@ These decisions were locked before Phase 1 and are not subject to renegotiation 
   reasoning kwarg advertises `reasoning.supported: false`.
 - Malformed or conflicting reasoning kwargs produce an empty reasoning object;
   the gateway does not infer a level from an alias name or from another model.
+- A `vllm-remote` model instead advertises the template-native levels its
+  family declares in `vllm-reasoning-efforts` (with `vllm-default-effort` or
+  the first listed level as `default_effort`, `mandatory: false`), selectable
+  per request through `reasoning_effort` or `chat_template_kwargs`. A remote
+  model whose family declares none advertises `reasoning.supported: false`.
 
 ### Contract G: Mangchi Remote Backends
 

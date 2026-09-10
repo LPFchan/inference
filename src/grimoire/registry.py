@@ -13,7 +13,10 @@ from typing import Optional
 from urllib.parse import urlsplit
 
 from grimoire import config
-from grimoire.chat_template import configured_reasoning_capability
+from grimoire.chat_template import (
+    configured_reasoning_capability,
+    vllm_remote_reasoning_capability,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -308,6 +311,10 @@ class ModelRegistry:
         else:
             capability_names = set()
         family_defaults = self.get_family_defaults(cfg.get("family"))
+        if _get_backend(cfg) == BACKEND_VLLM_REMOTE:
+            reasoning = vllm_remote_reasoning_capability(cfg, family_defaults)
+        else:
+            reasoning = configured_reasoning_capability(cfg, family_defaults)
         return {
             "id": model_name,
             "object": "model",
@@ -321,7 +328,7 @@ class ModelRegistry:
                 "text",
                 "image",
             ] if {"multimodal", "vision"} & capability_names else ["text"],
-            "reasoning": configured_reasoning_capability(cfg, family_defaults),
+            "reasoning": reasoning,
             "cost": cfg.get("cost", {"input": 0, "output": 0}),
             "backend": _get_backend(cfg),
             "pinned_gpu": self.get_fixed_gpu(model_name),
