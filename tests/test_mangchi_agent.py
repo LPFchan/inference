@@ -254,6 +254,7 @@ def test_qsa_fp8_canary_build_is_pinned_and_thor_aware():
     assert 'test "$(git -C vllm rev-parse HEAD)" = "${VLLM_SHA}"' in dockerfile
     assert "VLLM_FLASH_ATTN_SHA=506341a143fcabd4bb79052a7605ada727d6b3f5" in dockerfile
     assert "id=mangchi-vllm-build,target=/build/vllm/build" in dockerfile
+    assert "find build -type f -name CMakeCache.txt -delete" in dockerfile
     assert "VLLM_FLASH_ATTN_SRC_DIR=/build/vllm-flash-attn" in dockerfile
     assert "git -C vllm-flash-attn submodule update --init --depth 1 csrc/cutlass" in dockerfile
     assert "submodule update --init --recursive" not in dockerfile

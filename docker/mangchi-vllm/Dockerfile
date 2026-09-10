@@ -55,6 +55,11 @@ RUN python use_existing_torch.py || true
 RUN pip install --no-cache-dir "setuptools-scm>=8"
 RUN --mount=type=cache,id=mangchi-vllm-build,target=/build/vllm/build \
     --mount=type=cache,id=mangchi-vllm-deps,target=/build/vllm/.deps \
+    --mount=type=cache,id=mangchi-vllm-rust-target,target=/build/vllm/rust/target \
+    --mount=type=cache,id=mangchi-vllm-cargo-registry,target=/root/.cargo/registry \
+    --mount=type=cache,id=mangchi-vllm-cargo-git,target=/root/.cargo/git \
+    find build -type f -name CMakeCache.txt -delete \
+    && \
     VLLM_FLASH_ATTN_SRC_DIR=/build/vllm-flash-attn \
     VLLM_THOR_MINIMAL_BUILD=1 \
     CMAKE_ARGS="-DVLLM_THOR_MINIMAL_BUILD=ON -DVLLM_FLASH_ATTN_THOR_VISION_ONLY=ON" \
