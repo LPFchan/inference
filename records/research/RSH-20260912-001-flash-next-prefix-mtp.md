@@ -23,12 +23,24 @@ server metrics, and spec-decode counters.
 
 ## Findings
 
-- MTP=2 works. Server-reported generation throughput reached 14.3-15.0 tok/s
-  against the 10.56 tok/s pre-MTP decode baseline in PLANS (+36-42%).
-- Draft acceptance on the abliterated checkpoint is 71.5% (1,764/2,468;
-  position 0: 81%, position 1: 62%), above the RadixArk ~63% free-form
-  reference. The worry that refusal-projection would shift draft hidden states
-  and depress acceptance did not materialize.
+- MTP=2 works, and the gain tracks how predictable the text is. End-to-end
+  against the 10.56 tok/s pre-MTP decode baseline in PLANS: code 26.0 tok/s
+  (2.46x), prose 16.5-17.5 tok/s (1.56-1.65x), with mean accepted length
+  2.82/3.00 and 1.97-2.00/3.00 respectively and 2.95/3.00 on arithmetic. The
+  first pooled figure recorded here came from vLLM's averaged generation gauge
+  over a reasoning-heavy harness, which both understates the rate and hides the
+  workload split.
+- Per-position acceptance is 95.1/86.6% on code and 61-64/35.5-36.0% on prose,
+  matching or beating tonyd2wild's Spark reference (93/78% code, 65/39% prose).
+  The worry that refusal-projection would shift draft hidden states and depress
+  acceptance did not materialize on either workload.
+- Step rate is ~9/s on both workloads against 10.56/s pre-MTP, so the MTP step
+  costs about 15% more and returns the accepted length. Per-step overhead is
+  therefore not the limiter; acceptance length on prose is.
+- GPU SM occupancy during decode is 63-69% mean (median 62-68%, under 20% for
+  only 4-8% of samples). There is real host-side headroom in eager mode, but
+  decode is not dominated by launch gaps, so CUDA graphs are an incremental
+  win rather than the missing multiplier.
 - vLLM's own warning explains the prefix-cache behavior: with no KV group
   annotated as the draft's, every group (including Mamba groups 0-3) is
   flagged as a draft group, which the code documents as disabling

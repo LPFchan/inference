@@ -121,11 +121,16 @@ Steps 1-2 (done 2026-09-12, `RSH-20260912-001`): image
 mangchi-vllm:thor-dense-candidate-v7-prefix-mtp ships the ported
 blazux/qwen3.8-Flash-DGX two-line mamba block_size fix
 (docker/mangchi-vllm/patch_mamba_block_size.py) and serves MTP=2 from the
-in-checkpoint draft head. MTP is the whole gain so far: 14.3-15.0 tok/s
-generation against the 10.56 pre-MTP baseline (+36-42%), draft acceptance
-71.5% (position 0 81%, position 1 62%) — above the RadixArk ~63% free-form
-reference, so refusal projection did not depress it. The verify-shape risk is
-closed: thor_nvfp4/check.py now gates tokens 2, 3, 4. Budget cost: util
+in-checkpoint draft head. MTP is the whole gain so far, and it scales with how
+predictable the text is. End-to-end against the 10.56 tok/s pre-MTP baseline:
+code 26.0 tok/s (2.46x, mean accepted length 2.82/3.00, per-position
+95.1/86.6%), prose 16.5-17.5 tok/s (1.56-1.65x, 1.97-2.00/3.00, 61-64/36%),
+arithmetic 2.95/3.00. Those per-position rates match or beat tonyd2wild's Spark
+reference (93/78% code, 65/39% prose), so refusal projection did not depress the
+draft head; the prose gap is the workload, not the checkpoint. Step rate holds
+at ~9/s on both workloads against 10.56/s pre-MTP, so MTP costs roughly 15% per
+step and returns the accepted length. The verify-shape risk is closed:
+thor_nvfp4/check.py now gates tokens 2, 3, 4. Budget cost: util
 0.68 -> 0.72, resident 83 -> 88 GiB, with the unused multimodal warmup
 disabled to pay for it.
 
