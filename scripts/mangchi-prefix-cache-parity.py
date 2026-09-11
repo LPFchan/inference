@@ -53,7 +53,9 @@ def chat(base_url, model, messages, max_tokens=48, logprobs=False):
     lp = choice.get("logprobs")
     if lp and lp.get("content"):
         top = [t.get("token") for t in lp["content"][0].get("top_logprobs", [])]
-    return choice["message"]["content"], usage, dt, top
+    msg = choice["message"]
+    text_out = msg.get("content") or msg.get("reasoning") or ""
+    return text_out, usage, dt, top
 
 
 def make_prompt(n_tokens_hint):
