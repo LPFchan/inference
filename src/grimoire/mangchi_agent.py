@@ -205,12 +205,15 @@ class ResidencyManager:
             return True
 
     @staticmethod
-    def _docker(args: list[str]) -> tuple[int, str]:
+    def _docker(args: list[str], merge_stderr: bool = False) -> tuple[int, str]:
         try:
             out = subprocess.run(
                 ["docker", *args], capture_output=True, text=True, timeout=30
             )
-            return out.returncode, (out.stdout or "").strip()
+            text = out.stdout or ""
+            if merge_stderr:
+                text = text + (out.stderr or "")
+            return out.returncode, text.strip()
         except Exception as exc:
             return 1, str(exc)
 
@@ -230,7 +233,9 @@ class ResidencyManager:
         )
         if rc != 0:
             return "container state unavailable"
-        logs_rc, logs = self._docker(["logs", "--tail", "80", name])
+        # A container's stderr arrives on `docker logs`' stderr, and engine
+        # tracebacks go there. Merge both streams or the crash reason is lost.
+        logs_rc, logs = self._docker(["logs", "--tail", "80", name], merge_stderr=True)
         if logs_rc == 0 and logs:
             logger.error("final logs for failed container %s:\n%s", name, logs)
         return state
