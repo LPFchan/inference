@@ -142,6 +142,54 @@ def _telemetry_gpu_index(active):
     return active.gpu if len(gpus) == 1 else None
 
 
+def _rewrite_chunk_model(chunk, model_name):
+    """Replace the backend model id in one response payload with the gateway alias.
+
+    The proxy rewrites the request's model to the backend's native id so the
+    engine accepts it, but the engine echoes that id back in its response. A
+    client that records the response's model (the webui tags each assistant
+    message with it) then holds a value that matches none of its listed models,
+    so it shows the conversation's model as unavailable. Rewrite the echoed id
+    back to the public alias before the client sees it. Handles a single SSE
+    event (data: {json} line) or a whole non-SSE JSON body; anything that does
+    not parse as a model-bearing payload passes through unchanged.
+    """
+    if not chunk:
+        return chunk
+    stripped = chunk.lstrip()
+    if stripped.startswith(b"data:"):
+        nl = chunk.find(b"\n")
+        if nl == -1:
+            return chunk
+        line = chunk[:nl]
+        rest = chunk[nl:]
+        body = line[line.find(b":") + 1:].strip()
+        if body == b"[DONE]":
+            return chunk
+        try:
+            data = json.loads(body)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return chunk
+        if isinstance(data, dict) and "model" in data:
+            data["model"] = model_name
+            return b"data: " + json.dumps(data).encode() + rest
+        return chunk
+    try:
+        data = json.loads(chunk)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return chunk
+    if isinstance(data, dict) and "model" in data:
+        data["model"] = model_name
+        return json.dumps(data).encode()
+    return chunk
+
+
+async def _rewrite_stream_model(stream, model_name):
+    """Yield response chunks with each model field rewritten to the alias."""
+    async for chunk in stream:
+        yield _rewrite_chunk_model(chunk, model_name)
+
+
 async def _proxy_chat(
     requested_model,
     payload,
@@ -239,6 +287,7 @@ async def _proxy_chat(
         try:
             stream = upstream.aiter_raw()
             stream = plugin_manager.wrap_response_stream(stream, requested_name, model_cfg)
+            stream = _rewrite_stream_model(stream, requested_name)
             if user_hash:
                 stream = _record_response_stream(
                     stream,

@@ -186,6 +186,28 @@ class LlamaProxyTests(unittest.IsolatedAsyncioTestCase):
         result = llama_proxy._apply_model_logit_bias(payload.copy(), cfg)
         self.assertEqual(result["logit_bias"], {"262143": 1.0, "111038": -100.0, "7": 1.5, "5": -2.0})
 
+    def test_rewrite_chunk_model_rewrites_sse_model_to_alias(self):
+        chunk = b'data: {"id":"x","object":"chat.completion.chunk","model":"/models/qwen3.8-flash-next-abliterated-w4a4","choices":[]}\n\n'
+        out = llama_proxy._rewrite_chunk_model(chunk, "qwen3.8-flash-next-uncensored-nvfp4")
+        self.assertIn(b'"model": "qwen3.8-flash-next-uncensored-nvfp4"', out)
+        self.assertNotIn(b"abliterated", out)
+        self.assertTrue(out.startswith(b"data: "))
+
+    def test_rewrite_chunk_model_passes_through_done_and_non_model(self):
+        done = b"data: [DONE]\n\n"
+        self.assertEqual(llama_proxy._rewrite_chunk_model(done, "alias"), done)
+        other = b'data: {"choices":[{"delta":{"content":"hi"}}]}\n\n'
+        self.assertEqual(llama_proxy._rewrite_chunk_model(other, "alias"), other)
+
+    def test_rewrite_chunk_model_rewrites_non_sse_body(self):
+        body = b'{"id":"x","model":"/models/m","choices":[],"usage":{}}'
+        out = llama_proxy._rewrite_chunk_model(body, "alias")
+        self.assertIn(b'"model": "alias"', out)
+
+    def test_rewrite_chunk_model_leaves_unparseable_bytes(self):
+        blob = b"not json at all"
+        self.assertEqual(llama_proxy._rewrite_chunk_model(blob, "alias"), blob)
+
     def test_request_logit_bias_overrides_cli_logit_bias(self):
         payload = {"messages": []}
         cfg = {

@@ -241,14 +241,14 @@ def test_specs_file_parses():
     assert "--enforce-eager" in flash.serve_args
     assert "--no-enable-flashinfer-autotune" in flash.serve_args
     assert flash.serve_args[flash.serve_args.index("--max-model-len") + 1] == "262144"
-    assert dense.serve_args[dense.serve_args.index("--max-model-len") + 1] == "100000"
+    assert dense.serve_args[dense.serve_args.index("--max-model-len") + 1] == "262144"
     assert flash.serve_args[flash.serve_args.index("--kv-cache-dtype") + 1] == "fp8"
     assert flash.serve_args[flash.serve_args.index("--max-num-batched-tokens") + 1] == "8192"
     assert dense.serve_args[dense.serve_args.index("--max-num-batched-tokens") + 1] == "2048"
     assert flash.gpu_mem_util == 0.68
     assert flash.resident_gb == 83
-    assert dense.gpu_mem_util == 0.20
-    assert dense.resident_gb == 25
+    assert dense.gpu_mem_util == 0.245
+    assert dense.resident_gb == 30
     assert flash.resident_gb > specs["qwen3.8-27b-uncensored-nvfp4"].resident_gb
     assert dense.resident_gb + flash.resident_gb <= agent.MEMORY_BUDGET_GIB
 
