@@ -95,7 +95,7 @@ def main():
     prepared = prepare_weights(layer)
     from .diagnose import require_quality, validate_case
 
-    for tokens, pattern in ((1, "shared"), (10, "shared"), (129, "shared"), (32, "scattered")):
+    for tokens, pattern in ((1, "shared"), (2, "shared"), (3, "shared"), (4, "shared"), (10, "shared"), (129, "shared"), (32, "scattered")):
         x = (torch.randn(tokens, HIDDEN, device="cuda") * .25).to(torch.bfloat16)
         ids = torch.arange(TOP_K, device="cuda").expand(tokens, -1)
         if pattern == "scattered":

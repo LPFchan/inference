@@ -109,6 +109,13 @@ RUN python /tmp/patch_ple_mmap.py
 COPY docker/mangchi-vllm/patch_thor_qsa.py /tmp/patch_thor_qsa.py
 RUN python /tmp/patch_thor_qsa.py
 
+# Prefix caching on this hybrid model: EngineCore narrows cache_config.block_size
+# to the QSA raw-key ring (8/4 tokens), which the GDN Mamba state seed and the
+# scheduler's block-aligned split then misread as the 1600-token Mamba block.
+# Port of blazux/qwen3.8-Flash-DGX's two-line fix (Apache-2.0).
+COPY docker/mangchi-vllm/patch_mamba_block_size.py /tmp/patch_mamba_block_size.py
+RUN python /tmp/patch_mamba_block_size.py
+
 # Optional experimental NVIDIA SM110 W4A4 MoE adapter. Sources are fetched by
 # exact revision + SHA256; small native helpers and CuTe kernels compile once
 # during model weight preparation, before CUDA graph capture. Build a separate

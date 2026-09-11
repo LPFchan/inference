@@ -111,7 +111,47 @@ Triton-MLIR FA4 targets because their own configure checks reject SM110; keep
 the core stable-ABI CUDA/MoE extensions, FA2, Triton kernels, CUTLASS, and the
 separately installed FlashInfer and CuTeDSL paths used by the accepted models.
 
+
+## Flash-Next decode/TTFT program (prefix caching, MTP, graphs)
+
+Three-step program greenlit by the operator 2026-09-12, sequenced prefix
+caching first, then MTP in eager mode, then CUDA graphs.
+
+Step 1 (in progress): prefix caching via the ported
+blazux/qwen3.8-Flash-DGX two-line mamba block_size fix
+(docker/mangchi-vllm/patch_mamba_block_size.py), plus MTP=2 from the
+in-checkpoint draft head, both in image
+mangchi-vllm:thor-dense-candidate-v7-prefix-mtp. Validation must use
+varied-length repeated prompts (a same-length prompt cannot catch a
+misaligned Mamba state restore); check --mamba-cache-mode align behavior
+and logprob parity cold-vs-hit. tonyd2wild's lane keeps prefix caching off
+by default pending vLLM issue 54173, so our acceptance bar is measured parity,
+not boot success.
+
+MTP acceptance risk: the verify step pushes num_spec+1 tokens (3 at MTP=2)
+through the native MoE, between the gated {1,10,32,129} shapes; add 2-4
+token cases to thor_nvfp4/check.py before trusting measured acceptance.
+Our abliterated checkpoint keeps its 31-tensor BF16 MTP head, but refusal
+projection may shift draft acceptance versus the RadixArk reference
+(~63% free-form prose, ~94% predictable text).
+
+Step 3 (graphs) has a concrete design from tonyd2wild's
+Qwen3.8-Flash-Next-NVFP4-DGX-Spark single-spark-vllm-tp1 lane: move the PLE
+gather out of the forward pass into model-state prepare_inputs with fixed
+GPU buffers (shape follows Trosfy's vLLM PR 54129), enabling
+compilation-config mode 0 with cudagraph_mode FULL_DECODE_ONLY.
+Their staged gather replaces mmap with preadv positional reads on a thread
+pool (their measurements: mmap page faults serialize on mmap_lock at 10-20K
+rows/s cold regardless of threads; preadv reaches 131K rows/s cold at 64
+threads on GB10 NVMe). Their results ladder on GB10: eager+MTP 24.6 tok/s,
+piecewise graphs 32.5, staged gather + FULL_DECODE_ONLY 37.4, plus
+reduced-vocab draft + MTP3 = 43.9. Port candidates live in that repo's
+single-spark-vllm-tp1/patch/ (ple_mmap.py preadv reader, ple_layer.diff
+staged integration). Reduced draft vocabulary (65,536-row head projection,
+target still verifies full vocab) is an independent +15-20% decode option.
+
 ## Backlog (Future Interest)
+
 
 | Priority | Item | Why Deferred | Prerequisite |
 |----------|------|-------------|--------------|
