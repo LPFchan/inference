@@ -117,25 +117,33 @@ separately installed FlashInfer and CuTeDSL paths used by the accepted models.
 Three-step program greenlit by the operator 2026-09-12, sequenced prefix
 caching first, then MTP in eager mode, then CUDA graphs.
 
-Step 1 (in progress): prefix caching via the ported
+Steps 1-2 (done 2026-09-12, `RSH-20260912-001`): image
+mangchi-vllm:thor-dense-candidate-v7-prefix-mtp ships the ported
 blazux/qwen3.8-Flash-DGX two-line mamba block_size fix
-(docker/mangchi-vllm/patch_mamba_block_size.py), plus MTP=2 from the
-in-checkpoint draft head, both in image
-mangchi-vllm:thor-dense-candidate-v7-prefix-mtp. Validation must use
-varied-length repeated prompts (a same-length prompt cannot catch a
-misaligned Mamba state restore); check --mamba-cache-mode align behavior
-and logprob parity cold-vs-hit. tonyd2wild's lane keeps prefix caching off
-by default pending vLLM issue 54173, so our acceptance bar is measured parity,
-not boot success.
+(docker/mangchi-vllm/patch_mamba_block_size.py) and serves MTP=2 from the
+in-checkpoint draft head. MTP is the whole gain so far: 14.3-15.0 tok/s
+generation against the 10.56 pre-MTP baseline (+36-42%), draft acceptance
+71.5% (position 0 81%, position 1 62%) — above the RadixArk ~63% free-form
+reference, so refusal projection did not depress it. The verify-shape risk is
+closed: thor_nvfp4/check.py now gates tokens 2, 3, 4. Budget cost: util
+0.68 -> 0.72, resident 83 -> 88 GiB, with the unused multimodal warmup
+disabled to pay for it.
 
-MTP acceptance risk: the verify step pushes num_spec+1 tokens (3 at MTP=2)
-through the native MoE, between the gated {1,10,32,129} shapes; add 2-4
-token cases to thor_nvfp4/check.py before trusting measured acceptance.
-Our abliterated checkpoint keeps its 31-tensor BF16 MTP head, but refusal
-projection may shift draft acceptance versus the RadixArk reference
-(~63% free-form prose, ~94% predictable text).
+Prefix caching is enabled but inert on this vLLM pin (5fd5dd5). With no KV
+group annotated as the draft's, vLLM flags the Mamba groups as draft groups
+and silently disables cross-request reuse: cached_tokens stays 0 on every
+repeat, so nothing can come from a misaligned state restore. Adding
+max_model_len to the speculative config did not clear the warning. blazux
+gets real hits because their image runs the qwen38-flash-next release line,
+a different codebase from our PR #55557 pin. Unblocking this needs
+draft-group annotation in kv_cache_utils.py (_warn_if_unannotated_eagle_mamba),
+which is vLLM work rather than configuration. Until then the acceptance bar
+stays measured parity via scripts/mangchi-prefix-cache-parity.py, and note
+that its exact-match oracle is too strict for an MTP stack — free-form
+reasoning text varies cold-vs-cold at temperature 0 from MTP tie-breaking.
+Short definite-answer determinism is the reliable regression check.
 
-Step 3 (graphs) has a concrete design from tonyd2wild's
+Step 3 (next, graphs) has a concrete design from tonyd2wild's
 Qwen3.8-Flash-Next-NVFP4-DGX-Spark single-spark-vllm-tp1 lane: move the PLE
 gather out of the forward pass into model-state prepare_inputs with fixed
 GPU buffers (shape follows Trosfy's vLLM PR 54129), enabling
