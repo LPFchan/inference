@@ -62,6 +62,9 @@ IMPORT_KEYS="${IMPORT_KEYS:-1}"  # ssh-import-id gh:LPFchan
 # STOP_AFTER=weights returns once the checkpoint is on disk, so the download
 # can run while the box is still busy serving something else.
 STOP_AFTER="${STOP_AFTER:-}"
+# Reduced-vocabulary MTP drafting. Set to Mangchi's value (98304) to compare
+# like for like; 0 leaves the stock full-vocabulary draft head.
+DRAFT_VOCAB="${DRAFT_VOCAB:-0}"
 
 MARKERS="$WORK/.stages"
 say() { printf '\n=== %s\n' "$*"; }
@@ -236,6 +239,20 @@ if mode == "mmap":
 open(path, "w").write(src)
 PY
 
+MTP_MOUNT=()
+DV_ENV=()
+if [ "$DRAFT_VOCAB" -gt 0 ] 2>/dev/null; then
+  say "5c/7 reduced-vocabulary drafting (first $DRAFT_VOCAB token ids)"
+  MTP_IN_IMAGE="${PLE_IN_IMAGE%/*}/mtp.py"
+  CID="$(docker create "$IMAGE")"
+  docker cp "$CID:$MTP_IN_IMAGE" "$WORK/mtp_orig.py" >/dev/null
+  docker rm "$CID" >/dev/null
+  fetch scripts/spark/spark_patch_draft_vocab.py "$WORK/spark_patch_draft_vocab.py"
+  python3 "$WORK/spark_patch_draft_vocab.py" "$WORK/mtp_orig.py" "$WORK/mtp_patched.py"
+  MTP_MOUNT=(-v "$WORK/mtp_patched.py:$MTP_IN_IMAGE:ro")
+  DV_ENV=(-e QWEN4EXP_DRAFT_VOCAB="$DRAFT_VOCAB")
+fi
+
 # ---- 6. launch ---------------------------------------------------------------
 say "6/7 launching vLLM (TP1, MTP k=$MTP_K, PLE=$PLE_MODE)"
 # Unified memory: the page cache holds pieces of a 126 GiB file by now, and the
@@ -284,7 +301,7 @@ docker run -d --name "$NAME" --gpus all --network host --ipc host \
   "${PLE_ENV[@]}" \
   -v "$MODEL_DIR:/models:ro" \
   -v "$WORK/ple_layer_patched.py:$PLE_IN_IMAGE:ro" \
-  "${PLE_MOUNT[@]}" \
+  "${PLE_MOUNT[@]}" "${MTP_MOUNT[@]}" "${DV_ENV[@]}" \
   -v "$HOME/.cache/vllm:/root/.cache/vllm" \
   "$IMAGE" /models \
     --served-model-name "$SERVED" \
