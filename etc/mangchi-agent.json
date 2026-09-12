@@ -52,7 +52,8 @@
         "VLLM_THOR_CUTEDSL_MOE": "1",
         "VLLM_PLE_MMAP": "1",
         "VLLM_PLE_MMAP_PREWARM": "0",
-        "QWEN4EXP_DRAFT_VOCAB": "98304"
+        "QWEN4EXP_DRAFT_VOCAB": "98304",
+        "VLLM_TUNED_CONFIG_FOLDER": "/models/moe-tuned"
       },
       "serve_args": [
         "--enable-per-request-metrics",
