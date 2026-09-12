@@ -9,7 +9,10 @@
 # qwen3_8_flash_next to qwen4_exp -- and that is the point: at this commit the
 # Thor patches in docker/mangchi-vllm/ apply unchanged, and QSA accepts an FP8
 # E4M3 main KV cache (upstream PR #55557, dequantised inside the Triton kernel).
-FROM vllm/vllm-openai:qwen38-flash-next
+# Pinned by digest, not tag: this is a one-off day-0 tag for a single model
+# release, and a tag can be repointed or removed. The digest is the
+# multi-arch manifest list; docker still selects the arm64 member.
+FROM vllm/vllm-openai@sha256:fc120ece0a388cc0aa1caad4a9f1cd92113484ab7ec2fd0efadd62585be05bf8
 
 ENV TORCH_CUDA_ARCH_LIST=12.1a \
     FLASHINFER_CUDA_ARCH_LIST=12.1a \
