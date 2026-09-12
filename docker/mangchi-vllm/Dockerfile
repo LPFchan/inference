@@ -27,15 +27,19 @@ RUN pip uninstall -y flash-attn flash_attn || true
 # cleanly and carries sm_110 kernels; use_existing_torch.py lets vLLM build against it.
 RUN pip install --no-cache-dir torch==2.11.0 torchvision==0.26.0 --index-url https://download.pytorch.org/whl/cu130
 
-# Build the reviewed QSA FP8 candidate from an exact commit. The PR ref is used
-# only to make the commit reachable; the SHA check keeps rebuilds reproducible.
+# Build the reviewed QSA FP8 candidate from an exact commit. Fetch the SHA
+# itself: upstream has pushed to #55557 since this pin was taken, so the PR ref
+# no longer resolves to this commit and checking out FETCH_HEAD would fail the
+# SHA check (or, without it, silently build a different engine). The ref stays
+# as a fallback for the day the commit is no longer directly fetchable.
 ARG VLLM_REF=refs/pull/55557/head
 ARG VLLM_SHA=5fd5dd5cf4ac8e9f09b6fae3f3603e9a3cb88aaa
 WORKDIR /build
 RUN git init vllm \
  && git -C vllm remote add origin https://github.com/vllm-project/vllm.git \
- && git -C vllm fetch --depth 1 origin "${VLLM_REF}" \
- && git -C vllm checkout --detach FETCH_HEAD \
+ && (git -C vllm fetch --depth 1 origin "${VLLM_SHA}" \
+     || git -C vllm fetch --depth 200 origin "${VLLM_REF}") \
+ && git -C vllm checkout --detach "${VLLM_SHA}" \
  && test "$(git -C vllm rev-parse HEAD)" = "${VLLM_SHA}"
 COPY patches/mangchi-vllm/0003-thor-minimal-vllm-targets.patch /tmp/thor-minimal-vllm-targets.patch
 RUN git -C vllm apply --check /tmp/thor-minimal-vllm-targets.patch \
