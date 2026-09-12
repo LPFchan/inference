@@ -59,6 +59,9 @@ MAX_SEQS="${MAX_SEQS:-1}"        # batch 1, matching the Mangchi baseline
 MAX_BATCHED="${MAX_BATCHED:-8192}"
 KV_DTYPE="${KV_DTYPE:-auto}"     # see the note in stage 6 before changing this
 IMPORT_KEYS="${IMPORT_KEYS:-1}"  # ssh-import-id gh:LPFchan
+# STOP_AFTER=weights returns once the checkpoint is on disk, so the download
+# can run while the box is still busy serving something else.
+STOP_AFTER="${STOP_AFTER:-}"
 
 MARKERS="$WORK/.stages"
 say() { printf '\n=== %s\n' "$*"; }
@@ -161,6 +164,13 @@ else
   say "4/7 weights (present at $MODEL_DIR)"
 fi
 
+if [ "$STOP_AFTER" = "weights" ]; then
+  say "stopping after the download (STOP_AFTER=weights)"
+  echo "weights: $MODEL_DIR"
+  echo "re-run without STOP_AFTER once the GPU memory is free"
+  exit 0
+fi
+
 # ---- 5. image + PLE patch ----------------------------------------------------
 if ! done_stage image; then
   say "5/7 pulling $IMAGE"
@@ -230,8 +240,15 @@ PY
 say "6/7 launching vLLM (TP1, MTP k=$MTP_K, PLE=$PLE_MODE)"
 # Unified memory: the page cache holds pieces of a 126 GiB file by now, and the
 # allocator wants it back. The upstream Spark recipes all do this before load.
-sync; echo 3 | $SUDO tee /proc/sys/vm/drop_caches >/dev/null || \
-  echo "WARNING: could not drop caches; load may fail on memory pressure"
+sync
+if [ -z "$SUDO" ] || sudo -n true 2>/dev/null; then
+  echo 3 | $SUDO tee /proc/sys/vm/drop_caches >/dev/null
+else
+  # No passwordless sudo (borrowed box). Not fatal, but say so: the page cache
+  # is holding pieces of a 126 GiB file the allocator now wants back.
+  echo "WARNING: no passwordless sudo, skipping drop_caches; if the load dies on"
+  echo "         memory pressure, run: sync; echo 3 | sudo tee /proc/sys/vm/drop_caches"
+fi
 
 docker rm -f "$NAME" >/dev/null 2>&1 || true
 mkdir -p "$HOME/.cache/vllm"
