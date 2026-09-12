@@ -112,7 +112,7 @@ fetch() {  # fetch <url-path> <dest>
   curl -fsSL "$RAW/$1" -o "$2" || die "cannot fetch $RAW/$1"
   echo "fetched $(basename "$2")"
 }
-fetch docker/mangchi-vllm/vllm_ple_mmap.py "$WORK/vllm_ple_mmap.py"
+fetch scripts/spark/spark_ple_mmap.py "$WORK/vllm_ple_mmap.py"
 fetch scripts/spark/bench.py "$WORK/bench.py"
 chmod +x "$WORK/bench.py"
 
