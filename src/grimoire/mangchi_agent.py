@@ -31,6 +31,7 @@ import subprocess
 import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -104,7 +105,9 @@ class LaunchSpec:
 class Resident:
     name: str
     spec: LaunchSpec
-    process: subprocess.Popen
+    # None for a resident adopted at startup: its launcher belonged to a
+    # previous agent process and is already gone.
+    process: Optional[subprocess.Popen]
     port: int
     pgid: Optional[int] = None
     container: Optional[str] = None  # set when launched as a docker container
@@ -112,6 +115,11 @@ class Resident:
     started_at: float = field(default_factory=time.time)
     last_used: float = field(default_factory=time.time)
     min_host_available_gib: Optional[float] = None
+
+
+def _pid_of(r: "Resident") -> Optional[int]:
+    """Launcher pid, or None for a resident adopted from a previous agent."""
+    return r.process.pid if r.process is not None else None
 
 
 def load_specs(path: str = SPECS_PATH) -> dict[str, LaunchSpec]:
@@ -259,6 +267,8 @@ class ResidencyManager:
                 return
             except (ProcessLookupError, PermissionError):
                 pass
+        if r.process is None:
+            return
         try:
             r.process.send_signal(sig)
         except ProcessLookupError:
@@ -267,6 +277,8 @@ class ResidencyManager:
     def _reap_launcher(self, r: Resident) -> None:
         """Reap the launcher so an exited one doesn't linger as a zombie and make
         the group look alive. Non-blocking."""
+        if r.process is None:
+            return
         try:
             r.process.wait(timeout=0)
         except Exception:
@@ -344,7 +356,7 @@ class ResidencyManager:
             r = self.resident.get(name)
             if not r:
                 return False
-            logger.info("stopping %s (pid %s, pgid %s)", name, r.process.pid, r.pgid)
+            logger.info("stopping %s (pid %s, pgid %s)", name, _pid_of(r), r.pgid)
             await self._reap_group(r)  # raises if not confirmed dead
             self.resident.pop(name, None)
             return True
@@ -407,7 +419,7 @@ class ResidencyManager:
         r = self.resident.get(name)
         if not r:
             return
-        logger.info("stopping %s (pid %s, pgid %s)", name, r.process.pid, r.pgid)
+        logger.info("stopping %s (pid %s, pgid %s)", name, _pid_of(r), r.pgid)
         await self._reap_group(r)  # raises if not confirmed dead
         self.resident.pop(name, None)
 
@@ -583,12 +595,69 @@ class ResidencyManager:
             return {"name": name, "status": "not-resident"}
         return {"name": name, "status": "unloaded"}
 
+    async def adopt_existing(self) -> None:
+        """Re-attach to model containers a previous agent left running.
+
+        A graceful shutdown stops every resident, so this normally finds
+        nothing. It matters when the previous agent died without running its
+        shutdown (crash, SIGKILL, host power loss): the container keeps holding
+        GPU memory that a fresh agent would neither count against the budget nor
+        be able to stop, and the next load would collide with it.
+
+        A container that is running but does not answer /health is not useful to
+        anyone, so it is stopped rather than adopted.
+        """
+        for name, spec in self.specs.items():
+            container = f"mangchi-vllm-{name}"
+            if not self._container_running(container):
+                continue
+            if await self._probe_health(spec.port):
+                r = Resident(
+                    name=name,
+                    spec=spec,
+                    process=None,
+                    port=spec.port,
+                    container=container,
+                    status="loaded",
+                    started_at=self._container_started_at(container),
+                )
+                self.resident[name] = r
+                logger.info(
+                    "adopted running container for '%s' on port %d (%.1f GiB reserved)",
+                    name,
+                    spec.port,
+                    spec.resident_gb,
+                )
+                continue
+            logger.warning(
+                "container for '%s' is running but not serving; stopping it", name
+            )
+            self._stop_container(container, STOP_TIMEOUT_S)
+            self._remove_container(container)
+
+    async def _probe_health(self, port: int) -> bool:
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                return (await client.get(f"http://127.0.0.1:{port}/health")).status_code == 200
+        except Exception:
+            return False
+
+    def _container_started_at(self, name: str) -> float:
+        """Container start time, so adopted residents report a true uptime."""
+        rc, out = self._docker(["inspect", "-f", "{{.State.StartedAt}}", name])
+        if rc != 0 or not out:
+            return time.time()
+        try:
+            return datetime.fromisoformat(out.replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            return time.time()
+
     def status(self, name: Optional[str] = None) -> dict:
         def one(r: Resident) -> dict:
             return {
                 "name": r.name,
                 "port": r.port,
-                "pid": r.process.pid,
+                "pid": _pid_of(r),
                 "alive": self._group_alive(r),
                 "status": r.status,
                 "pinned": r.spec.pinned,
@@ -642,6 +711,7 @@ def create_app(manager: Optional[ResidencyManager] = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
+        await mgr.adopt_existing()
         yield
         await mgr.shutdown()
 

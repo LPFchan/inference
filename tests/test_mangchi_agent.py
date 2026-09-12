@@ -84,8 +84,8 @@ def test_load_unknown_model_404(mgr):
 def test_container_exit_detail_captures_state_and_logs(mgr, monkeypatch, caplog):
     calls = []
 
-    def fake_docker(args):
-        calls.append(args)
+    def fake_docker(args, merge_stderr=False):
+        calls.append((args, merge_stderr))
         if args[0] == "inspect":
             return 0, 'exit=1 oom=false error=""'
         return 0, "fatal startup error"
@@ -93,7 +93,9 @@ def test_container_exit_detail_captures_state_and_logs(mgr, monkeypatch, caplog)
     monkeypatch.setattr(mgr, "_docker", fake_docker)
 
     assert mgr._container_exit_detail("model-container") == 'exit=1 oom=false error=""'
-    assert calls[1] == ["logs", "--tail", "80", "model-container"]
+    # The engine traceback arrives on the container's stderr, and 80 lines were
+    # not enough to keep the frames above the raising one.
+    assert calls[1] == (["logs", "--tail", "400", "model-container"], True)
     assert "fatal startup error" in caplog.text
 
 
@@ -227,7 +229,7 @@ def test_specs_file_parses():
     flash = specs["qwen3.8-flash-next-uncensored-nvfp4"]
     dense = specs["qwen3.8-27b-uncensored-nvfp4"]
     assert dense.vllm_docker_image == "mangchi-vllm:thor-dense-candidate-v7-memorysafe"
-    assert flash.vllm_docker_image == "mangchi-vllm:thor-dense-candidate-v6-vision-minfa"
+    assert flash.vllm_docker_image == "mangchi-vllm:thor-dense-candidate-v8-draft-vocab"
     for spec in (dense, flash):
         assert "--enable-per-request-metrics" in spec.serve_args
         assert "--enable-prompt-tokens-details" in spec.serve_args
@@ -236,6 +238,7 @@ def test_specs_file_parses():
         assert spec.serve_args[spec.serve_args.index("--reasoning-parser") + 1] == "qwen3"
     assert flash.env.get("VLLM_PLE_MMAP") == "1"
     assert flash.env.get("VLLM_THOR_CUTEDSL_MOE") == "1"
+    assert flash.env.get("QWEN4EXP_DRAFT_VOCAB") == "98304"
     assert dense.env.get("VLLM_THOR_CUTEDSL_DENSE") == "1"
     assert "VLLM_PLE_CPU_OFFLOAD" not in flash.env
     assert "--enforce-eager" in flash.serve_args
@@ -245,12 +248,16 @@ def test_specs_file_parses():
     assert flash.serve_args[flash.serve_args.index("--kv-cache-dtype") + 1] == "fp8"
     assert flash.serve_args[flash.serve_args.index("--max-num-batched-tokens") + 1] == "8192"
     assert dense.serve_args[dense.serve_args.index("--max-num-batched-tokens") + 1] == "2048"
-    assert flash.gpu_mem_util == 0.68
-    assert flash.resident_gb == 83
+    assert flash.gpu_mem_util == 0.72
+    assert flash.resident_gb == 88
     assert dense.gpu_mem_util == 0.245
     assert dense.resident_gb == 30
     assert flash.resident_gb > specs["qwen3.8-27b-uncensored-nvfp4"].resident_gb
-    assert dense.resident_gb + flash.resident_gb <= agent.MEMORY_BUDGET_GIB
+    # Co-residency was withdrawn (DEC-20260910-001): the two are served one at a
+    # time via LRU eviction, so the invariant is that each fits alone, not that
+    # both fit together.
+    assert flash.resident_gb <= agent.MEMORY_BUDGET_GIB
+    assert dense.resident_gb <= agent.MEMORY_BUDGET_GIB
 
 
 def test_qsa_fp8_canary_build_is_pinned_and_thor_aware():
@@ -596,3 +603,48 @@ def test_zombie_launcher_does_not_block_reap(mgr, monkeypatch):
     assert "small" not in mgr.resident
     assert state["launcher_reaped"] is True
     assert 9 not in kills  # SIGKILL was not needed once the zombie was reaped
+
+
+def test_adopt_existing_reattaches_to_a_healthy_container(mgr, monkeypatch):
+    """A crashed agent leaves containers running; a fresh one must reclaim them.
+
+    Graceful shutdown stops every resident, so this path only matters after a
+    crash, SIGKILL, or power loss. Without it the container keeps holding GPU
+    memory the new agent neither counts nor can stop.
+    """
+    monkeypatch.setattr(mgr, "_container_running", lambda c: c == "mangchi-vllm-large")
+    monkeypatch.setattr(mgr, "_container_started_at", lambda c: 1000.0)
+
+    async def healthy(port):
+        return True
+
+    monkeypatch.setattr(mgr, "_probe_health", healthy)
+
+    run(mgr.adopt_existing())
+
+    assert "large" in mgr.resident
+    adopted = mgr.resident["large"]
+    assert adopted.status == "loaded"
+    assert adopted.container == "mangchi-vllm-large"
+    assert adopted.process is None  # its launcher belonged to the dead agent
+    assert adopted.started_at == 1000.0
+    # The reservation must count against the budget, or the next load oversubscribes.
+    assert mgr.status()["used_gib"] == 80
+    assert mgr.status()["resident"][0]["pid"] is None
+
+
+def test_adopt_existing_stops_a_container_that_is_not_serving(mgr, monkeypatch):
+    stopped = []
+    monkeypatch.setattr(mgr, "_container_running", lambda c: c == "mangchi-vllm-large")
+    monkeypatch.setattr(mgr, "_stop_container", lambda c, t: stopped.append(c))
+    monkeypatch.setattr(mgr, "_remove_container", lambda c: None)
+
+    async def unhealthy(port):
+        return False
+
+    monkeypatch.setattr(mgr, "_probe_health", unhealthy)
+
+    run(mgr.adopt_existing())
+
+    assert mgr.resident == {}
+    assert stopped == ["mangchi-vllm-large"]

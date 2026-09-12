@@ -1,0 +1,46 @@
+# Mangchi (Jetson Thor) services.
+#
+# Kept separate from docker-compose.yml on purpose: that file describes the
+# Grimoire gateway and resolves its volumes from a .env that does not exist on
+# this host, so Compose cannot render it here at all -- not even for one
+# service, since it validates every service before running any. Mangchi does not
+# run the gateway; it runs the residency agent that the gateway calls.
+#
+#   docker compose -f docker-compose.mangchi.yml up -d
+#
+# Load the `inference` skill before touching models, presets, or residency.
+
+services:
+  # The residency agent owns no GPU itself: it launches and stops sibling vLLM
+  # containers through the Docker socket, so it runs on the default runtime and
+  # needs only the repo (for its source and etc/mangchi-agent.json) plus the
+  # model directory.
+  #
+  # restart: unless-stopped is the point of this file. Started by hand the agent
+  # did not survive a reboot, and the command to start it lived only in shell
+  # history. On startup it re-attaches to any model container a previous agent
+  # left running, so a restart does not orphan tens of GiB of resident weights.
+  mangchi-agent:
+    image: ghcr.io/nvidia-ai-iot/vllm:latest-jetson-thor
+    container_name: mangchi-agent
+    restart: unless-stopped
+    # The gateway reaches :9700 directly, and the agent reaches each vLLM
+    # container on 127.0.0.1:<port>, so it shares the host network namespace.
+    network_mode: host
+    command:
+      - /opt/venv/bin/python
+      - -m
+      - uvicorn
+      - grimoire.mangchi_agent:app
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "9700"
+      - --app-dir
+      - /app/src
+    volumes:
+      - .:/app
+      - ${MANGCHI_MODELS_DIR:-/home/yeowool/models/nvfp4}:/models:ro
+      # Sibling-container control: the agent shells out to docker on the host.
+      - /usr/bin/docker:/usr/bin/docker:ro
+      - /var/run/docker.sock:/var/run/docker.sock
