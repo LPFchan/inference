@@ -148,7 +148,21 @@ that its exact-match oracle is too strict for an MTP stack — free-form
 reasoning text varies cold-vs-cold at temperature 0 from MTP tie-breaking.
 Short definite-answer determinism is the reliable regression check.
 
-Step 3 (next, graphs) has a concrete design from tonyd2wild's
+Speculative depth is now measured rather than assumed: k=4 is the operating
+point (`RSH-20260912-002`), k=3 is the alternative if the served mix becomes
+prose-dominated, and k>=5 is blocked on a vLLM block-size alignment bug that
+ignores the QSA ring capacity. The k=4 optimum should be re-checked once graphs
+land, since a lower per-step cost shifts the turnover deeper.
+
+Step 3 is re-scoped (`RSH-20260912-003`). The cheap route -- registering the PLE
+gather as a splitting op -- was implemented and does not work on this pin: the
+op is invoked and still lands inside CUDA graph capture. Graphs therefore
+require the staged gather (disk read hoisted into the model state's
+prepare_inputs, into a fixed GPU buffer), and measured GPU occupancy of 63-69%
+caps the prize near 20%. The reduced-vocabulary draft, originally an aside in
+this plan, already returned more than that and has shipped.
+
+Step 3 (graphs) has a concrete design from tonyd2wild's
 Qwen3.8-Flash-Next-NVFP4-DGX-Spark single-spark-vllm-tp1 lane: move the PLE
 gather out of the forward pass into model-state prepare_inputs with fixed
 GPU buffers (shape follows Trosfy's vLLM PR 54129), enabling

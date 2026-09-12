@@ -46,12 +46,13 @@
       "gpu_mem_util": 0.72,
       "port": 8002,
       "pinned": false,
-      "vllm_docker_image": "mangchi-vllm:thor-dense-candidate-v7-prefix-mtp",
+      "vllm_docker_image": "mangchi-vllm:thor-dense-candidate-v8-draft-vocab",
       "models_dir_host": "/home/yeowool/models/nvfp4",
       "env": {
         "VLLM_THOR_CUTEDSL_MOE": "1",
         "VLLM_PLE_MMAP": "1",
-        "VLLM_PLE_MMAP_PREWARM": "0"
+        "VLLM_PLE_MMAP_PREWARM": "0",
+        "QWEN4EXP_DRAFT_VOCAB": "98304"
       },
       "serve_args": [
         "--enable-per-request-metrics",
@@ -62,7 +63,7 @@
         "fp8",
         "--enable-prefix-caching",
         "--speculative-config",
-        "{\"method\":\"mtp\",\"num_speculative_tokens\":2,\"max_model_len\":262144}",
+        "{\"method\":\"mtp\",\"num_speculative_tokens\":4,\"max_model_len\":262144}",
         "--max-num-seqs",
         "1",
         "--max-num-batched-tokens",

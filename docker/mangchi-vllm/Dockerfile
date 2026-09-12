@@ -130,6 +130,24 @@ RUN if [ "${THOR_CUTEDSL_MOE}" = "1" ]; then \
       && python -m thor_nvfp4.install --vllm-root /opt/venv/lib/python3.12/site-packages/vllm; \
     elif [ "${THOR_CUTEDSL_MOE}" != "0" ]; then exit 1; fi
 
+# Reduced-vocabulary MTP drafting (FR-Spec). lm_head is the one big BF16 tensor
+# left in this NVFP4 model (248320x2560 = 1.27 GB) and is ~98% of a draft pass's
+# weight traffic, so restricting the draft to the most frequent token ids cuts
+# decode memory traffic sharply. Opt-in at runtime with QWEN4EXP_DRAFT_VOCAB=N;
+# unset or 0 keeps full-vocabulary drafting. The target still verifies over the
+# full vocabulary, so output is unchanged and only draft acceptance can move.
+COPY docker/mangchi-vllm/patch_draft_vocab.py /tmp/patch_draft_vocab.py
+RUN python /tmp/patch_draft_vocab.py
+
+# Let the disk-backed PLE gather split a piecewise CUDA graph. The gather does a
+# host round trip (ids to CPU, rows off NVMe, staged back), which cannot run
+# inside graph capture -- the reason this model is served with --enforce-eager.
+# Registering it as a custom op and listing it in CompilationConfig._attention_ops
+# makes torch.compile treat it as opaque and end a piecewise graph there.
+# Opt-in with QWEN4EXP_PLE_GRAPH_SPLIT=1; unset keeps the direct call.
+COPY docker/mangchi-vllm/patch_ple_graph_split.py /tmp/patch_ple_graph_split.py
+RUN python /tmp/patch_ple_graph_split.py
+
 # the cloned source tree shadows the installed _C.so -> remove it and serve from /
 RUN rm -rf /build
 WORKDIR /
