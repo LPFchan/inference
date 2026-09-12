@@ -235,7 +235,9 @@ class ResidencyManager:
             return "container state unavailable"
         # A container's stderr arrives on `docker logs`' stderr, and engine
         # tracebacks go there. Merge both streams or the crash reason is lost.
-        logs_rc, logs = self._docker(["logs", "--tail", "80", name], merge_stderr=True)
+        logs_rc, logs = self._docker(
+            ["logs", "--tail", "400", name], merge_stderr=True
+        )
         if logs_rc == 0 and logs:
             logger.error("final logs for failed container %s:\n%s", name, logs)
         return state
