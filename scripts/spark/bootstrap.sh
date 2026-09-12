@@ -48,6 +48,8 @@ NAME="${NAME:-spark-fn}"
 PORT="${PORT:-8000}"
 SERVED="${SERVED:-qwen3.8-flash-next}"
 
+# PLE_MODE=baked expects an image that already carries the Mangchi patches;
+# scripts/spark/Dockerfile builds one. Nothing is extracted or bind mounted.
 # PLE_MODE=mmap keeps the 47.7 GiB FP8 n-gram table on NVMe and reads rows per
 # request. One Spark shares 128 GB between CPU and GPU and this checkpoint is
 # 126 GiB, so an in-memory table does not fit. inmem is for a 2-Spark TP2 run.
@@ -185,6 +187,9 @@ fi
 
 # The PLE layer module moved between vLLM builds, so find it rather than
 # hardcoding it, then patch the copy we bind-mount back over the image.
+if [ "$PLE_MODE" = "baked" ]; then
+  say "5b/7 PLE and MTP patches are baked into $IMAGE"
+else
 say "5b/7 preparing the PLE layer override"
 SITE="$(docker run --rm --entrypoint python3 "$IMAGE" -c \
   'import vllm,os;print(os.path.dirname(vllm.__file__))')"
@@ -238,11 +243,15 @@ if mode == "mmap":
 
 open(path, "w").write(src)
 PY
+fi
 
 MTP_MOUNT=()
 DV_ENV=()
 if [ "$DRAFT_VOCAB" -gt 0 ] 2>/dev/null; then
   say "5c/7 reduced-vocabulary drafting (first $DRAFT_VOCAB token ids)"
+  DV_ENV=(-e QWEN4EXP_DRAFT_VOCAB="$DRAFT_VOCAB")
+fi
+if [ "$DRAFT_VOCAB" -gt 0 ] 2>/dev/null && [ "$PLE_MODE" != "baked" ]; then
   MTP_IN_IMAGE="${PLE_IN_IMAGE%/*}/mtp.py"
   CID="$(docker create "$IMAGE")"
   docker cp "$CID:$MTP_IN_IMAGE" "$WORK/mtp_orig.py" >/dev/null
@@ -250,7 +259,6 @@ if [ "$DRAFT_VOCAB" -gt 0 ] 2>/dev/null; then
   fetch scripts/spark/spark_patch_draft_vocab.py "$WORK/spark_patch_draft_vocab.py"
   python3 "$WORK/spark_patch_draft_vocab.py" "$WORK/mtp_orig.py" "$WORK/mtp_patched.py"
   MTP_MOUNT=(-v "$WORK/mtp_patched.py:$MTP_IN_IMAGE:ro")
-  DV_ENV=(-e QWEN4EXP_DRAFT_VOCAB="$DRAFT_VOCAB")
 fi
 
 # ---- 6. launch ---------------------------------------------------------------
@@ -273,6 +281,12 @@ mkdir -p "$HOME/.cache/vllm"
 PLE_ENV=()
 PLE_MOUNT=()
 case "$PLE_MODE" in
+  baked)
+    # The hook and the module are already inside the image; only opt in.
+    PLE_ENV=(-e VLLM_PLE_MMAP=1 -e VLLM_PLE_MMAP_PREWARM=0
+             -e VLLM_PLE_MMAP_DIR=/models)
+    GRAPH_ARGS=(--enforce-eager)
+    ;;
   mmap)
     PLE_ENV=(-e VLLM_PLE_MMAP=1 -e VLLM_PLE_MMAP_PREWARM=0
              -e VLLM_PLE_MMAP_DIR=/models)
@@ -284,7 +298,7 @@ case "$PLE_MODE" in
     PLE_ENV=(-e PLE_FORCE_FP8=1)
     GRAPH_ARGS=(--compilation-config '{"mode":0,"cudagraph_mode":"FULL_DECODE_ONLY"}')
     ;;
-  *) die "PLE_MODE must be mmap or inmem" ;;
+  *) die "PLE_MODE must be baked, mmap or inmem" ;;
 esac
 
 # KV dtype: Mangchi serves fp8, but newer builds reject anything but BF16 for
@@ -300,7 +314,7 @@ docker run -d --name "$NAME" --gpus all --network host --ipc host \
   -e VLLM_USE_DEEP_GEMM=0 \
   "${PLE_ENV[@]}" \
   -v "$MODEL_DIR:/models:ro" \
-  -v "$WORK/ple_layer_patched.py:$PLE_IN_IMAGE:ro" \
+  ${PLE_IN_IMAGE:+-v "$WORK/ple_layer_patched.py:$PLE_IN_IMAGE:ro"} \
   "${PLE_MOUNT[@]}" "${MTP_MOUNT[@]}" "${DV_ENV[@]}" \
   -v "$HOME/.cache/vllm:/root/.cache/vllm" \
   "$IMAGE" /models \
@@ -317,6 +331,7 @@ docker run -d --name "$NAME" --gpus all --network host --ipc host \
     --reasoning-parser qwen3 \
     --enable-auto-tool-choice --tool-call-parser qwen3_xml \
     --enable-per-request-metrics --enable-prompt-tokens-details \
+    --no-enable-flashinfer-autotune \
     --limit-mm-per-prompt '{"image":0,"video":0}' \
     --default-chat-template-kwargs '{"reasoning_effort":"medium"}' \
     "${GRAPH_ARGS[@]}" "${KV_ARGS[@]}"
