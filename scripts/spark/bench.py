@@ -31,6 +31,7 @@ KEY = os.environ.get("BENCH_API_KEY", "")
 # reproduces the RSH-20260910-001 sweep prompt.
 PREFILL_TOKENS = [int(x) for x in os.environ.get("BENCH_PREFILL", "8192,36864").split(",")]
 PASSES = int(os.environ.get("BENCH_PASSES", "3"))  # pass 1 is discarded as cold
+EFFORT = os.environ.get("BENCH_EFFORT", "medium")  # served default; "off" disables thinking
 
 PROMPTS = {
     "code": ("Write a Python function that merges two sorted lists into one sorted "
@@ -90,6 +91,7 @@ def stream_chat(prompt, max_tokens):
         "max_tokens": max_tokens,
         "stream": True,
         "stream_options": {"include_usage": True},
+        "chat_template_kwargs": {"reasoning_effort": EFFORT},
     }).encode()
     req = urllib.request.Request(BASE + "/v1/chat/completions", data=body,
                                  headers=_headers())
@@ -122,8 +124,12 @@ def decode_run(prompt, max_tokens):
     after = counters()
     n = usage.get("completion_tokens", 0)
     ttft = ttft if ttft else 0.0
-    # Decode rate excludes the prefill: (tokens - 1) / (total - ttft).
-    decode_s = max(total - ttft, 1e-6)
+    decode_s = total - ttft
+    # With thinking on, some builds hold the whole reasoning block until the
+    # closing tag and then flush it, so "time after the first delta" is a flush,
+    # not decoding. Refuse to divide by it rather than reporting 400 tokens in
+    # 1.7s. end_to_end below stays valid either way.
+    burst = n < 32 or decode_s < 0.5 or (n / max(decode_s, 1e-6)) > 200
     drafts = delta(before, after, "vllm:spec_decode_num_drafts_total")
     drafted = delta(before, after, "vllm:spec_decode_num_draft_tokens_total")
     accepted = delta(before, after, "vllm:spec_decode_num_accepted_tokens_total")
@@ -138,23 +144,44 @@ def decode_run(prompt, max_tokens):
         "tokens": n,
         "ttft_s": round(ttft, 3),
         "wall_s": round(total, 2),
-        "decode_tok_s": round((n - 1) / decode_s, 2) if n > 1 else None,
+        "decode_tok_s": None if burst else round((n - 1) / decode_s, 2),
+        "burst_flush": burst,
         "e2e_tok_s": round(n / total, 2) if total else None,
         "drafts": drafts, "drafted": drafted, "accepted": accepted,
         "accept_rate": round(100 * accepted / drafted, 1) if drafted else None,
         "mean_accept_len": round((accepted + drafts) / drafts, 3) if drafts else None,
-        "steps_per_s": round(drafts / decode_s, 2) if drafts else None,
+        "steps_per_s": round(drafts / total, 2) if drafts else None,
         "per_pos_pct": [round(100 * p / drafts, 1) for p in pos] if drafts else [],
         "sha": hashlib.sha256(text.encode()).hexdigest()[:16],
     }
 
 
+def build_prompt(reps):
+    return (f"Session {uuid.uuid4()}. Read the log below and reply with the "
+            f"single word OK.\n\n" + FILLER * reps)
+
+
+_CALIBRATION = {}
+
+
+def calibrate(target_tokens):
+    """Return the repeat count that lands near target_tokens.
+
+    The filler line's token count is a property of the tokenizer, not something
+    worth hardcoding, so ask the server once and scale from its answer.
+    """
+    if "per_rep" not in _CALIBRATION:
+        probe_reps = 64
+        _, usage, _, _ = stream_chat(build_prompt(probe_reps), 1)
+        p_tokens = usage.get("prompt_tokens", 0)
+        _CALIBRATION["per_rep"] = max(p_tokens / probe_reps, 1e-6)
+        _CALIBRATION["probe_tokens"] = p_tokens
+    return max(1, round(target_tokens / _CALIBRATION["per_rep"]))
+
+
 def prefill_run(target_tokens):
     """Time a cold prefill. The nonce defeats prefix-cache reuse."""
-    reps = max(1, target_tokens // 16)
-    prompt = (f"Session {uuid.uuid4()}. Read the log below and reply with the "
-              f"single word OK.\n\n" + FILLER * reps)
-    _, usage, ttft, total = stream_chat(prompt, 1)
+    _, usage, ttft, total = stream_chat(build_prompt(calibrate(target_tokens)), 1)
     p = usage.get("prompt_tokens", 0)
     return {
         "prompt_tokens": p,
@@ -165,7 +192,7 @@ def prefill_run(target_tokens):
 
 def main():
     label = sys.argv[1] if len(sys.argv) > 1 else "run"
-    res = {"label": label, "base": BASE, "model": MODEL,
+    res = {"label": label, "base": BASE, "model": MODEL, "effort": EFFORT,
            "ts": time.strftime("%Y-%m-%d %H:%M:%S"), "passes": PASSES}
     decode_run("hi", 8)  # discard first-request effects
 
@@ -188,15 +215,22 @@ def main():
         runs = [decode_run(prompt, mt) for _ in range(PASSES)]
         warm = runs[1:] or runs
         rates = [r["decode_tok_s"] for r in warm if r["decode_tok_s"]]
+        e2e = [r["e2e_tok_s"] for r in warm if r["e2e_tok_s"]]
+        steps = [r["steps_per_s"] for r in warm if r["steps_per_s"]]
         res["decode"][name] = {
             "runs": runs,
+            "warm_mean_e2e_tok_s": round(statistics.mean(e2e), 2) if e2e else None,
+            "warm_mean_steps_per_s": round(statistics.mean(steps), 2) if steps else None,
             "warm_mean_decode_tok_s": round(statistics.mean(rates), 2) if rates else None,
             "warm_mean_accept_len": round(statistics.mean(
                 [r["mean_accept_len"] for r in warm if r["mean_accept_len"]] or [0]), 3),
             "shas": sorted({r["sha"] for r in runs}),
         }
         d = res["decode"][name]
-        print(f'decode  {name:<10} {d["warm_mean_decode_tok_s"]:>8} tok/s  '
+        dec = d["warm_mean_decode_tok_s"]
+        print(f'decode  {name:<10} e2e={d["warm_mean_e2e_tok_s"]:>7} tok/s  '
+              f'decode={"burst" if dec is None else dec:>7}  '
+              f'steps/s={d["warm_mean_steps_per_s"]}  '
               f'accept_len={d["warm_mean_accept_len"]}  '
               f'per_pos={runs[-1]["per_pos_pct"]}')
 

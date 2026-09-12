@@ -144,7 +144,7 @@ if ! done_stage venv; then
   say "3/7 creating the downloader venv"
   python3 -m venv "$WORK/.venv"
   "$WORK/.venv/bin/pip" install --quiet --upgrade pip
-  "$WORK/.venv/bin/pip" install --quiet "huggingface_hub[cli,hf_transfer]"
+  "$WORK/.venv/bin/pip" install --quiet "huggingface_hub[hf_xet]"
   mark venv
 else
   say "3/7 downloader venv (present)"
@@ -155,7 +155,7 @@ HF_BIN="$WORK/.venv/bin/hf"
 if ! done_stage weights; then
   say "4/7 downloading $HF_REPO @ ${HF_REV:0:12} (126 GiB)"
   echo "This is the long pole. It resumes if interrupted; re-run the script."
-  HF_HUB_ENABLE_HF_TRANSFER=1 "$HF_BIN" download "$HF_REPO" \
+  HF_XET_HIGH_PERFORMANCE=1 HF_HUB_ENABLE_HF_TRANSFER=1 "$HF_BIN" download "$HF_REPO" \
     --revision "$HF_REV" --local-dir "$MODEL_DIR" --max-workers 8
   COUNT="$(find "$MODEL_DIR" -maxdepth 1 -type f | wc -l)"
   [ "$COUNT" -ge 422 ] || die "expected 422 files in $MODEL_DIR, found $COUNT"
