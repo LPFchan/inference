@@ -126,17 +126,14 @@ helper = (
     "\n"
     "\n"
 )
-for anchor in (
-    "\nclass Qwen3_8FlashNextMTP(",
-    "\nclass Qwen3_8FlashNextMultiTokenPredictor(",
-    "\nclass Qwen4ExpMultiTokenPredictor(",
-    "\nclass Qwen4ExpMTP(",
-):
-    if anchor in source:
-        break
-else:
-    raise RuntimeError(f"no MTP class anchor to place the helper in {mtp}")
-source = source.replace(anchor, helper + anchor.lstrip("\n"), 1)
+# The helper goes at the end of the module rather than above the MTP class.
+# This build wraps that class in @support_torch_compile(...), and anything
+# inserted between a decorator and its class silently becomes the decorated
+# object instead: the module still compiles, then vLLM rejects it at import
+# with "decorated class should have a forward method".
+helper_tail = "\n\n" + helper.strip("\n") + "\n"
+if "_draft_vocab_size" not in source.split("def compute_logits")[0]:
+    source = source.rstrip("\n") + "\n" + helper_tail
 
 out.write_text(source)
 print(f"patched {mtp} -> {out}")
