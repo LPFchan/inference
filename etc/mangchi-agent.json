@@ -39,8 +39,6 @@
         "auto",
         "--no-enable-flashinfer-autotune",
         "--enforce-eager",
-        "--limit-mm-per-prompt",
-        "{\"image\":4,\"video\":0}",
         "--mm-processor-kwargs",
         "{\"max_pixels\":2097152}",
         "--default-chat-template-kwargs",

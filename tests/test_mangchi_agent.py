@@ -242,8 +242,7 @@ def test_specs_file_parses():
     assert flash.serve_args[flash.serve_args.index("--max-model-len") + 1] == "262144"
     assert flash.serve_args[flash.serve_args.index("--kv-cache-dtype") + 1] == "fp8"
     assert flash.serve_args[flash.serve_args.index("--max-num-batched-tokens") + 1] == "8192"
-    mm_limits = json.loads(flash.serve_args[flash.serve_args.index("--limit-mm-per-prompt") + 1])
-    assert mm_limits == {"image": 4, "video": 0}
+    assert "--limit-mm-per-prompt" not in flash.serve_args
     mm_processor = json.loads(flash.serve_args[flash.serve_args.index("--mm-processor-kwargs") + 1])
     assert mm_processor == {"max_pixels": 2097152}
     assert flash.gpu_mem_util == 0.82

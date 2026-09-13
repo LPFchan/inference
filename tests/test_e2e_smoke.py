@@ -306,6 +306,31 @@ class VisionSmokeTests(E2ESmokeTestCase):
         )
         return "data:image/png;base64," + base64.b64encode(png).decode()
 
+    def _assert_image_colors(self, colors: list[tuple[int, int, int, str]]):
+        content = [
+            {
+                "type": "text",
+                "text": "Name the dominant color of each image in order. Answer concisely.",
+            }
+        ]
+        content.extend(
+            {
+                "type": "image_url",
+                "image_url": {"url": self._solid_png_data_url(red, green, blue)},
+            }
+            for red, green, blue, _ in colors
+        )
+        result = self._chat(
+            VISION_SMOKE_MODEL,
+            [{"role": "user", "content": content}],
+            max_tokens=128,
+        )
+
+        self.assertEqual(result["status_code"], 200)
+        answer = result["text"].lower()
+        for _, _, _, name in colors:
+            self.assertIn(name, answer, result.get("error"))
+
     def test_image_chat_completion(self):
         models = httpx.get(
             f"{BASE_URL}/v1/models",
@@ -320,24 +345,18 @@ class VisionSmokeTests(E2ESmokeTestCase):
         self.assertIsNotNone(metadata, f"{VISION_SMOKE_MODEL} is not advertised")
         self.assertEqual(metadata["input_modalities"], ["text", "image"])
 
-        messages = [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": "Answer with only the dominant color in this image."},
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": self._solid_png_data_url(255, 0, 0),
-                        },
-                    },
-                ],
-            }
-        ]
-        result = self._chat(VISION_SMOKE_MODEL, messages, max_tokens=32)
+        self._assert_image_colors([(255, 0, 0, "red")])
 
-        self.assertEqual(result["status_code"], 200)
-        self.assertIn("red", result["text"].lower(), result.get("error"))
+    def test_more_than_four_images(self):
+        self._assert_image_colors(
+            [
+                (255, 0, 0, "red"),
+                (0, 255, 0, "green"),
+                (0, 0, 255, "blue"),
+                (255, 255, 0, "yellow"),
+                (255, 0, 255, "magenta"),
+            ]
+        )
 
 
 if __name__ == "__main__":
