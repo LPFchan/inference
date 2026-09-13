@@ -137,6 +137,43 @@ class LlamaProxyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(request["chat_template_kwargs"], {"reasoning_strength": "high"})
         self.assertEqual(plugin_calls, [("muse-glimmer-30b-high", requested_cfg)])
 
+    async def test_remote_image_content_reaches_backend_unchanged(self):
+        active = _FakeActive()
+        active.name = "qwen3.8-flash-next-uncensored-nvfp4"
+        active.backend_type = "vllm-remote"
+        active.cfg = {
+            "backend": "vllm-remote",
+            "family": "qwen",
+            "capabilities": ["completion", "multimodal"],
+            "ctx-size": 262144,
+        }
+        content = [
+            {"type": "text", "text": "Describe these images."},
+            {
+                "type": "image_url",
+                "image_url": {
+                    "url": "data:image/png;base64,iVBORw0KGgo=",
+                    "detail": "high",
+                },
+            },
+        ]
+        payload = {"messages": [{"role": "user", "content": content}], "stream": False}
+
+        with patch.object(llama_proxy.registry, "resolve", return_value=active.name), \
+             patch.object(llama_proxy.registry, "get", return_value=active.cfg), \
+             patch.object(llama_proxy.registry, "get_family_defaults", return_value={}), \
+             patch.object(llama_proxy.plugin_manager, "before_request", side_effect=lambda p, *a: p), \
+             patch.object(llama_proxy.plugin_manager, "before_backend_request", side_effect=lambda p, *a: p), \
+             patch.object(llama_proxy.plugin_manager, "wrap_response_stream", side_effect=lambda s, *a: s), \
+             patch.object(llama_proxy, "get_proxy_client", _FakeClient):
+            response = await llama_proxy._proxy_chat(active.name, payload, active)
+            async for _ in response.body_iterator:
+                pass
+
+        request = _FakeClient.instances[-1].requests[0][0]["json"]
+        self.assertEqual(request["model"], active.name)
+        self.assertEqual(request["messages"][0]["content"], content)
+
     async def test_conversation_cache_key_is_scoped_by_process_and_user(self):
         active = _FakeActive()
         active.prefill_config = None

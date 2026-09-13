@@ -42,6 +42,16 @@ class ModelMetadataCapabilityTests(unittest.TestCase):
         self.assertEqual(vision["input_modalities"], ["text", "image"])
         self.assertEqual(alias["input_modalities"], ["text", "image"])
 
+    def test_flash_next_remote_alias_advertises_image_input(self):
+        registry = ModelRegistry(
+            path=str(Path(__file__).resolve().parents[1] / "etc" / "models.grimoire.json"),
+            seed_path="",
+        )
+
+        metadata = registry.model_metadata("qwen3.8-flash-next-uncensored-nvfp4")
+        self.assertIn("multimodal", metadata["capabilities"])
+        self.assertEqual(metadata["input_modalities"], ["text", "image"])
+
     def test_qwen_effort_alias_is_fixed_to_native_level(self):
         registry = self.make_registry(
             {

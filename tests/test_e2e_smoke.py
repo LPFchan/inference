@@ -23,12 +23,15 @@ Model overrides:
 Long-prompt overrides:
 """
 
+import base64
 import json
 import os
+import struct
 import subprocess
 import time
 import unittest
 import uuid
+import zlib
 from pathlib import Path
 
 import httpx
@@ -39,6 +42,9 @@ SKIP_E2E = os.environ.get("SKIP_E2E", "0") == "1"
 BASE_URL = os.environ.get("GRIMOIRE_SMOKE_URL", "http://localhost:9001")
 API_KEY = os.environ.get("GRIMOIRE_API_KEY", "")
 LLAMA_SMOKE_MODEL = os.environ.get("GRIMOIRE_LLAMA_SMOKE_MODEL", "qwen3.8-27B-low")
+VISION_SMOKE_MODEL = os.environ.get(
+    "GRIMOIRE_VISION_SMOKE_MODEL", "qwen3.8-flash-next-uncensored-nvfp4"
+)
 LONG_PROMPT_MIN_CHARS = int(os.environ.get("GRIMOIRE_LONG_PROMPT_MIN_CHARS", "1500"))
 LONG_PROMPT_MAX_CHARS = int(os.environ.get("GRIMOIRE_LONG_PROMPT_MAX_CHARS", "4000"))
 FIXTURES_DIR = Path(
@@ -267,6 +273,71 @@ class LlamaCppSmokeTests(E2ESmokeTestCase):
         self.assertEqual(result2["status_code"], 200)
         self.assertTrue(result2["text"], result2.get("error"))
         self._assert_timings(result2, "llama.cpp turn 2")
+
+
+class VisionSmokeTests(E2ESmokeTestCase):
+    """Image-input smoke for the served multimodal model."""
+
+    @classmethod
+    def setUpClass(cls):
+        if SKIP_E2E:
+            raise unittest.SkipTest("SKIP_E2E is set")
+        try:
+            response = httpx.get(f"{BASE_URL}/health", timeout=5.0)
+            if response.status_code != 200:
+                raise unittest.SkipTest(f"Gateway not healthy at {BASE_URL}")
+        except Exception as exc:
+            raise unittest.SkipTest(f"Gateway unreachable at {BASE_URL}: {exc}")
+
+    @staticmethod
+    def _solid_png_data_url(red: int, green: int, blue: int) -> str:
+        width = height = 32
+        rows = b"".join(b"\0" + bytes((red, green, blue)) * width for _ in range(height))
+
+        def chunk(kind: bytes, data: bytes) -> bytes:
+            body = kind + data
+            return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body))
+
+        png = (
+            b"\x89PNG\r\n\x1a\n"
+            + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(rows))
+            + chunk(b"IEND", b"")
+        )
+        return "data:image/png;base64," + base64.b64encode(png).decode()
+
+    def test_image_chat_completion(self):
+        models = httpx.get(
+            f"{BASE_URL}/v1/models",
+            headers=self._headers(),
+            timeout=30.0,
+        )
+        models.raise_for_status()
+        metadata = next(
+            (entry for entry in models.json()["data"] if entry["id"] == VISION_SMOKE_MODEL),
+            None,
+        )
+        self.assertIsNotNone(metadata, f"{VISION_SMOKE_MODEL} is not advertised")
+        self.assertEqual(metadata["input_modalities"], ["text", "image"])
+
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Answer with only the dominant color in this image."},
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": self._solid_png_data_url(255, 0, 0),
+                        },
+                    },
+                ],
+            }
+        ]
+        result = self._chat(VISION_SMOKE_MODEL, messages, max_tokens=32)
+
+        self.assertEqual(result["status_code"], 200)
+        self.assertIn("red", result["text"].lower(), result.get("error"))
 
 
 if __name__ == "__main__":

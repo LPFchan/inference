@@ -8,7 +8,8 @@
       "backend-model-id": "/models/qwen3.8-flash-next-abliterated-w4a4",
       "family": "qwen",
       "capabilities": [
-        "completion"
+        "completion",
+        "multimodal"
       ],
       "cost": {
         "input": 0.33,
