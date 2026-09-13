@@ -224,40 +224,26 @@ def test_status_reports_loading_until_health_check_completes(mgr, monkeypatch):
 def test_specs_file_parses():
     assert agent.HOST_MEMORY_FLOOR_GIB == 6
     specs = agent.load_specs()
-    assert "qwen3.8-27b-uncensored-nvfp4" in specs
-    assert "qwen3.8-flash-next-uncensored-nvfp4" in specs
+    assert set(specs) == {"qwen3.8-flash-next-uncensored-nvfp4"}
     flash = specs["qwen3.8-flash-next-uncensored-nvfp4"]
-    dense = specs["qwen3.8-27b-uncensored-nvfp4"]
-    assert dense.vllm_docker_image == "mangchi-vllm:thor-dense-candidate-v7-memorysafe"
     assert flash.vllm_docker_image == "mangchi-vllm:thor-dense-candidate-v8-draft-vocab"
-    for spec in (dense, flash):
-        assert "--enable-per-request-metrics" in spec.serve_args
-        assert "--enable-prompt-tokens-details" in spec.serve_args
-        assert "--enable-auto-tool-choice" in spec.serve_args
-        assert spec.serve_args[spec.serve_args.index("--tool-call-parser") + 1] == "qwen3_xml"
-        assert spec.serve_args[spec.serve_args.index("--reasoning-parser") + 1] == "qwen3"
+    assert "--enable-per-request-metrics" in flash.serve_args
+    assert "--enable-prompt-tokens-details" in flash.serve_args
+    assert "--enable-auto-tool-choice" in flash.serve_args
+    assert flash.serve_args[flash.serve_args.index("--tool-call-parser") + 1] == "qwen3_xml"
+    assert flash.serve_args[flash.serve_args.index("--reasoning-parser") + 1] == "qwen3"
     assert flash.env.get("VLLM_PLE_MMAP") == "1"
     assert flash.env.get("VLLM_THOR_CUTEDSL_MOE") == "1"
     assert flash.env.get("QWEN4EXP_DRAFT_VOCAB") == "98304"
-    assert dense.env.get("VLLM_THOR_CUTEDSL_DENSE") == "1"
     assert "VLLM_PLE_CPU_OFFLOAD" not in flash.env
     assert "--enforce-eager" in flash.serve_args
     assert "--no-enable-flashinfer-autotune" in flash.serve_args
     assert flash.serve_args[flash.serve_args.index("--max-model-len") + 1] == "262144"
-    assert dense.serve_args[dense.serve_args.index("--max-model-len") + 1] == "262144"
     assert flash.serve_args[flash.serve_args.index("--kv-cache-dtype") + 1] == "fp8"
     assert flash.serve_args[flash.serve_args.index("--max-num-batched-tokens") + 1] == "8192"
-    assert dense.serve_args[dense.serve_args.index("--max-num-batched-tokens") + 1] == "2048"
-    assert flash.gpu_mem_util == 0.72
-    assert flash.resident_gb == 88
-    assert dense.gpu_mem_util == 0.245
-    assert dense.resident_gb == 30
-    assert flash.resident_gb > specs["qwen3.8-27b-uncensored-nvfp4"].resident_gb
-    # Co-residency was withdrawn (DEC-20260910-001): the two are served one at a
-    # time via LRU eviction, so the invariant is that each fits alone, not that
-    # both fit together.
+    assert flash.gpu_mem_util == 0.82
+    assert flash.resident_gb == 101
     assert flash.resident_gb <= agent.MEMORY_BUDGET_GIB
-    assert dense.resident_gb <= agent.MEMORY_BUDGET_GIB
 
 
 def test_qsa_fp8_canary_build_is_pinned_and_thor_aware():
@@ -311,17 +297,17 @@ def test_qsa_fp8_canary_build_is_pinned_and_thor_aware():
 
 def test_docker_launch_command_shape():
     specs = agent.load_specs()
-    name = "qwen3.8-27b-uncensored-nvfp4"
+    name = "qwen3.8-flash-next-uncensored-nvfp4"
     cmd = agent.build_launch_command(name, specs[name])
     assert cmd[0] == "docker" and "run" in cmd and "-d" in cmd
     assert f"mangchi-vllm-{name}" in cmd
     assert "--runtime" in cmd and "nvidia" in cmd
     # port published, model dir mounted ro, image + vllm serve present
     joined = " ".join(cmd)
-    assert "-p 8001:8001" in joined
+    assert "-p 8002:8002" in joined
     assert ":ro" in joined
-    assert "vllm serve /models/qwen3.8-27b-uncensored-w4a4-preetpatel" in joined
-    assert "--gpu-memory-utilization 0.2" in joined
+    assert "vllm serve /models/qwen3.8-flash-next-abliterated-w4a4" in joined
+    assert "--gpu-memory-utilization 0.82" in joined
 
 
 def test_container_resident_alive_and_reap(mgr, monkeypatch):

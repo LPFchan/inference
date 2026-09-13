@@ -22,8 +22,20 @@ class ThorNvfp4Contracts(unittest.TestCase):
                          and isinstance(node.target, ast.Tuple)
                          and all(isinstance(item, ast.Name) for item in node.target.elts)
                          and [item.id for item in node.target.elts] == ["tokens", "pattern"])
-        self.assertEqual(ast.literal_eval(case_loop.iter),
-                         ((1, "shared"), (10, "shared"), (129, "shared"), (32, "scattered")))
+        self.assertEqual(
+            ast.literal_eval(case_loop.iter),
+            (
+                (1, "shared"),
+                (2, "shared"),
+                (3, "shared"),
+                (4, "shared"),
+                (5, "shared"),
+                (6, "shared"),
+                (10, "shared"),
+                (129, "shared"),
+                (32, "scattered"),
+            ),
+        )
         calls = [node for node in ast.walk(case_loop) if isinstance(node, ast.Call)]
         self.assertTrue(any(isinstance(node.func, ast.Name) and node.func.id == "validate_case" for node in calls))
         self.assertTrue(any(isinstance(node.func, ast.Attribute) and node.func.attr == "replay" for node in calls))
