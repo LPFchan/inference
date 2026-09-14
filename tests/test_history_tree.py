@@ -27,7 +27,10 @@ class HistoryTreeContractTests(unittest.TestCase):
         config.API_KEY = "test-key"
         config.ADMIN_TOKEN = "test-key"
         self.client = TestClient(entrypoint.app)
-        self.auth = {"Authorization": "Bearer test-key"}
+        self.auth = {
+            config.INTERNAL_AUTH_SUB_HEADER: "test-user",
+            config.INTERNAL_AUTH_ROLE_HEADER: "administrator",
+        }
 
     def tearDown(self):
         entrypoint.history_store = self._old_store
@@ -254,7 +257,7 @@ class HistoryTreeContractTests(unittest.TestCase):
         another = HistoryStore(self.db_path)
         # Sanity: the prior conversations are visible
         self._create_conv()
-        rows = another.list_conversations_tree(entrypoint.identity_hash("test-key"))
+        rows = another.list_conversations_tree(entrypoint.identity_hash("auth.lost.plus:test-user"))
         self.assertEqual([r["id"] for r in rows], ["c1"])
 
 

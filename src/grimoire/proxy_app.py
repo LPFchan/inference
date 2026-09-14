@@ -15,14 +15,15 @@ import copy
 import json
 import logging
 import os
+import urllib.parse
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import RedirectResponse, Response, StreamingResponse
 
 from grimoire import config
-from grimoire.auth import require_api
+from grimoire.auth import AuthIdentity, authenticate_public
 from grimoire.proxy.client import init_proxy_client, close_proxy_client, get_proxy_client
 from grimoire.proxy.llama import _backend_request_headers, _backend_response_headers
 from grimoire.proxy.routes_table import RouteTableReader
@@ -48,7 +49,7 @@ if config.CORS_ORIGINS:
         allow_origins=config.CORS_ORIGINS,
         allow_credentials=False,
         allow_methods=["GET", "PUT", "OPTIONS"],
-        allow_headers=["Authorization", "Content-Type"],
+        allow_headers=["Authorization", "Content-Type", "X-API-Key"],
         max_age=86400,
     )
     logger.info("CORS enabled for origins: %s", ", ".join(config.CORS_ORIGINS))
@@ -83,20 +84,24 @@ async def _ensure_loaded(client: httpx.AsyncClient, model: str) -> list[dict]:
     return _routes.replicas(model)
 
 
-def _manager_headers(headers):
-    """Headers to forward to the manager: keep Authorization (the manager
-    re-authenticates), drop only hop-by-hop + host/content-length (httpx sets)."""
-    drop = config.HOP_BY_HOP_HEADERS | {"host", "content-length"}
-    return {k: v for k, v in headers.items() if k.lower() not in drop}
+def _manager_headers(headers, identity: AuthIdentity):
+    """Forward safe headers plus identity asserted by this loopback proxy."""
+    drop = config.HOP_BY_HOP_HEADERS | config.SENSITIVE_PROXY_HEADERS | {"host", "content-length"}
+    forwarded = {k: v for k, v in headers.items() if k.lower() not in drop}
+    forwarded[config.INTERNAL_AUTH_SUB_HEADER] = identity.sub
+    forwarded[config.INTERNAL_AUTH_ROLE_HEADER] = identity.role
+    return forwarded
 
 
-async def _forward_to_manager(request: Request, path: str, body: bytes) -> StreamingResponse:
+async def _forward_to_manager(
+    request: Request, path: str, body: bytes, identity: AuthIdentity
+) -> StreamingResponse:
     """Proxy a request verbatim to the manager (chat, responses, admin, ...)."""
     client = get_proxy_client()
     req = client.build_request(
         request.method,
         f"{MANAGER_URL}/{path}",
-        headers=_manager_headers(request.headers),
+        headers=_manager_headers(request.headers, identity),
         params=request.query_params,
         content=body,
     )
@@ -115,13 +120,13 @@ async def _forward_to_manager(request: Request, path: str, body: bytes) -> Strea
 
 @app.api_route("/v1/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"])
 async def proxy_v1(request: Request, path: str):
-    require_api(request)
+    identity = await authenticate_public(request)
     body = await request.body()
 
     suffix = path.split("/")[0]
     if suffix not in STATELESS_SUFFIXES:
         # chat/completions, responses, models, ... -> manager (single authority)
-        return await _forward_to_manager(request, f"v1/{path}", body)
+        return await _forward_to_manager(request, f"v1/{path}", body, identity)
 
     # Stateless encoder path: round-robin across replica backends.
     payload = None
@@ -175,9 +180,116 @@ async def health():
     return {"status": "healthy", "pid": os.getpid()}
 
 
+def _return_to(request: Request) -> str:
+    path = request.url.path
+    if request.url.query:
+        path += f"?{request.url.query}"
+    return f"{config.PUBLIC_ORIGIN}{path}"
+
+
+def _login_url(request: Request) -> str:
+    return f"{config.AUTH_ORIGIN}/login?to={urllib.parse.quote(_return_to(request), safe='')}"
+
+
+async def _browser_identity(request: Request):
+    try:
+        return await authenticate_public(request)
+    except HTTPException as exc:
+        accepts_html = "text/html" in request.headers.get("accept", "")
+        if exc.status_code == 401 and request.method in {"GET", "HEAD"} and accepts_html:
+            return RedirectResponse(_login_url(request), status_code=307)
+        raise
+
+
+def _session_headers(request: Request) -> dict[str, str]:
+    session = request.cookies.get(config.AUTH_COOKIE_NAME, "")
+    if not session:
+        raise HTTPException(status_code=401, detail="Browser session required")
+    return {"Cookie": f"{config.AUTH_COOKIE_NAME}={session}"}
+
+
+async def _auth_management(request: Request, method: str, path: str) -> Response:
+    headers = _session_headers(request)
+    kwargs: dict = {"headers": headers, "timeout": config.AUTH_TIMEOUT_S}
+    if method != "GET":
+        kwargs["content"] = await request.body()
+        if request.headers.get("content-type"):
+            headers["Content-Type"] = request.headers["content-type"]
+    try:
+        upstream = await get_proxy_client().request(
+            method,
+            f"{config.AUTH_ORIGIN}{path}",
+            params=request.query_params,
+            **kwargs,
+        )
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=503, detail="Authentication service unavailable") from exc
+    response_headers = {}
+    if upstream.headers.get("content-type"):
+        response_headers["content-type"] = upstream.headers["content-type"]
+    return Response(upstream.content, status_code=upstream.status_code, headers=response_headers)
+
+
+@app.get("/login")
+async def login(request: Request):
+    return RedirectResponse(_login_url(request), status_code=307)
+
+
+@app.get("/auth/me")
+async def auth_me(request: Request):
+    identity = await authenticate_public(request)
+    return {
+        "sub": identity.sub,
+        "email": identity.email,
+        "name": identity.name,
+        "role": identity.role,
+        "services": identity.services,
+        "manage_url": config.AUTH_ORIGIN,
+        "logout_url": f"{config.AUTH_ORIGIN}/logout",
+    }
+
+
+@app.api_route("/auth/tokens", methods=["GET", "POST"])
+async def auth_tokens(request: Request):
+    return await _auth_management(request, request.method, "/api/tokens")
+
+
+@app.post("/auth/token-mode")
+async def auth_token_mode(request: Request):
+    return await _auth_management(request, "POST", "/api/token-mode")
+
+
+@app.delete("/auth/tokens/{token_id}")
+async def auth_token_delete(request: Request, token_id: str):
+    # Common auth revokes by immutable token ID in a JSON body.
+    body = json.dumps({"id": token_id}).encode()
+    headers = _session_headers(request)
+    headers["Content-Type"] = "application/json"
+    try:
+        upstream = await get_proxy_client().request(
+            "DELETE",
+            f"{config.AUTH_ORIGIN}/api/tokens",
+            headers=headers,
+            content=body,
+            timeout=config.AUTH_TIMEOUT_S,
+        )
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=503, detail="Authentication service unavailable") from exc
+    return Response(
+        upstream.content,
+        status_code=upstream.status_code,
+        headers={"content-type": upstream.headers.get("content-type", "application/json")},
+    )
+
+
 # Catch-all for non-/v1 routes (props, models management UI, dashboard, ...) ->
 # manager. Registered last so /v1 and /health take precedence.
 @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"])
 async def proxy_rest(request: Request, path: str):
+    if path == "internal" or path.startswith("internal/"):
+        raise HTTPException(status_code=404, detail="Not found")
+    identity = await _browser_identity(request)
+    if isinstance(identity, Response):
+        return identity
     body = await request.body()
-    return await _forward_to_manager(request, path, body)
+    return await _forward_to_manager(request, path, body, identity)

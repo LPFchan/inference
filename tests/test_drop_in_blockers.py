@@ -51,46 +51,31 @@ class DropInBlockerTests(unittest.TestCase):
         for alias in pinned:
             self.assertIn(alias, models, f"GPU pin names an unknown model: {alias}")
 
-    def test_auth_fails_closed_without_api_key(self):
-        old_api_key = config.API_KEY
-        old_allow_anonymous = config.ALLOW_ANONYMOUS
-        try:
-            config.API_KEY = ""
-            config.ALLOW_ANONYMOUS = False
-            with self.assertRaises(HTTPException) as cm:
-                entrypoint.require_api(FakeRequest())
-            self.assertEqual(cm.exception.status_code, 503)
-        finally:
-            config.API_KEY = old_api_key
-            config.ALLOW_ANONYMOUS = old_allow_anonymous
+    def test_manager_auth_fails_closed_without_proxy_identity(self):
+        with self.assertRaises(HTTPException) as cm:
+            entrypoint.require_api(FakeRequest())
+        self.assertEqual(cm.exception.status_code, 401)
 
-    def test_anonymous_mode_requires_explicit_opt_in(self):
-        old_api_key = config.API_KEY
-        old_allow_anonymous = config.ALLOW_ANONYMOUS
-        try:
-            config.API_KEY = ""
-            config.ALLOW_ANONYMOUS = True
-            token, user_hash = entrypoint.require_api(FakeRequest())
-            self.assertEqual(token, "anonymous")
-            self.assertEqual(user_hash, identity_hash("anonymous"))
-        finally:
-            config.API_KEY = old_api_key
-            config.ALLOW_ANONYMOUS = old_allow_anonymous
+    def test_manager_auth_uses_common_auth_sub_for_stable_storage(self):
+        sub, user_hash = entrypoint.require_api(
+            FakeRequest(headers={config.INTERNAL_AUTH_SUB_HEADER: "42"})
+        )
+        self.assertEqual(sub, "42")
+        self.assertEqual(user_hash, identity_hash("auth.lost.plus:42"))
 
-    def test_bearer_auth_uses_legacy_gateway_key(self):
-        old_api_key = config.API_KEY
-        try:
-            config.API_KEY = "legacy-key"
-            token, user_hash = entrypoint.require_api(FakeRequest(headers={"authorization": "Bearer legacy-key"}))
-            self.assertEqual(token, "legacy-key")
-            self.assertEqual(user_hash, identity_hash("legacy-key"))
-        finally:
-            config.API_KEY = old_api_key
+    def test_manager_admin_uses_common_auth_role(self):
+        request = FakeRequest(headers={
+            config.INTERNAL_AUTH_SUB_HEADER: "42",
+            config.INTERNAL_AUTH_ROLE_HEADER: "administrator",
+        })
+        sub, _ = entrypoint.require_admin(request)
+        self.assertEqual(sub, "42")
 
-    def test_login_template_renders_literal_css_braces(self):
-        html = entrypoint._render_login_html("")
-        self.assertIn("body{margin:0", html)
-        self.assertNotIn("{error}", html)
+    def test_manager_admin_rejects_regular_user(self):
+        request = FakeRequest(headers={config.INTERNAL_AUTH_SUB_HEADER: "42"})
+        with self.assertRaises(HTTPException) as cm:
+            entrypoint.require_admin(request)
+        self.assertEqual(cm.exception.status_code, 403)
 
     def test_build_cmd_binds_backend_to_loopback(self):
         with tempfile.NamedTemporaryFile(suffix=".gguf") as model_file:

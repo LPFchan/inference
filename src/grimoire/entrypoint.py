@@ -25,19 +25,12 @@ from fastapi.staticfiles import StaticFiles
 
 from grimoire import config
 from grimoire.chat_template import apply_chat_template_kwargs
-from grimoire.auth import (
-    require_api,
-    require_admin,
-    _require_login_enabled,
-    _render_login_html,
-    router as auth_router,
-)
+from grimoire.auth import require_api, require_admin
 from grimoire.config import (
     LLAMA_SERVER_BIN,
     DEFAULT_CTX_SIZE,
     DEFAULT_N_GPU_LAYERS,
     DEFAULT_PREDICT,
-    COOKIE_NAME,
     DEFAULT_STARTUP_TIMEOUT,
     MAX_HISTORY_CAPTURE_BYTES,
     MAX_USAGE_CAPTURE_BYTES,
@@ -202,7 +195,6 @@ async def lifespan(_app):
 
 
 app = FastAPI(title="Grimoire Gateway", version="0.1.0", lifespan=lifespan)
-app.include_router(auth_router)
 app.include_router(history_router)
 app.include_router(dashboard_router)
 app.include_router(models_router)

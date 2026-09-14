@@ -66,7 +66,10 @@ class RouterModeContractTests(unittest.TestCase):
         config.ADMIN_TOKEN = "test-key"
         entrypoint.manager.active.clear()
         self.client = TestClient(entrypoint.app)
-        self.auth = {"Authorization": "Bearer test-key"}
+        self.auth = {
+            config.INTERNAL_AUTH_SUB_HEADER: "test-user",
+            config.INTERNAL_AUTH_ROLE_HEADER: "administrator",
+        }
 
     def tearDown(self):
         config.API_KEY = self._old_api

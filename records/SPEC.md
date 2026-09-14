@@ -3,7 +3,7 @@
 **Project:** Grimoire — Multi-host model serving gateway
 **Canonical repo:** `git@github.com:LPFchan/inference.git`
 **Operator:** LPFchan
-**Last updated:** 2026-09-10
+**Last updated:** 2026-09-14
 
 ## Mission
 
@@ -117,6 +117,17 @@ These decisions were locked before Phase 1 and are not subject to renegotiation 
   across model unloads or agent restarts.
 - Mangchi owns its unified-memory budget, LRU eviction, pinning, launch specs,
   and process health. Grimoire owns the public registry and client-facing state.
+
+### Contract H: Common Authentication
+
+- `auth.lost.plus` is the only public identity and credential authority for Grimoire.
+- Browser requests use the shared `lp_auth` cookie and require `chat` visibility.
+- Bearer and `X-API-Key` requests are explicit and authoritative, and validate against the `chat-v1` machine-token service without cookie fallback.
+- Every protected public request is validated with common auth and fails closed when validation is unavailable.
+- The public multi-worker proxy strips credentials and client-supplied internal identity headers before forwarding the immutable common-auth `sub` and shared role to the loopback manager.
+- History, settings, usage, cache routing, and other account-bound state derive their stable owner from `sub`; rotating or switching tokens does not change ownership.
+- Chat settings proxy token management to common auth. Global/per-service mode, mint/rotate, listing, and revocation use common auth as the single source of truth. Plaintext secrets are neither stored nor listed by Grimoire.
+- Browser sign-in and global sign-out use absolute `auth.lost.plus` URLs. The web UI does not store bearer credentials in local storage.
 
 ## Pinned Upstream Repos
 

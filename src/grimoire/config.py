@@ -34,10 +34,18 @@ DEFAULT_CTX_SIZE = 131072
 DEFAULT_N_GPU_LAYERS = 999
 DEFAULT_PREDICT = 16384
 
-# Auth
+# Auth. GRIMOIRE_API_KEY remains only for one-time legacy usage import and for
+# existing deployment tooling; request authentication is owned by auth.lost.plus.
 API_KEY = os.environ.get("GRIMOIRE_API_KEY", "")
 ADMIN_TOKEN = os.environ.get("GRIMOIRE_ADMIN_TOKEN") or API_KEY
-COOKIE_NAME = "gw_session"
+AUTH_ORIGIN = os.environ.get("GRIMOIRE_AUTH_ORIGIN", "https://auth.lost.plus").rstrip("/")
+PUBLIC_ORIGIN = os.environ.get("GRIMOIRE_PUBLIC_ORIGIN", "https://chat.lost.plus").rstrip("/")
+AUTH_COOKIE_NAME = "lp_auth"
+AUTH_VISIBILITY_KEY = "chat"
+AUTH_TOKEN_SERVICE = "chat-v1"
+AUTH_TIMEOUT_S = 5.0
+INTERNAL_AUTH_SUB_HEADER = "x-grimoire-auth-sub"
+INTERNAL_AUTH_ROLE_HEADER = "x-grimoire-auth-role"
 
 
 def _env_origins(name):
@@ -81,6 +89,8 @@ SENSITIVE_PROXY_HEADERS = {
     "cookie",
     "x-grimoire-token",
     "x-api-key",
+    INTERNAL_AUTH_SUB_HEADER,
+    INTERNAL_AUTH_ROLE_HEADER,
 }
 
 # Process management
