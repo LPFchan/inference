@@ -53,6 +53,13 @@ class HistoryTreeContractTests(unittest.TestCase):
             headers=self.auth,
         ).json()
 
+    @staticmethod
+    def _auth_for(sub):
+        return {
+            config.INTERNAL_AUTH_SUB_HEADER: sub,
+            config.INTERNAL_AUTH_ROLE_HEADER: "user",
+        }
+
     def test_create_returns_webui_shape(self):
         conv = self._create_conv()
         self.assertEqual(conv["id"], "c1")
@@ -124,6 +131,25 @@ class HistoryTreeContractTests(unittest.TestCase):
         self.assertEqual(msgs_by_id["m-root"]["children"], ["m-a"])
         self.assertEqual(msgs_by_id["m-a"]["children"], ["m-b"])
 
+    def test_patch_message_rejects_parent_cycles(self):
+        self._create_conv()
+        self._add_message("c1", "m-root", parent_id=None)
+        self._add_message("c1", "m-child", parent_id="m-root")
+
+        self_parent = self.client.patch(
+            "/history/c1/messages/m-root",
+            json={"parent": "m-root"},
+            headers=self.auth,
+        )
+        descendant_parent = self.client.patch(
+            "/history/c1/messages/m-root",
+            json={"parent": "m-child"},
+            headers=self.auth,
+        )
+
+        self.assertEqual(self_parent.status_code, 400)
+        self.assertEqual(descendant_parent.status_code, 400)
+
     def test_delete_message_unlinks_from_parent(self):
         self._create_conv()
         self._add_message("c1", "m-root", parent_id=None, role="system", type="root", content="")
@@ -137,6 +163,39 @@ class HistoryTreeContractTests(unittest.TestCase):
         self.assertNotIn("m-1", ids)
         root = next(m for m in conv["messages"] if m["id"] == "m-root")
         self.assertEqual(root["children"], ["m-2"])
+
+    def test_delete_message_reparents_surviving_children(self):
+        self._create_conv()
+        self._add_message("c1", "m-root", parent_id=None)
+        self._add_message("c1", "m-parent", parent_id="m-root")
+        self._add_message("c1", "m-child", parent_id="m-parent")
+
+        response = self.client.delete("/history/messages/m-parent", headers=self.auth)
+
+        self.assertEqual(response.status_code, 200)
+        conversation = self.client.get("/history/c1", headers=self.auth).json()
+        messages = {message["id"]: message for message in conversation["messages"]}
+        self.assertEqual(messages["m-root"]["children"], ["m-child"])
+        self.assertEqual(messages["m-child"]["parent"], "m-root")
+
+    def test_reparent_then_delete_keeps_server_managed_children_consistent(self):
+        self._create_conv()
+        self._add_message("c1", "m-root", parent_id=None, role="system", type="root", content="")
+        self._add_message("c1", "m-system", parent_id="m-root", role="system", content="prompt")
+        self._add_message("c1", "m-user", parent_id="m-system", role="user", content="hello")
+
+        reparent = self.client.patch(
+            "/history/messages/m-user", json={"parent": "m-root"}, headers=self.auth
+        )
+        deleted = self.client.delete("/history/messages/m-system", headers=self.auth)
+
+        self.assertEqual(reparent.status_code, 200)
+        self.assertEqual(deleted.status_code, 200)
+        conversation = self.client.get("/history/c1", headers=self.auth).json()
+        messages = {message["id"]: message for message in conversation["messages"]}
+        self.assertEqual(set(messages), {"m-root", "m-user"})
+        self.assertEqual(messages["m-root"]["children"], ["m-user"])
+        self.assertEqual(messages["m-user"]["parent"], "m-root")
 
     def test_delete_current_node_clears_curr_node(self):
         self._create_conv()
@@ -229,6 +288,182 @@ class HistoryTreeContractTests(unittest.TestCase):
         self.assertEqual(second, {"imported": 0, "skipped": 1})
         listing = self.client.get("/history", headers=self.auth).json()["conversations"]
         self.assertEqual(len(listing), 1)
+
+    def test_reparent_cannot_link_to_another_accounts_message(self):
+        alice = self._auth_for("alice")
+        bob = self._auth_for("bob")
+        self.client.post("/history", json={"id": "alice-c", "name": "Alice"}, headers=alice)
+        self.client.post(
+            "/history/alice-c/messages",
+            json={"id": "alice-message", "role": "user", "content": "private"},
+            headers=alice,
+        )
+        self.client.post("/history", json={"id": "bob-c", "name": "Bob"}, headers=bob)
+        self.client.post(
+            "/history/bob-c/messages",
+            json={"id": "bob-message", "role": "user", "content": "hello"},
+            headers=bob,
+        )
+
+        response = self.client.patch(
+            "/history/bob-c/messages/bob-message",
+            json={"parent": "alice-message"},
+            headers=bob,
+        )
+
+        self.assertEqual(response.status_code, 404)
+        alice_conversation = self.client.get("/history/alice-c", headers=alice).json()
+        self.assertEqual(alice_conversation["messages"][0]["children"], [])
+
+    def test_import_remaps_message_ids_owned_by_another_account(self):
+        alice = self._auth_for("alice")
+        bob = self._auth_for("bob")
+        self.client.post("/history", json={"id": "alice-c", "name": "Alice"}, headers=alice)
+        self.client.post(
+            "/history/alice-c/messages",
+            json={"id": "shared-id", "role": "user", "content": "alice-private"},
+            headers=alice,
+        )
+        payload = [{
+            "conv": {"id": "bob-import", "name": "Bob import", "currNode": "shared-id"},
+            "messages": [{
+                "id": "shared-id",
+                "role": "user",
+                "content": "bob-copy",
+                "parent": None,
+                "children": [],
+            }],
+        }]
+
+        response = self.client.post("/history/import", json=payload, headers=bob)
+
+        self.assertEqual(response.json(), {"imported": 1, "skipped": 0})
+        alice_conversation = self.client.get("/history/alice-c", headers=alice).json()
+        self.assertEqual(alice_conversation["messages"][0]["id"], "shared-id")
+        self.assertEqual(alice_conversation["messages"][0]["content"], "alice-private")
+        bob_conversation = self.client.get("/history/bob-import", headers=bob).json()
+        self.assertNotEqual(bob_conversation["messages"][0]["id"], "shared-id")
+        self.assertEqual(bob_conversation["currNode"], bob_conversation["messages"][0]["id"])
+
+    def test_fork_rejects_dangling_parent_owned_by_another_account(self):
+        alice = self._auth_for("alice")
+        bob = self._auth_for("bob")
+        self.client.post("/history", json={"id": "alice-c", "name": "Alice"}, headers=alice)
+        self.client.post(
+            "/history/alice-c/messages",
+            json={"id": "alice-child", "role": "user", "content": "alice"},
+            headers=alice,
+        )
+        self.client.post("/history", json={"id": "bob-c", "name": "Bob"}, headers=bob)
+        self.client.post(
+            "/history/bob-c/messages",
+            json={"id": "foreign-parent", "role": "user", "content": "bob-private"},
+            headers=bob,
+        )
+        with entrypoint.history_store._connect() as conn:
+            conn.execute(
+                "UPDATE messages SET parent_id = ? WHERE id = ?",
+                ("foreign-parent", "alice-child"),
+            )
+
+        response = self.client.post(
+            "/history/alice-c/fork",
+            json={"at_message_id": "alice-child", "name": "Fork"},
+            headers=alice,
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_import_skips_cyclic_message_tree(self):
+        payload = [{
+            "conv": {"id": "cyclic-import", "name": "Cyclic", "currNode": "a"},
+            "messages": [
+                {"id": "a", "parent": "b", "children": ["b"]},
+                {"id": "b", "parent": "a", "children": ["a"]},
+            ],
+        }]
+
+        response = self.client.post("/history/import", json=payload, headers=self.auth)
+
+        self.assertEqual(response.json(), {"imported": 0, "skipped": 1})
+
+    def test_import_skips_self_fork_and_cross_entry_fork_cycle(self):
+        payload = [
+            {"conv": {"id": "self", "name": "Self", "forkedFromConversationId": "self"}},
+            {"conv": {"id": "fork-a", "name": "A", "forkedFromConversationId": "fork-b"}},
+            {"conv": {"id": "fork-b", "name": "B", "forkedFromConversationId": "fork-a"}},
+        ]
+
+        response = self.client.post("/history/import", json=payload, headers=self.auth)
+
+        self.assertEqual(response.json(), {"imported": 0, "skipped": 3})
+
+    def test_import_detaches_fork_when_origin_is_unavailable(self):
+        payload = [{
+            "conv": {
+                "id": "portable-fork",
+                "name": "Portable",
+                "forkedFromConversationId": "unavailable-origin",
+                "currNode": "message",
+            },
+            "messages": [{
+                "id": "message",
+                "role": "user",
+                "content": "portable",
+                "parent": None,
+                "children": [],
+            }],
+        }]
+
+        response = self.client.post("/history/import", json=payload, headers=self.auth)
+
+        self.assertEqual(response.json(), {"imported": 1, "skipped": 0})
+        imported = self.client.get("/history/portable-fork", headers=self.auth).json()
+        self.assertIsNone(imported["forkedFromConversationId"])
+
+    def test_import_skips_children_that_disagree_with_parent_links(self):
+        payload = [{
+            "conv": {"id": "bad-children", "name": "Bad", "currNode": "root"},
+            "messages": [{"id": "root", "parent": None, "children": ["root"]}],
+        }]
+
+        response = self.client.post("/history/import", json=payload, headers=self.auth)
+
+        self.assertEqual(response.json(), {"imported": 0, "skipped": 1})
+
+    def test_message_by_id_patch_returns_400_for_cycle(self):
+        self._create_conv()
+        self._add_message("c1", "m-root", parent_id=None)
+        self._add_message("c1", "m-child", parent_id="m-root")
+
+        response = self.client.patch(
+            "/history/messages/m-root",
+            json={"parent": "m-child"},
+            headers=self.auth,
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_message_patch_rejects_children_that_disagree_with_parent_links(self):
+        self._create_conv()
+        self._add_message("c1", "m-root", parent_id=None)
+
+        response = self.client.patch(
+            "/history/messages/m-root",
+            json={"children": ["m-root"]},
+            headers=self.auth,
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_conversation_rejects_self_fork(self):
+        response = self.client.post(
+            "/history",
+            json={"id": "self-fork", "name": "Self", "forkedFromConversationId": "self-fork"},
+            headers=self.auth,
+        )
+
+        self.assertEqual(response.status_code, 400)
 
     def test_cross_user_access_is_forbidden(self):
         # Create as user A

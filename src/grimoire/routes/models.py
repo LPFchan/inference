@@ -728,7 +728,7 @@ async def get_registry_model(name: str, request: Request):
 @router.put("/registry/model/{name}")
 async def put_registry_model(name: str, request: Request):
     """Upsert a model entry."""
-    require_api(request)
+    require_admin(request)
     try:
         data = await request.json()
     except Exception:
@@ -766,7 +766,7 @@ async def delete_registry_model(
     force: bool = False,
 ):
     """Remove a model entry with optional shared-file gate."""
-    require_api(request)
+    require_admin(request)
     cfg = registry.get(name)
     if cfg is None:
         raise HTTPException(status_code=404, detail=f"Model '{name}' not found")
@@ -812,7 +812,7 @@ async def delete_registry_model(
 @router.delete("/registry/gguf")
 async def delete_registry_gguf(request: Request, filename: str = ""):
     """Delete an orphaned GGUF file."""
-    require_api(request)
+    require_admin(request)
     if not filename:
         raise HTTPException(status_code=400, detail="'filename' query parameter is required")
     real_path = _containment_check(filename)
@@ -834,7 +834,7 @@ async def delete_registry_gguf(request: Request, filename: str = ""):
 @router.post("/registry/upload")
 async def upload_registry_gguf(request: Request, file: UploadFile):
     """Upload a .gguf file to the models directory."""
-    require_api(request)
+    require_admin(request)
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file provided")
 
@@ -941,7 +941,7 @@ async def prune_old_ingest_tasks():
 @router.post("/registry/ingest-start")
 async def ingest_start(request: Request):
     """Parse a HuggingFace URL and start a background download."""
-    require_api(request)
+    require_admin(request)
     try:
         data = await request.json()
     except Exception:
@@ -1024,7 +1024,7 @@ async def ingest_start(request: Request):
 @router.post("/registry/ingest-configure")
 async def ingest_configure(request: Request):
     """Save config for a download task. Model is registered when download completes."""
-    require_api(request)
+    require_admin(request)
     try:
         data = await request.json()
     except Exception:
@@ -1113,7 +1113,7 @@ async def ingest_status(task_id: str, request: Request):
 @router.delete("/registry/ingest-status/{task_id}")
 async def ingest_cancel(task_id: str, request: Request):
     """Cancel a background download."""
-    require_api(request)
+    require_admin(request)
     async with _ingest_lock:
         task = _ingest_tasks.get(task_id)
         if not task:
@@ -1152,7 +1152,7 @@ async def ingest_cancel(task_id: str, request: Request):
 @router.patch("/registry/gguf")
 async def rename_gguf(request: Request, filename: str = "", new_filename: str = ""):
     """Rename a GGUF file and update all model configs referencing it."""
-    require_api(request)
+    require_admin(request)
     if not filename or not new_filename:
         raise HTTPException(status_code=400, detail="'filename' and 'new_filename' are required")
 

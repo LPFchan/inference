@@ -93,6 +93,12 @@ def _manager_headers(headers, identity: AuthIdentity):
     return forwarded
 
 
+def _enforce_expected_identity(request: Request, identity: AuthIdentity) -> None:
+    expected = request.headers.get("x-grimoire-expected-sub")
+    if expected is not None and expected != identity.sub:
+        raise HTTPException(status_code=409, detail="Browser account changed; reload and retry")
+
+
 async def _forward_to_manager(
     request: Request, path: str, body: bytes, identity: AuthIdentity
 ) -> StreamingResponse:
@@ -121,6 +127,7 @@ async def _forward_to_manager(
 @app.api_route("/v1/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"])
 async def proxy_v1(request: Request, path: str):
     identity = await authenticate_public(request)
+    _enforce_expected_identity(request, identity)
     body = await request.body()
 
     suffix = path.split("/")[0]
@@ -187,8 +194,9 @@ def _return_to(request: Request) -> str:
     return f"{config.PUBLIC_ORIGIN}{path}"
 
 
-def _login_url(request: Request) -> str:
-    return f"{config.AUTH_ORIGIN}/login?to={urllib.parse.quote(_return_to(request), safe='')}"
+def _login_url(request: Request, return_to: str | None = None) -> str:
+    target = return_to or _return_to(request)
+    return f"{config.AUTH_ORIGIN}/login?to={urllib.parse.quote(target, safe='')}"
 
 
 async def _browser_identity(request: Request):
@@ -208,7 +216,18 @@ def _session_headers(request: Request) -> dict[str, str]:
     return {"Cookie": f"{config.AUTH_COOKIE_NAME}={session}"}
 
 
+async def _require_browser_session(request: Request) -> None:
+    if "authorization" in request.headers or "x-api-key" in request.headers:
+        raise HTTPException(
+            status_code=401,
+            detail="Token management requires browser session authentication only",
+        )
+    identity = await authenticate_public(request)
+    _enforce_expected_identity(request, identity)
+
+
 async def _auth_management(request: Request, method: str, path: str) -> Response:
+    await _require_browser_session(request)
     headers = _session_headers(request)
     kwargs: dict = {"headers": headers, "timeout": config.AUTH_TIMEOUT_S}
     if method != "GET":
@@ -232,7 +251,7 @@ async def _auth_management(request: Request, method: str, path: str) -> Response
 
 @app.get("/login")
 async def login(request: Request):
-    return RedirectResponse(_login_url(request), status_code=307)
+    return RedirectResponse(_login_url(request, f"{config.PUBLIC_ORIGIN}/"), status_code=307)
 
 
 @app.get("/auth/me")
@@ -262,6 +281,7 @@ async def auth_token_mode(request: Request):
 @app.delete("/auth/tokens/{token_id}")
 async def auth_token_delete(request: Request, token_id: str):
     # Common auth revokes by immutable token ID in a JSON body.
+    await _require_browser_session(request)
     body = json.dumps({"id": token_id}).encode()
     headers = _session_headers(request)
     headers["Content-Type"] = "application/json"
@@ -291,5 +311,6 @@ async def proxy_rest(request: Request, path: str):
     identity = await _browser_identity(request)
     if isinstance(identity, Response):
         return identity
+    _enforce_expected_identity(request, identity)
     body = await request.body()
     return await _forward_to_manager(request, path, body, identity)

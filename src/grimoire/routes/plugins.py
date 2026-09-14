@@ -6,8 +6,7 @@ import logging
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
-from grimoire.auth import require_api
-from grimoire.history import identity_hash
+from grimoire.auth import require_admin
 from grimoire.plugins import plugin_manager, restore_plugin_states
 from grimoire.settings import settings_store
 
@@ -66,7 +65,7 @@ async function load(){try{const r=await fetch('/stats/plugins');if(!r.ok)throw n
 
 @router.get("/stats/plugins")
 async def plugins_stats(request: Request):
-    _, user_hash = require_api(request)
+    _, user_hash = require_admin(request)
     restore_plugin_states(user_hash, settings_store)
     return plugin_manager.get_all_info()
 
@@ -78,7 +77,7 @@ async def plugins_page():
 
 @router.patch("/stats/plugins/{key}")
 async def plugins_toggle(key: str, request: Request):
-    _, user_hash = require_api(request)
+    _, user_hash = require_admin(request)
     body = await request.json()
     enabled = body.get("enabled")
     if enabled is None or not isinstance(enabled, bool):

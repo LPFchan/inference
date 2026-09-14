@@ -416,6 +416,48 @@ class RouterModeContractTests(unittest.TestCase):
             response = self.client.request(method, path, json=body)
             self.assertEqual(response.status_code, 401, f"{method} {path} should require auth")
 
+    def test_shared_registry_mutations_require_administrator(self):
+        user_auth = {
+            config.INTERNAL_AUTH_SUB_HEADER: "regular-user",
+            config.INTERNAL_AUTH_ROLE_HEADER: "user",
+        }
+        requests = [
+            ("put", "/registry/model/test", {"json": {}}),
+            ("delete", "/registry/model/test", {}),
+            ("delete", "/registry/gguf?filename=gguf/test.gguf", {}),
+            ("post", "/registry/upload", {"files": {"file": ("test.gguf", b"gguf")}}),
+            ("post", "/registry/ingest-start", {"json": {"url": "https://example.test/model.gguf"}}),
+            ("post", "/registry/ingest-configure", {"json": {"task_id": "test", "alias": "test"}}),
+            ("delete", "/registry/ingest-status/test", {}),
+            ("patch", "/registry/gguf?filename=gguf/a.gguf&new_filename=gguf/b.gguf", {}),
+        ]
+
+        for method, path, kwargs in requests:
+            response = self.client.request(method, path, headers=user_auth, **kwargs)
+            self.assertEqual(response.status_code, 403, f"{method} {path} should require administrator")
+
+    def test_global_plugin_state_requires_administrator(self):
+        user_auth = {
+            config.INTERNAL_AUTH_SUB_HEADER: "regular-user",
+            config.INTERNAL_AUTH_ROLE_HEADER: "user",
+        }
+        for method, path, kwargs in [
+            ("get", "/stats/plugins", {}),
+            ("patch", "/stats/plugins/tool-arg-sanitize", {"json": {"enabled": False}}),
+        ]:
+            response = self.client.request(method, path, headers=user_auth, **kwargs)
+            self.assertEqual(response.status_code, 403, f"{method} {path} should require administrator")
+
+    def test_settings_write_rejects_stale_browser_account(self):
+        headers = {
+            **self.auth,
+            "X-Grimoire-Expected-Sub": "different-account",
+        }
+
+        response = self.client.put("/settings", headers=headers, json={"config": "{}"})
+
+        self.assertEqual(response.status_code, 409)
+
 
 if __name__ == "__main__":
     unittest.main()

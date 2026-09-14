@@ -14,7 +14,7 @@ def _history_store():
 
 @router.get("/history")
 async def list_history(request: Request):
-    """List conversations for the authenticated API key (tree-aware shape)."""
+    """List conversations for the authenticated account (tree-aware shape)."""
     _, user_hash = require_api(request)
     conversations = _history_store().list_conversations_tree(user_hash)
     return {"conversations": conversations}
@@ -22,7 +22,7 @@ async def list_history(request: Request):
 
 @router.post("/history")
 async def create_history(request: Request):
-    """Create a conversation for the authenticated API key.
+    """Create a conversation for the authenticated account.
 
     Webui upsert path: pass {id, name, lastModified, currNode, ...}.
     Legacy gateway path: pass {title, model, messages: [...]}.
@@ -34,6 +34,10 @@ async def create_history(request: Request):
             return _history_store().upsert_conversation_tree(user_hash, data)
         except PermissionError as e:
             raise HTTPException(status_code=403, detail=str(e))
+        except KeyError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
     return _history_store().create_conversation(
         user_hash,
         title=data.get("title") or "New chat",
@@ -102,7 +106,12 @@ async def patch_history_message_by_id(message_id: str, request: Request):
     if not conv_id:
         raise HTTPException(status_code=404, detail=f"Message '{message_id}' not found")
     data = await request.json()
-    _history_store().update_message_tree(user_hash, conv_id, message_id, data)
+    try:
+        _history_store().update_message_tree(user_hash, conv_id, message_id, data)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     return {"updated": message_id}
 
 
@@ -138,6 +147,8 @@ async def patch_history_message(conversation_id: str, message_id: str, request: 
         _history_store().update_message_tree(user_hash, conversation_id, message_id, data)
     except KeyError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     return {"updated": message_id}
 
 
@@ -169,6 +180,8 @@ async def fork_history(conversation_id: str, request: Request):
         )
     except KeyError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.post("/history/import")

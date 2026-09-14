@@ -13,7 +13,8 @@ client ──/v1──► chat.lost.plus ──► grimoire :9001 ──┬─�
 
 ```bash
 docker run --name grimoire --gpus all -p 9001:9001 \
-  -e GRIMOIRE_API_KEY="change-me" \
+  -e GRIMOIRE_AUTH_ORIGIN="https://auth.lost.plus" \
+  -e GRIMOIRE_PUBLIC_ORIGIN="https://chat.lost.plus" \
   -v /path/to/models:/models \
   -v grimoire-state:/var/lib/grimoire \
   grimoire:local --model qwen-3.6-27B
@@ -26,16 +27,19 @@ docker exec grimoire grimoire list                    # registered models
 docker exec grimoire grimoire ingest --alias X --url Y  # download + register
 docker exec grimoire grimoire pin gemma-4-31B 1        # pin to GPU
 docker exec grimoire grimoire unpin gemma-4-31B        # release
-curl -X POST http://localhost:9001/switch/qwen-3.6-27B -H "Authorization: Bearer $KEY"
+curl -X POST http://localhost:9001/switch/qwen-3.6-27B -H "Authorization: Bearer $LOST_PLUS_TOKEN"
 ```
 
 ## Auth
 
-| Header | Env var | Scope |
-| --- | --- | --- |
-| `Authorization: Bearer ...` or `X-Grimoire-Token` | `GRIMOIRE_API_KEY` (or legacy `GATEWAY_API_KEY`) | `/v1/*`, history, stats |
-| Admin auth | `GRIMOIRE_ADMIN_TOKEN` (falls back to API key) | Management endpoints |
-| `GRIMOIRE_ALLOW_ANONYMOUS=1` | — | Local dev, no auth |
+`auth.lost.plus` is the only public identity and credential authority.
+
+- Browsers use the shared `lp_auth` cookie and must have `chat` visibility.
+- API clients use a global or `chat-v1` bearer token through `Authorization: Bearer ...`; `X-API-Key` is accepted as a compatibility spelling.
+- Shared model lifecycle, presets, registry files, uploads, and ingest operations require the common-auth `administrator` role. History, settings, usage, and dashboard layout remain private to the immutable account `sub`.
+- An explicit credential header is authoritative. Invalid or empty credentials never fall back to a browser cookie.
+
+`GRIMOIRE_API_KEY` is retained only for one-time legacy usage migration and existing deployment tooling. It no longer authenticates public requests.
 
 ## Model Registry
 
@@ -92,19 +96,19 @@ Temporary runtime controls are available through admin-authenticated POST reques
 
 ```bash
 curl -X POST "$GRIMOIRE_ORIGIN/models/qwen/clone" \
-  -H "Authorization: Bearer $GRIMOIRE_API_KEY" -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $LOST_PLUS_TOKEN" -H "Content-Type: application/json" \
   -d '{"gpu_ids":[0,1],"tensor_split":[1,1]}'
-curl -X POST "$GRIMOIRE_ORIGIN/models/qwen/declone" -H "Authorization: Bearer $GRIMOIRE_API_KEY"
+curl -X POST "$GRIMOIRE_ORIGIN/models/qwen/declone" -H "Authorization: Bearer $LOST_PLUS_TOKEN"
 curl -X POST "$GRIMOIRE_ORIGIN/models/qwen/pin" \
-  -H "Authorization: Bearer $GRIMOIRE_API_KEY" -H "Content-Type: application/json" -d '{"gpu":0}'
-curl -X POST "$GRIMOIRE_ORIGIN/models/qwen/unpin" -H "Authorization: Bearer $GRIMOIRE_API_KEY"
+  -H "Authorization: Bearer $LOST_PLUS_TOKEN" -H "Content-Type: application/json" -d '{"gpu":0}'
+curl -X POST "$GRIMOIRE_ORIGIN/models/qwen/unpin" -H "Authorization: Bearer $LOST_PLUS_TOKEN"
 ```
 
 `clone` runs one llama-server process sharded across the ordered GPUs; it does not create a replica. Clone/declone reload active models with rollback on failure. Pin reloads only when residency must move; unpin changes eviction protection without moving a running model. `/status` keeps `gpu`/`gpus` for actual residency and reports requested placement, placement/pin sources, and runtime overrides separately. Locked presets clear runtime overrides and reconcile target models; manual-control presets retain them but enforce their GPU mask.
 - Dynamic allocation: free GPU preferred, oldest non-pinned evicted when all busy
 - `backend: "llama"` starts a local llama-server and participates in Grimoire's GPU allocator.
 - `backend: "vllm-remote"` asks the Mangchi residency agent to load or unload `remote-model-id`, forwards inference to `remote-url`, and does not consume or evict Grimoire GPU residency. The pinned Mangchi image emits live prefill progress, live decode speed, and final timing statistics in the same SSE fields used by the web UI's llama.cpp path.
-- Grimoire keeps the public API key boundary. Mangchi's agent accepts only its configured private source CIDRs and does not receive the client credential.
+- Grimoire keeps the public common-auth boundary. Mangchi's agent accepts only its configured private source CIDRs and does not receive the client credential.
 
 ### Prompt Cache Reuse
 
@@ -158,8 +162,8 @@ docker compose build        # ~90 min first build (llama.cpp)
 ```bash
 sudo install -d /etc/grimoire
 sudo install -m 600 /dev/stdin /etc/grimoire/grimoire.env <<'EOF'
-GRIMOIRE_API_KEY=change-me
-GRIMOIRE_ADMIN_TOKEN=change-me
+GRIMOIRE_AUTH_ORIGIN=https://auth.lost.plus
+GRIMOIRE_PUBLIC_ORIGIN=https://chat.lost.plus
 GRIMOIRE_LEGACY_STATS_PATH=/var/lib/grimoire/token-stats.json
 EOF
 sudo install -m 644 etc/grimoire.service /etc/systemd/system/grimoire.service

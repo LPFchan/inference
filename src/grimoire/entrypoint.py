@@ -5,15 +5,18 @@ import argparse
 import asyncio
 import copy
 import ctypes
+import ipaddress
 from collections import OrderedDict
 from contextlib import asynccontextmanager
 import json
 import logging
 import os
 import signal
+import socket
 import subprocess
 import sys
 import time
+import urllib.parse
 import uuid
 from datetime import datetime, timezone
 
@@ -510,9 +513,41 @@ def _mount_webui():
 @app.api_route("/cors-proxy", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"])
 async def cors_proxy(request: Request):
     """CORS proxy for MCP server connections — enables browser-to-MCP via the gateway."""
+    require_api(request)
     target_url = request.query_params.get("url")
     if not target_url:
         return JSONResponse(status_code=400, content={"error": "Missing 'url' query parameter"})
+
+    parsed = urllib.parse.urlparse(target_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise HTTPException(status_code=400, detail="MCP proxy target must be an HTTP(S) URL")
+    if parsed.username is not None or parsed.password is not None:
+        raise HTTPException(status_code=400, detail="MCP proxy target must not contain credentials")
+    try:
+        target_port = parsed.port
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="MCP proxy target has an invalid port") from exc
+    try:
+        addresses = await asyncio.to_thread(
+            socket.getaddrinfo,
+            parsed.hostname,
+            target_port,
+            type=socket.SOCK_STREAM,
+        )
+    except socket.gaierror as exc:
+        raise HTTPException(status_code=400, detail="MCP proxy target hostname could not be resolved") from exc
+    if not addresses or any(not ipaddress.ip_address(item[4][0]).is_global for item in addresses):
+        raise HTTPException(
+            status_code=403,
+            detail="MCP proxy target resolves to a private or non-routable address",
+        )
+    # Connect to the already-validated address so attacker-controlled DNS
+    # cannot rebind the hostname to an internal service between validation and
+    # connection. Preserve Host and TLS SNI for the original public hostname.
+    selected_address = addresses[0][4][0]
+    pinned_host = f"[{selected_address}]" if ":" in selected_address else selected_address
+    pinned_netloc = f"{pinned_host}:{target_port}" if target_port is not None else pinned_host
+    pinned_url = urllib.parse.urlunparse(parsed._replace(netloc=pinned_netloc))
 
     if request.method == "OPTIONS":
         origin = request.headers.get("origin", "*")
@@ -530,32 +565,64 @@ async def cors_proxy(request: Request):
     headers = {}
     for key, value in request.headers.items():
         low = key.lower()
-        if low in ("host", "content-length", "x-forwarded-for", "accept-encoding"):
-            continue
         if low.startswith("x-proxy-header-"):
             original_key = key[len("x-proxy-header-"):]
+            if original_key.lower() in {
+                "host", "content-length", "cookie", "x-forwarded-for", "accept-encoding",
+                config.INTERNAL_AUTH_SUB_HEADER, config.INTERNAL_AUTH_ROLE_HEADER,
+                "x-grimoire-expected-sub",
+            }:
+                continue
             headers[original_key] = value
+            continue
+        if low in SENSITIVE_PROXY_HEADERS or low in {
+            "host", "content-length", "x-forwarded-for", "accept-encoding",
+            "x-grimoire-expected-sub",
+        }:
             continue
         headers[key] = value
     headers.setdefault("Accept", "application/json, text/event-stream")
+    headers["Host"] = parsed.netloc
 
-    async with httpx.AsyncClient(timeout=300) as client:
+    async with httpx.AsyncClient(timeout=300, follow_redirects=False, trust_env=False) as client:
         try:
             upstream = await client.request(
                 method=request.method,
-                url=target_url,
+                url=pinned_url,
                 headers=headers,
                 content=body or None,
+                extensions={"sni_hostname": parsed.hostname},
             )
         except httpx.RequestError as e:
             return JSONResponse(status_code=502, content={"error": f"Proxy error: {e}"})
 
+    if 300 <= upstream.status_code < 400:
+        return JSONResponse(
+            status_code=502,
+            content={"error": "MCP proxy targets must not redirect browser requests"},
+        )
+
+    allowed_response_headers = {
+        "cache-control",
+        "mcp-session-id",
+        "retry-after",
+        "vary",
+        "www-authenticate",
+    }
     resp_headers = {}
     for key, value in upstream.headers.items():
         low = key.lower()
-        if low not in ("transfer-encoding", "content-encoding", "content-length"):
+        if low in allowed_response_headers:
             resp_headers[key] = value
+    content_type = upstream.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+    if content_type in {"application/json", "text/event-stream"} or content_type.endswith("+json"):
+        resp_headers["Content-Type"] = upstream.headers["content-type"]
+    else:
+        resp_headers["Content-Type"] = "text/plain; charset=utf-8"
+    resp_headers["Content-Security-Policy"] = "sandbox; default-src 'none'"
+    resp_headers["X-Content-Type-Options"] = "nosniff"
     resp_headers["Access-Control-Allow-Origin"] = request.headers.get("origin", "*")
+    resp_headers["Access-Control-Expose-Headers"] = "Mcp-Session-Id, Retry-After, WWW-Authenticate"
 
     return Response(
         content=upstream.content,

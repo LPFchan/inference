@@ -1,4 +1,4 @@
-"""Server-side per-api-key conversation history.
+"""Server-side per-account conversation history.
 
 Schema supports both the flat append API used by the gateway when recording
 chat completions, and the tree-with-branches model used by the stock llama.cpp
@@ -14,6 +14,7 @@ import os
 import sqlite3
 import time
 import uuid
+from collections import Counter, deque
 from datetime import datetime, timezone
 from threading import RLock
 
@@ -31,14 +32,14 @@ def now_ms():
 
 
 def identity_hash(token):
-    """Hash an API key into a stable non-secret identity key."""
+    """Hash a stable identity into a non-secret storage key."""
     if not token:
         token = "anonymous"
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
 class HistoryStore:
-    """Small SQLite-backed conversation store keyed by API-key hash."""
+    """Small SQLite-backed conversation store keyed by account hash."""
 
     def __init__(self, path=DEFAULT_HISTORY_PATH):
         self.path = path
@@ -384,6 +385,16 @@ class HistoryStore:
             ).fetchone()
             if existing and existing["user_hash"] != user_hash:
                 raise PermissionError(f"Conversation '{conv_id}' not owned by caller")
+            self._validate_fork_parent(conn, user_hash, conv_id, forked_from)
+            if curr_node is not None:
+                current_message = conn.execute(
+                    "SELECT 1 FROM messages WHERE id = ? AND conversation_id = ?",
+                    (curr_node, conv_id),
+                ).fetchone()
+                if not current_message:
+                    raise KeyError(
+                        f"Current message '{curr_node}' not found in conversation '{conv_id}'"
+                    )
             if existing:
                 conn.execute(
                     """
@@ -421,6 +432,19 @@ class HistoryStore:
         }
         with self._lock, self._connect() as conn:
             self._ensure_owner(conn, user_hash, conversation_id)
+            if "forkedFromConversationId" in updates:
+                self._validate_fork_parent(
+                    conn, user_hash, conversation_id, updates["forkedFromConversationId"]
+                )
+            if updates.get("currNode") is not None:
+                current_message = conn.execute(
+                    "SELECT 1 FROM messages WHERE id = ? AND conversation_id = ?",
+                    (updates["currNode"], conversation_id),
+                ).fetchone()
+                if not current_message:
+                    raise KeyError(
+                        f"Current message '{updates['currNode']}' not found in conversation '{conversation_id}'"
+                    )
             sets = ["updated_at = ?"]
             values = [utcnow()]
             for key, value in updates.items():
@@ -447,6 +471,7 @@ class HistoryStore:
             if delete_with_forks:
                 to_delete = [conversation_id]
                 queue = [conversation_id]
+                visited = {conversation_id}
                 while queue:
                     parent = queue.pop()
                     children = conn.execute(
@@ -454,6 +479,9 @@ class HistoryStore:
                         (parent, user_hash),
                     ).fetchall()
                     for child in children:
+                        if child["id"] in visited:
+                            continue
+                        visited.add(child["id"])
                         to_delete.append(child["id"])
                         queue.append(child["id"])
                 placeholders = ",".join("?" * len(to_delete))
@@ -513,7 +541,7 @@ class HistoryStore:
                 ),
             )
             if parent_id is not None:
-                self._append_child(conn, parent_id, msg_id)
+                self._append_child(conn, conversation_id, parent_id, msg_id)
             conn.execute(
                 "UPDATE conversations SET curr_node_id = ?, last_modified_ms = ?, updated_at = ? WHERE id = ?",
                 (msg_id, now_ms(), utcnow(), conversation_id),
@@ -552,6 +580,44 @@ class HistoryStore:
                 raise KeyError(f"Message '{message_id}' not in conversation '{conversation_id}'")
             old_parent_id = current["parent_id"]
             new_parent_id = updates.get("parent", old_parent_id)
+            if new_parent_id is not None:
+                parent = conn.execute(
+                    "SELECT 1 FROM messages WHERE id = ? AND conversation_id = ?",
+                    (new_parent_id, conversation_id),
+                ).fetchone()
+                if not parent:
+                    raise KeyError(
+                        f"Parent message '{new_parent_id}' not found in conversation '{conversation_id}'"
+                    )
+                cursor = new_parent_id
+                visited = set()
+                while cursor is not None:
+                    if cursor == message_id or cursor in visited:
+                        raise ValueError("Message parent would create a cycle")
+                    visited.add(cursor)
+                    row = conn.execute(
+                        "SELECT parent_id FROM messages WHERE id = ? AND conversation_id = ?",
+                        (cursor, conversation_id),
+                    ).fetchone()
+                    cursor = row["parent_id"] if row else None
+            if "children" in updates:
+                requested_children = updates["children"] or []
+                if (
+                    not isinstance(requested_children, list)
+                    or any(not isinstance(child, str) for child in requested_children)
+                    or len(requested_children) != len(set(requested_children))
+                    or message_id in requested_children
+                ):
+                    raise ValueError("Message children must be unique message IDs and cannot include itself")
+                actual_children = {
+                    row["id"]
+                    for row in conn.execute(
+                        "SELECT id FROM messages WHERE parent_id = ? AND conversation_id = ?",
+                        (message_id, conversation_id),
+                    ).fetchall()
+                }
+                if set(requested_children) != actual_children:
+                    raise ValueError("Message children must match their parent links")
             sets = []
             values = []
             for key, value in updates.items():
@@ -585,9 +651,9 @@ class HistoryStore:
             )
             if new_parent_id != old_parent_id:
                 if old_parent_id:
-                    self._remove_child(conn, old_parent_id, message_id)
+                    self._remove_child(conn, conversation_id, old_parent_id, message_id)
                 if new_parent_id:
-                    self._append_child(conn, new_parent_id, message_id)
+                    self._append_child(conn, conversation_id, new_parent_id, message_id)
             conn.execute(
                 "UPDATE conversations SET last_modified_ms = ?, updated_at = ? WHERE id = ?",
                 (now_ms(), utcnow(), conversation_id),
@@ -612,8 +678,12 @@ class HistoryStore:
             if cascade:
                 deleted = []
                 queue = [message_id]
+                visited = set()
                 while queue:
                     current = queue.pop()
+                    if current in visited:
+                        continue
+                    visited.add(current)
                     deleted.append(current)
                     child_rows = conn.execute(
                         "SELECT id FROM messages WHERE parent_id = ? AND conversation_id = ?",
@@ -626,15 +696,27 @@ class HistoryStore:
                     deleted,
                 )
                 if parent_id:
-                    self._remove_child(conn, parent_id, message_id)
+                    self._remove_child(conn, conversation_id, parent_id, message_id)
                 conn.execute(
                     "UPDATE conversations SET curr_node_id = ?, last_modified_ms = ?, updated_at = ? WHERE id = ?",
                     (None if current_node in deleted else current_node, now_ms(), utcnow(), conversation_id),
                 )
                 return deleted
+            child_rows = conn.execute(
+                "SELECT id FROM messages WHERE parent_id = ? AND conversation_id = ?",
+                (message_id, conversation_id),
+            ).fetchall()
+            child_ids = [child["id"] for child in child_rows]
+            if child_ids:
+                conn.execute(
+                    "UPDATE messages SET parent_id = ? WHERE parent_id = ? AND conversation_id = ?",
+                    (parent_id, message_id, conversation_id),
+                )
             conn.execute("DELETE FROM messages WHERE id = ?", (message_id,))
             if parent_id:
-                self._remove_child(conn, parent_id, message_id)
+                self._remove_child(conn, conversation_id, parent_id, message_id)
+                for child_id in child_ids:
+                    self._append_child(conn, conversation_id, parent_id, child_id)
             conn.execute(
                 "UPDATE conversations SET curr_node_id = ?, last_modified_ms = ?, updated_at = ? WHERE id = ?",
                 (None if current_node == message_id else current_node, now_ms(), utcnow(), conversation_id),
@@ -654,13 +736,19 @@ class HistoryStore:
 
             path_ids = []
             cursor = at_message_id
+            visited = set()
             while cursor is not None:
-                path_ids.append(cursor)
+                if cursor in visited:
+                    raise ValueError("Conversation contains a cyclic message parent chain")
+                visited.add(cursor)
                 row = conn.execute(
-                    "SELECT parent_id FROM messages WHERE id = ?",
-                    (cursor,),
+                    "SELECT parent_id FROM messages WHERE id = ? AND conversation_id = ?",
+                    (cursor, source_conversation_id),
                 ).fetchone()
-                cursor = row["parent_id"] if row else None
+                if not row:
+                    raise ValueError("Conversation contains a dangling message parent")
+                path_ids.append(cursor)
+                cursor = row["parent_id"]
             path_ids.reverse()
 
             placeholders = ",".join("?" * len(path_ids))
@@ -668,9 +756,10 @@ class HistoryStore:
                 f"""
                 SELECT id, role, content_json, type, timestamp_ms,
                        tool_calls, tool_call_id, reasoning_content, extra_json, timings_json, model
-                FROM messages WHERE id IN ({placeholders})
+                FROM messages
+                WHERE id IN ({placeholders}) AND conversation_id = ?
                 """,
-                path_ids,
+                [*path_ids, source_conversation_id],
             ).fetchall()
             by_id = {row["id"]: row for row in path_rows}
 
@@ -710,7 +799,7 @@ class HistoryStore:
                     ),
                 )
                 if previous_new_id:
-                    self._append_child(conn, previous_new_id, new_id)
+                    self._append_child(conn, new_conv_id, previous_new_id, new_id)
                 previous_new_id = new_id
 
             conn.execute(
@@ -724,10 +813,72 @@ class HistoryStore:
         imported = 0
         skipped = 0
         with self._lock, self._connect() as conn:
-            for entry in payload or []:
+            entries = payload or []
+            import_ids = [
+                entry.get("conv", {}).get("id")
+                for entry in entries
+                if isinstance(entry, dict) and isinstance(entry.get("conv"), dict)
+            ]
+            import_id_counts = Counter(import_ids)
+            duplicate_ids = {
+                conv_id for conv_id, count in import_id_counts.items() if conv_id and count > 1
+            }
+            pending_parents = {}
+            candidate_entries = {}
+            for entry in entries:
+                if not isinstance(entry, dict) or not isinstance(entry.get("conv"), dict):
+                    continue
+                candidate = entry["conv"]
+                candidate_id = candidate.get("id")
+                if not isinstance(candidate_id, str) or not candidate_id or candidate_id in duplicate_ids:
+                    continue
+                exists = conn.execute(
+                    "SELECT 1 FROM conversations WHERE id = ?", (candidate_id,)
+                ).fetchone()
+                if not exists:
+                    pending_parents[candidate_id] = candidate.get("forkedFromConversationId")
+                    candidate_entries[candidate_id] = entry
+
+            ordered_ids = []
+            children_by_parent = {}
+            incoming = {}
+            for candidate_id, parent_id in pending_parents.items():
+                incoming[candidate_id] = int(parent_id in pending_parents)
+                if parent_id in pending_parents:
+                    children_by_parent.setdefault(parent_id, []).append(candidate_id)
+            ready = deque(
+                candidate_id for candidate_id, count in incoming.items() if count == 0
+            )
+            while ready:
+                candidate_id = ready.popleft()
+                ordered_ids.append(candidate_id)
+                for child_id in children_by_parent.get(candidate_id, []):
+                    incoming[child_id] -= 1
+                    if incoming[child_id] == 0:
+                        ready.append(child_id)
+            cyclic_ids = set(pending_parents) - set(ordered_ids)
+
+            non_candidates = [
+                entry
+                for entry in entries
+                if not isinstance(entry, dict)
+                or not isinstance(entry.get("conv"), dict)
+                or entry["conv"].get("id") not in candidate_entries
+            ]
+            entries = non_candidates + [
+                candidate_entries[candidate_id]
+                for candidate_id in ordered_ids
+                if candidate_id not in cyclic_ids
+            ]
+            skipped += len(cyclic_ids)
+
+            for entry in entries:
+                if not isinstance(entry, dict) or not isinstance(entry.get("conv"), dict):
+                    skipped += 1
+                    continue
                 conv = entry.get("conv") or {}
                 conv_id = conv.get("id")
-                if not conv_id:
+                if not isinstance(conv_id, str) or not conv_id or conv_id in duplicate_ids:
                     skipped += 1
                     continue
                 row = conn.execute(
@@ -735,6 +886,74 @@ class HistoryStore:
                     (conv_id,),
                 ).fetchone()
                 if row:
+                    skipped += 1
+                    continue
+                forked_from = conv.get("forkedFromConversationId")
+                try:
+                    self._validate_fork_parent(
+                        conn,
+                        user_hash,
+                        conv_id,
+                        forked_from,
+                    )
+                except (KeyError, PermissionError):
+                    # Exported forks are self-contained. If their original
+                    # conversation is unavailable to this account, import them
+                    # as a detached conversation instead of retaining a dangling
+                    # or cross-account relationship.
+                    forked_from = None
+                except ValueError:
+                    skipped += 1
+                    continue
+                messages = entry.get("messages") or []
+                if not isinstance(messages, list) or not all(isinstance(msg, dict) for msg in messages):
+                    skipped += 1
+                    continue
+                if any(msg.get("id") is not None and not isinstance(msg.get("id"), str) for msg in messages):
+                    skipped += 1
+                    continue
+                source_ids = [msg.get("id") or f"__missing_{index}" for index, msg in enumerate(messages)]
+                if len(source_ids) != len(set(source_ids)):
+                    skipped += 1
+                    continue
+                id_map = {source_id: str(uuid.uuid4()) for source_id in source_ids}
+                references_valid = all(
+                    (msg.get("parent") is None or isinstance(msg.get("parent"), str))
+                    and isinstance(msg.get("children") or [], list)
+                    and all(isinstance(child, str) for child in (msg.get("children") or []))
+                    and (msg.get("parent") is None or msg.get("parent") in id_map)
+                    and all(child in id_map for child in (msg.get("children") or []))
+                    for msg in messages
+                )
+                if references_valid:
+                    parents = {
+                        source_id: msg.get("parent")
+                        for source_id, msg in zip(source_ids, messages)
+                    }
+                    for source_id in source_ids:
+                        cursor = source_id
+                        visited = set()
+                        while cursor is not None:
+                            if cursor in visited:
+                                references_valid = False
+                                break
+                            visited.add(cursor)
+                            cursor = parents.get(cursor)
+                        if not references_valid:
+                            break
+                if references_valid:
+                    expected_children = {source_id: [] for source_id in source_ids}
+                    for source_id, parent_id in parents.items():
+                        if parent_id is not None:
+                            expected_children[parent_id].append(source_id)
+                    references_valid = all(
+                        isinstance(msg.get("children") or [], list)
+                        and len(msg.get("children") or []) == len(set(msg.get("children") or []))
+                        and set(msg.get("children") or []) == set(expected_children[source_id])
+                        for source_id, msg in zip(source_ids, messages)
+                    )
+                curr_node = conv.get("currNode")
+                if not references_valid or (curr_node is not None and curr_node not in id_map):
                     skipped += 1
                     continue
                 now = utcnow()
@@ -753,13 +972,14 @@ class HistoryStore:
                         now,
                         now,
                         int(conv.get("lastModified") or now_ms()),
-                        conv.get("currNode"),
-                        conv.get("forkedFromConversationId"),
+                        id_map.get(curr_node),
+                        forked_from,
                         json.dumps(conv["mcpServerOverrides"]) if conv.get("mcpServerOverrides") is not None else None,
                     ),
                 )
-                for msg in entry.get("messages") or []:
-                    children = msg.get("children") or []
+                for index, msg in enumerate(messages):
+                    source_id = msg.get("id") or f"__missing_{index}"
+                    children = [id_map[child] for child in (msg.get("children") or [])]
                     extra = msg.get("extra")
                     timings = msg.get("timings")
                     content = msg.get("content") or ""
@@ -767,7 +987,7 @@ class HistoryStore:
                         content = json.dumps(content)
                     conn.execute(
                         """
-                        INSERT OR REPLACE INTO messages (
+                        INSERT INTO messages (
                             id, conversation_id, role, content_json, created_at,
                             parent_id, children_json, type, timestamp_ms,
                             tool_calls, tool_call_id, reasoning_content, extra_json, timings_json, model
@@ -775,12 +995,12 @@ class HistoryStore:
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
-                            msg.get("id") or str(uuid.uuid4()),
+                            id_map[source_id],
                             conv_id,
                             msg.get("role") or "user",
                             json.dumps(content),
                             utcnow(),
-                            msg.get("parent"),
+                            id_map.get(msg.get("parent")),
                             json.dumps(children),
                             msg.get("type") or msg.get("role") or "user",
                             int(msg.get("timestamp") or now_ms()),
@@ -809,10 +1029,33 @@ class HistoryStore:
             return row["conversation_id"] if row else None
 
     @staticmethod
-    def _append_child(conn, parent_id, child_id):
+    def _validate_fork_parent(conn, user_hash, conversation_id, parent_id):
+        if parent_id is not None and not isinstance(parent_id, str):
+            raise ValueError("Fork parent must be a conversation ID")
+        cursor = parent_id
+        visited = set()
+        while cursor is not None:
+            if cursor == conversation_id or cursor in visited:
+                raise ValueError("Conversation fork parent would create a cycle")
+            visited.add(cursor)
+            row = conn.execute(
+                "SELECT user_hash, forked_from_id FROM conversations WHERE id = ?",
+                (cursor,),
+            ).fetchone()
+            if not row:
+                raise KeyError(f"Fork parent conversation '{cursor}' not found")
+            if row["user_hash"] != user_hash:
+                raise PermissionError(f"Fork parent conversation '{cursor}' not owned by caller")
+            cursor = row["forked_from_id"]
+
+    @staticmethod
+    def _append_child(conn, conversation_id, parent_id, child_id):
         row = conn.execute(
-            "SELECT children_json FROM messages WHERE id = ?", (parent_id,)
+            "SELECT children_json FROM messages WHERE id = ? AND conversation_id = ?",
+            (parent_id, conversation_id),
         ).fetchone()
+        if not row:
+            raise KeyError(f"Parent message '{parent_id}' not found in conversation '{conversation_id}'")
         try:
             children = json.loads(row["children_json"] or "[]")
         except (json.JSONDecodeError, TypeError):
@@ -820,14 +1063,15 @@ class HistoryStore:
         if child_id not in children:
             children.append(child_id)
         conn.execute(
-            "UPDATE messages SET children_json = ? WHERE id = ?",
-            (json.dumps(children), parent_id),
+            "UPDATE messages SET children_json = ? WHERE id = ? AND conversation_id = ?",
+            (json.dumps(children), parent_id, conversation_id),
         )
 
     @staticmethod
-    def _remove_child(conn, parent_id, child_id):
+    def _remove_child(conn, conversation_id, parent_id, child_id):
         row = conn.execute(
-            "SELECT children_json FROM messages WHERE id = ?", (parent_id,)
+            "SELECT children_json FROM messages WHERE id = ? AND conversation_id = ?",
+            (parent_id, conversation_id),
         ).fetchone()
         if not row:
             return
@@ -837,8 +1081,8 @@ class HistoryStore:
             children = []
         children = [c for c in children if c != child_id]
         conn.execute(
-            "UPDATE messages SET children_json = ? WHERE id = ?",
-            (json.dumps(children), parent_id),
+            "UPDATE messages SET children_json = ? WHERE id = ? AND conversation_id = ?",
+            (json.dumps(children), parent_id, conversation_id),
         )
 
 

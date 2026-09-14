@@ -125,9 +125,12 @@ These decisions were locked before Phase 1 and are not subject to renegotiation 
 - Bearer and `X-API-Key` requests are explicit and authoritative, and validate against the `chat-v1` machine-token service without cookie fallback.
 - Every protected public request is validated with common auth and fails closed when validation is unavailable.
 - The public multi-worker proxy strips credentials and client-supplied internal identity headers before forwarding the immutable common-auth `sub` and shared role to the loopback manager.
+- Shared model lifecycle, preset, registry, GGUF, ingest, and plugin mutations require the common-auth `administrator` role; ordinary users can use inference and manage only their own account-bound state.
 - History, settings, usage, cache routing, and other account-bound state derive their stable owner from `sub`; rotating or switching tokens does not change ownership.
+- Browser-local settings, MCP credentials, tool permissions, skills, and prompt presets are stored under account-specific keys bound to `sub`. Account changes select the new account cache, force a reload, and stale tabs cannot read or write another account's values.
 - Chat settings proxy token management to common auth. Global/per-service mode, mint/rotate, listing, and revocation use common auth as the single source of truth. Plaintext secrets are neither stored nor listed by Grimoire.
 - Browser sign-in and global sign-out use absolute `auth.lost.plus` URLs. The web UI does not store bearer credentials in local storage.
+- The browser MCP proxy accepts only HTTP(S) targets whose resolved addresses are globally routable; it cannot originate requests to loopback, private, link-local, tailnet, or otherwise non-routable control-plane addresses.
 
 ## Pinned Upstream Repos
 

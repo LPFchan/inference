@@ -38,12 +38,13 @@ class AuthIdentity:
 
 
 def _explicit_credentials(headers: Mapping[str, str]) -> dict[str, str] | None:
-    authorization = headers.get("authorization", "")
-    if authorization.lower().startswith("bearer "):
-        return {"Authorization": authorization}
-    api_key = headers.get("x-api-key", "")
-    if api_key:
-        return {"X-API-Key": api_key}
+    # Credential headers are authoritative whenever present. In particular, a
+    # malformed or empty header must fail common-auth validation instead of
+    # silently falling back to a valid browser cookie on the same request.
+    if "authorization" in headers:
+        return {"Authorization": headers.get("authorization", "")}
+    if "x-api-key" in headers:
+        return {"X-API-Key": headers.get("x-api-key", "")}
     return None
 
 
