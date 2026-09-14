@@ -27,7 +27,7 @@
         "--speculative-config",
         "{\"method\":\"mtp\",\"num_speculative_tokens\":4,\"max_model_len\":262144}",
         "--max-num-seqs",
-        "1",
+        "4",
         "--max-num-batched-tokens",
         "8192",
         "--enable-auto-tool-choice",
