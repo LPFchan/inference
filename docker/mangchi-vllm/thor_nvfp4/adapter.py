@@ -22,6 +22,38 @@ def plain_parameter(value):
 
 
 def prepare_weights(layer):
+    names = [
+        "w13_weight", "w2_weight", "w13_weight_scale", "w2_weight_scale",
+        "w13_weight_scale_2", "w13_input_scale", "w2_weight_scale_2",
+        "w2_input_scale",
+    ]
+    # A vLLM sharded-state checkpoint records the tensors after this adapter
+    # has prepared them. Keep that layout instead of swizzling it a second time.
+    if layer.w13_weight_scale.ndim == 6:
+        prepared = {
+            "w13_weight": ((EXPERTS, 2 * INTERMEDIATE, HIDDEN // 2), torch.uint8),
+            "w2_weight": ((EXPERTS, HIDDEN, INTERMEDIATE // 2), torch.uint8),
+            "w13_weight_scale": (
+                (EXPERTS, 2 * INTERMEDIATE // 128, HIDDEN // 64, 32, 4, 4),
+                torch.uint8,
+            ),
+            "w2_weight_scale": (
+                (EXPERTS, HIDDEN // 128, INTERMEDIATE // 64, 32, 4, 4),
+                torch.uint8,
+            ),
+            **{name: ((EXPERTS,), torch.float32) for name in names[4:]},
+        }
+        device = layer.w13_weight.device
+        for name, (shape, dtype) in prepared.items():
+            value = getattr(layer, name)
+            if (
+                value.shape != shape
+                or value.dtype != dtype
+                or value.device != device
+                or not value.is_contiguous()
+            ):
+                raise ValueError(f"Malformed prepared Thor NVFP4 sharded tensor: {name}")
+        return [getattr(layer, name) for name in names]
     expected = {
         "w13_weight": ((EXPERTS, 2 * INTERMEDIATE, HIDDEN // 2), torch.uint8),
         "w2_weight": ((EXPERTS, HIDDEN, INTERMEDIATE // 2), torch.uint8),
@@ -58,8 +90,6 @@ def prepare_weights(layer):
               layer.w13_input_scale[:, 0].contiguous(),
               layer.w2_weight_scale_2, layer.w2_input_scale]
     # Replace source storage to avoid retaining a second packed copy per layer.
-    names = ["w13_weight", "w2_weight", "w13_weight_scale", "w2_weight_scale",
-             "w13_weight_scale_2", "w13_input_scale", "w2_weight_scale_2", "w2_input_scale"]
     for name, value in zip(names, values):
         setattr(layer, name, plain_parameter(value))
     return [getattr(layer, name) for name in names]

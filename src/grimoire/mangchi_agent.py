@@ -48,8 +48,8 @@ SPECS_PATH = os.environ.get(
 # Total unified memory the residency set may use, in GiB. Thor has 128; leave
 # headroom for the OS, CUDA runtime, and KV cache growth beyond estimate.
 MEMORY_BUDGET_GIB = float(os.environ.get("MANGCHI_AGENT_BUDGET_GIB", "115"))
-# Flash-Next takes about 9m44s to initialize on Thor. Allow enough margin for
-# cold storage and kernel-cache variation while keeping the timeout bounded.
+# Flash-Next's prepared-state path normally initializes in about 3 minutes.
+# Retain enough margin for cold-cache variation and source-checkpoint fallback.
 HEALTH_TIMEOUT_S = float(os.environ.get("MANGCHI_AGENT_HEALTH_TIMEOUT_S", "900"))
 STOP_TIMEOUT_S = float(os.environ.get("MANGCHI_AGENT_STOP_TIMEOUT_S", "60"))
 # CUDA allocations on Thor share physical RAM with the host and are not fully
@@ -99,6 +99,8 @@ class LaunchSpec:
     docker_runtime: str = "nvidia"
     models_dir_container: str = "/models"
     models_dir_host: Optional[str] = None
+    cache_dir_container: str = "/root/.cache"
+    cache_dir_host: Optional[str] = None
 
 
 @dataclass
@@ -140,6 +142,8 @@ def load_specs(path: str = SPECS_PATH) -> dict[str, LaunchSpec]:
             docker_runtime=cfg.get("docker_runtime", "nvidia"),
             models_dir_container=cfg.get("models_dir_container", "/models"),
             models_dir_host=cfg.get("models_dir_host"),
+            cache_dir_container=cfg.get("cache_dir_container", "/root/.cache"),
+            cache_dir_host=cfg.get("cache_dir_host"),
         )
     return specs
 
@@ -162,6 +166,8 @@ def build_launch_command(name: str, spec: LaunchSpec) -> list[str]:
     ]
     if spec.models_dir_host:
         cmd += ["-v", f"{spec.models_dir_host}:{spec.models_dir_container}:ro"]
+    if spec.cache_dir_host:
+        cmd += ["-v", f"{spec.cache_dir_host}:{spec.cache_dir_container}"]
     for k, v in spec.env.items():
         cmd += ["-e", f"{k}={v}"]
     cmd += [spec.vllm_docker_image, "vllm", *serve]

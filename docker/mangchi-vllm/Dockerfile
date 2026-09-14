@@ -143,6 +143,13 @@ RUN if [ "${THOR_CUTEDSL_MOE}" = "1" ]; then \
 COPY docker/mangchi-vllm/patch_draft_vocab.py /tmp/patch_draft_vocab.py
 RUN python /tmp/patch_draft_vocab.py
 
+# Fast restarts use a sharded state saved after the Thor MoE weights are
+# prepared. Teach the stock loader that prepared layout, keep disk-backed PLE
+# tensors on their original mmap path, and let MTP use its explicit draft
+# loader instead of inheriting the target's sharded format.
+COPY docker/mangchi-vllm/patch_sharded_state.py /tmp/patch_sharded_state.py
+RUN python /tmp/patch_sharded_state.py
+
 # Let the disk-backed PLE gather split a piecewise CUDA graph. The gather does a
 # host round trip (ids to CPU, rows off NVMe, staged back), which cannot run
 # inside graph capture -- the reason this model is served with --enforce-eager.

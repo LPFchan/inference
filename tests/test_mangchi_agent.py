@@ -227,19 +227,28 @@ def test_specs_file_parses():
     specs = agent.load_specs()
     assert set(specs) == {"qwen3.8-flash-next-uncensored-nvfp4"}
     flash = specs["qwen3.8-flash-next-uncensored-nvfp4"]
-    assert flash.vllm_docker_image == "mangchi-vllm:thor-dense-candidate-v8-draft-vocab"
+    assert flash.vllm_docker_image == "mangchi-vllm:thor-dense-candidate-v10-sharded-state"
     assert "--enable-per-request-metrics" in flash.serve_args
     assert "--enable-prompt-tokens-details" in flash.serve_args
+    assert (
+        flash.serve_args[flash.serve_args.index("--load-format") + 1]
+        == "sharded_state"
+    )
     assert "--enable-auto-tool-choice" in flash.serve_args
     assert flash.serve_args[flash.serve_args.index("--tool-call-parser") + 1] == "qwen3_xml"
     assert flash.serve_args[flash.serve_args.index("--reasoning-parser") + 1] == "qwen3"
     assert flash.env.get("VLLM_PLE_MMAP") == "1"
+    assert flash.env.get("VLLM_PLE_MMAP_DIR") == "/models/qwen3.8-flash-next-abliterated-w4a4"
     assert flash.env.get("VLLM_THOR_CUTEDSL_MOE") == "1"
     assert flash.env.get("QWEN4EXP_DRAFT_VOCAB") == "98304"
+    assert flash.env.get("VLLM_ALLOW_LONG_MAX_MODEL_LEN") == "1"
+    assert flash.cache_dir_host == "/home/yeowool/.cache/mangchi-vllm"
     assert "VLLM_PLE_CPU_OFFLOAD" not in flash.env
     assert "--enforce-eager" in flash.serve_args
     assert "--no-enable-flashinfer-autotune" in flash.serve_args
-    assert flash.serve_args[flash.serve_args.index("--max-model-len") + 1] == "262144"
+    assert flash.serve_args[flash.serve_args.index("--max-model-len") + 1] == "393216"
+    assert "--skip-mm-profiling" in flash.serve_args
+    assert flash.serve_args[flash.serve_args.index("--kv-cache-memory-bytes") + 1] == "14485411127"
     assert flash.serve_args[flash.serve_args.index("--kv-cache-dtype") + 1] == "fp8"
     assert flash.serve_args[flash.serve_args.index("--max-num-batched-tokens") + 1] == "8192"
     assert "--limit-mm-per-prompt" not in flash.serve_args
@@ -309,8 +318,9 @@ def test_docker_launch_command_shape():
     # port published, model dir mounted ro, image + vllm serve present
     joined = " ".join(cmd)
     assert "-p 8002:8002" in joined
-    assert ":ro" in joined
-    assert "vllm serve /models/qwen3.8-flash-next-abliterated-w4a4" in joined
+    assert "/home/yeowool/models/nvfp4:/models:ro" in joined
+    assert "/home/yeowool/.cache/mangchi-vllm:/root/.cache" in joined
+    assert "vllm serve /models/qwen3.8-flash-next-abliterated-w4a4-vllm-state-mtp4-393k" in joined
     assert "--gpu-memory-utilization 0.82" in joined
 
 
