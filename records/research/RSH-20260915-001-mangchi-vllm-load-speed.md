@@ -35,6 +35,10 @@ contexts?
   to health. NVIDIA's `CUTE_DSL_CACHE_DIR` created no files for these exported
   kernels, so it was not retained as a placebo setting. Both observed startup
   times remain below the gateway's 600-second deadline.
+- The final canonical restart, after removing that ineffective setting,
+  repeated 68.11 seconds for target weights, 43.51 seconds for the draft,
+  117.88 seconds for total model loading, and reached the agent's healthy state
+  in 168 seconds.
 - The explicit 13.49 GiB FP8 KV reservation produced 844,883 cache tokens:
   3.22 native contexts or 2.15 extended 393,216-token contexts. Four short
   concurrent requests ran together with zero waiting. Host available memory
