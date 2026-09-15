@@ -24,9 +24,17 @@ contexts?
 - Saving vLLM's post-load state once produced 20 sequential safetensors shards
   totaling 73.36 GiB. The accepted load read those prepared target weights in
   65.81 seconds, loaded the original MTP draft in 43.50 seconds, and reported
-  118.36 seconds for total model loading. The API became healthy about 154
-  seconds after container launch, 4.9 times faster than the old 753-second
-  baseline.
+  118.36 seconds for total model loading. A warm-compiler restart became
+  healthy about 154 seconds after container launch, 4.9 times faster than the
+  old 753-second baseline.
+- A production restart after rebuilding the Thor image exposed a separate
+  cold CuTe DSL compilation cost. Prepared target loading still took 66.22
+  seconds, but total model loading rose to 271.52 seconds and the API became
+  healthy in about 379 seconds. A following restart returned to 68.11 seconds
+  for the target, 117.43 seconds for all model loading, and about 154 seconds
+  to health. NVIDIA's `CUTE_DSL_CACHE_DIR` created no files for these exported
+  kernels, so it was not retained as a placebo setting. Both observed startup
+  times remain below the gateway's 600-second deadline.
 - The explicit 13.49 GiB FP8 KV reservation produced 844,883 cache tokens:
   3.22 native contexts or 2.15 extended 393,216-token contexts. Four short
   concurrent requests ran together with zero waiting. Host available memory
@@ -58,6 +66,9 @@ The accepted path therefore:
   sharded loader remains selected.
 - Startup-plan caching does not remove ModelOpt weight conversion and does not
   apply when KV bytes are explicit.
+- Pointing `CUTE_DSL_CACHE_DIR` at the persistent cache mount produced no
+  compiler artifacts for the exported Thor kernels and did not provide a
+  durable cache to retain.
 - Two sharded checkpoints made with mismatched serving geometry were removed.
   They were derived artifacts; the source checkpoint was untouched.
 
