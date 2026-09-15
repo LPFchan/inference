@@ -1,6 +1,6 @@
 {
   "models": {
-    "qwen3.8-flash-next-uncensored-nvfp4": {
+    "qwen3.8-flash-next": {
       "model_path": "/models/qwen3.8-flash-next-abliterated-w4a4-vllm-state-mtp4-393k",
       "model_path_host": "/home/yeowool/models/nvfp4/qwen3.8-flash-next-abliterated-w4a4-vllm-state-mtp4-393k",
       "resident_gb": 101,
@@ -26,6 +26,8 @@
         "--enable-prompt-tokens-details",
         "--load-format",
         "sharded_state",
+        "--served-model-name",
+        "qwen3.8-flash-next",
         "--max-model-len",
         "393216",
         "--hf-overrides",

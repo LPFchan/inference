@@ -48,7 +48,7 @@ class ModelMetadataCapabilityTests(unittest.TestCase):
             seed_path="",
         )
 
-        metadata = registry.model_metadata("qwen3.8-flash-next-uncensored-nvfp4")
+        metadata = registry.model_metadata("qwen3.8-flash-next")
         self.assertIn("multimodal", metadata["capabilities"])
         self.assertEqual(metadata["input_modalities"], ["text", "image"])
 

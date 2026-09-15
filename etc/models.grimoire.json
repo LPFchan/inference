@@ -1,11 +1,11 @@
 {
   "models": {
-    "qwen3.8-flash-next-uncensored-nvfp4": {
+    "qwen3.8-flash-next": {
       "backend": "vllm-remote",
       "remote-agent-url": "http://mangchi.lost.plus:9700",
-      "remote-model-id": "qwen3.8-flash-next-uncensored-nvfp4",
+      "remote-model-id": "qwen3.8-flash-next",
       "remote-url": "http://mangchi.lost.plus:8002",
-      "backend-model-id": "/models/qwen3.8-flash-next-abliterated-w4a4",
+      "backend-model-id": "qwen3.8-flash-next",
       "family": "qwen",
       "capabilities": [
         "completion",
@@ -16,7 +16,7 @@
         "output": 3.25,
         "cache_read": 0.1
       },
-      "ctx-size": 262144,
+      "ctx-size": 393216,
       "startup-timeout": 900
     },
     "qwen3.6-mtp-27B": {

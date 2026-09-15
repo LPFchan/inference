@@ -139,7 +139,7 @@ class LlamaProxyTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_remote_image_content_reaches_backend_unchanged(self):
         active = _FakeActive()
-        active.name = "qwen3.8-flash-next-uncensored-nvfp4"
+        active.name = "qwen3.8-flash-next"
         active.backend_type = "vllm-remote"
         active.cfg = {
             "backend": "vllm-remote",
@@ -225,8 +225,8 @@ class LlamaProxyTests(unittest.IsolatedAsyncioTestCase):
 
     def test_rewrite_chunk_model_rewrites_sse_model_to_alias(self):
         chunk = b'data: {"id":"x","object":"chat.completion.chunk","model":"/models/qwen3.8-flash-next-abliterated-w4a4","choices":[]}\n\n'
-        out = llama_proxy._rewrite_chunk_model(chunk, "qwen3.8-flash-next-uncensored-nvfp4")
-        self.assertIn(b'"model": "qwen3.8-flash-next-uncensored-nvfp4"', out)
+        out = llama_proxy._rewrite_chunk_model(chunk, "qwen3.8-flash-next")
+        self.assertIn(b'"model": "qwen3.8-flash-next"', out)
         self.assertNotIn(b"abliterated", out)
         self.assertTrue(out.startswith(b"data: "))
 

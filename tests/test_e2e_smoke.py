@@ -43,7 +43,7 @@ BASE_URL = os.environ.get("GRIMOIRE_SMOKE_URL", "http://localhost:9001")
 API_KEY = os.environ.get("GRIMOIRE_API_KEY", "")
 LLAMA_SMOKE_MODEL = os.environ.get("GRIMOIRE_LLAMA_SMOKE_MODEL", "qwen3.8-27B-low")
 VISION_SMOKE_MODEL = os.environ.get(
-    "GRIMOIRE_VISION_SMOKE_MODEL", "qwen3.8-flash-next-uncensored-nvfp4"
+    "GRIMOIRE_VISION_SMOKE_MODEL", "qwen3.8-flash-next"
 )
 LONG_PROMPT_MIN_CHARS = int(os.environ.get("GRIMOIRE_LONG_PROMPT_MIN_CHARS", "1500"))
 LONG_PROMPT_MAX_CHARS = int(os.environ.get("GRIMOIRE_LONG_PROMPT_MAX_CHARS", "4000"))

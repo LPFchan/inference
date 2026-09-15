@@ -225,8 +225,8 @@ def test_status_reports_loading_until_health_check_completes(mgr, monkeypatch):
 def test_specs_file_parses():
     assert agent.HOST_MEMORY_FLOOR_GIB == 6
     specs = agent.load_specs()
-    assert set(specs) == {"qwen3.8-flash-next-uncensored-nvfp4"}
-    flash = specs["qwen3.8-flash-next-uncensored-nvfp4"]
+    assert set(specs) == {"qwen3.8-flash-next"}
+    flash = specs["qwen3.8-flash-next"]
     assert flash.vllm_docker_image == "mangchi-vllm:thor-dense-candidate-v10-sharded-state"
     assert "--enable-per-request-metrics" in flash.serve_args
     assert "--enable-prompt-tokens-details" in flash.serve_args
@@ -234,6 +234,7 @@ def test_specs_file_parses():
         flash.serve_args[flash.serve_args.index("--load-format") + 1]
         == "sharded_state"
     )
+    assert flash.serve_args[flash.serve_args.index("--served-model-name") + 1] == "qwen3.8-flash-next"
     assert "--enable-auto-tool-choice" in flash.serve_args
     assert flash.serve_args[flash.serve_args.index("--tool-call-parser") + 1] == "qwen3_xml"
     assert flash.serve_args[flash.serve_args.index("--reasoning-parser") + 1] == "qwen3"
@@ -310,7 +311,7 @@ def test_qsa_fp8_canary_build_is_pinned_and_thor_aware():
 
 def test_docker_launch_command_shape():
     specs = agent.load_specs()
-    name = "qwen3.8-flash-next-uncensored-nvfp4"
+    name = "qwen3.8-flash-next"
     cmd = agent.build_launch_command(name, specs[name])
     assert cmd[0] == "docker" and "run" in cmd and "-d" in cmd
     assert f"mangchi-vllm-{name}" in cmd
