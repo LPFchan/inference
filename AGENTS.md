@@ -1,3 +1,4 @@
+<!-- template-managed:begin -->
 # Agent Instructions
 
 `AGENTS.md` is the canonical editable agent-instructions file. It enforces repo behavior while deferring canonical policy to `records/REPO.md`.
@@ -13,13 +14,6 @@
 
 Before writing into an artifact directory, read its `README.md` and follow its prescriptive shape when it defines one.
 
-Migration contracts, plans, and baselines are dissolved into `records/SPEC.md`, `records/STATUS.md`, `records/PLANS.md`, `records/decisions/`, and `records/research/`. Read those instead. The legacy `MIGRATION_EXECUTION_CHECKLIST.md` is retired.
-
-The build repo is `https://github.com/TheTom/llama-cpp-turboquant.git`, pinned to SHA `2f2f32f5d9517518c9e860f30131acb09840a965` (branch `feature/turboquant-kv-cache`). Patches in `patches/atomic-llama-cpp/` apply at image build time (`GRIMOIRE_LLAMA_CPP_APPLY_PATCHES=1`): PEFT trainable-token replacements (eastself), the Gemma4V multi-image mtmd fix, and Muse Glimmer support (upstream PR #26841: muse-glimmer arch + mmproj + DFlash draft).
-The DFlash named there is upstream llama.cpp's speculative architecture (`MODEL_ARCH.DFLASH`, `MuseGlimmerAssistant`), not the retired grimoire DFlash/PFlash stack removed in DEC-20260902-001. Do not strip it from the patch. No registered model currently uses it, and `speculative-type` accepts only `nextn` and `mtp`, so enabling a Muse Glimmer drafter would need that allowlist extended first.
-
-The webui is a git submodule at `webui/` — a forked copy of `ggerganov/llama.cpp`'s `tools/ui/`. Before building, run `git submodule update --init` to check it out.
-
 ## Skills
 
 Load the skill before the trigger condition fires. Each skill defines the procedure; follow it.
@@ -30,9 +24,9 @@ Load the skill before the trigger condition fires. Each skill defines the proced
 | Before replacing, deleting, or rewriting content that already exists | `skills/clean-correction/SKILL.md` |
 | When routing work or creating repo artifacts | `skills/repo-orchestrator/SKILL.md` |
 | When reviewing inbox pressure | `skills/daily-inbox-pressure-review/SKILL.md` |
-| When reviewing upstream changes | `skills/upstream-intake/SKILL.md` |
-| When sharpening or iteratively refining an artifact | `skills/sharpen-the-tip/SKILL.md` |
-| When prototyping, greenfield building, or working pre-MVP | `skills/prototype-mode/SKILL.md` |
+| When reviewing upstream changes *(only if the optional `records/upstream-intake/` module is enabled)* | `skills/upstream-intake/SKILL.md` |
+
+Repo-agnostic skills (`sharpen-the-tip`, `prototype-mode`, `housekeeping`, `proactive-docs`) are **global**, not vendored per repo — they live in `~/.agents/skills/` via the `agents` module of LPFchan/setup, and your runtime surfaces them automatically.
 
 ## Rules
 
@@ -50,9 +44,9 @@ Load the skill before the trigger condition fires. Each skill defines the proced
 - Do not turn an inbox review into a digest of every low-confidence idea. Report counts or clusters.
 - Do not write chatty transcripts where the repo expects normalized records.
 - Do not bypass commit provenance checks unless the commit is an explicit bootstrap or migration exception.
-- **Never use `docker commit` on the grimoire image.** Image changes go through `Dockerfile` → `docker compose build`. For live dev code changes, use the existing `DEV_SRC_BIND` mount. For dependency changes, edit `pyproject.toml` and rebuild.
 
 ## Code Review Rules
 
 - Before reporting a commit as missing required provenance fields, verify against the exact commit messages as they exist on GitHub. If the fields are present, do not claim they are missing.
 - The provenance contract is defined in `records/REPO.md` and enforced by `scripts/new-commit-message.sh`. Cite the specific field that is missing and the rule it violates; do not review commits against an assumed format.
+<!-- template-managed:end -->
