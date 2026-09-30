@@ -58,6 +58,57 @@
         "--default-chat-template-kwargs",
         "{\"reasoning_effort\":\"medium\"}"
       ]
+    },
+    "qwen3.8-27b-grugthink": {
+      "model_path": "/models/nvfp4/qwen3.8-27b-vanilla-nvidia",
+      "model_path_host": "/home/yeowool/models/nvfp4/qwen3.8-27b-vanilla-nvidia",
+      "resident_gb": 62,
+      "gpu_mem_util": 0.5,
+      "port": 8003,
+      "pinned": false,
+      "vllm_docker_image": "mangchi-vllm:thor-dense-candidate-v10-sharded-state",
+      "models_dir_host": "/home/yeowool/models",
+      "cache_dir_host": "/home/yeowool/.cache/mangchi-vllm",
+      "env": {
+        "VLLM_CACHE_ROOT": "/root/.cache/vllm",
+        "TRITON_CACHE_DIR": "/root/.cache/triton",
+        "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True"
+      },
+      "serve_args": [
+        "--enable-per-request-metrics",
+        "--enable-prompt-tokens-details",
+        "--served-model-name",
+        "qwen3.8-27b-vanilla",
+        "--enable-lora",
+        "--max-lora-rank",
+        "16",
+        "--max-loras",
+        "1",
+        "--lora-modules",
+        "qwen3.8-27b-grugthink=/models/grugthink/dense-27b-d4-iter-0011",
+        "--dtype",
+        "bfloat16",
+        "--max-model-len",
+        "262144",
+        "--kv-cache-dtype",
+        "fp8",
+        "--enable-prefix-caching",
+        "--speculative-config",
+        "{\"method\":\"mtp\",\"num_speculative_tokens\":3}",
+        "--max-num-seqs",
+        "4",
+        "--max-num-batched-tokens",
+        "8192",
+        "--enable-auto-tool-choice",
+        "--tool-call-parser",
+        "qwen3_coder",
+        "--reasoning-parser",
+        "qwen3",
+        "--no-enable-flashinfer-autotune",
+        "--skip-mm-profiling",
+        "--mm-processor-kwargs",
+        "{\"max_pixels\":2097152}"
+      ]
     }
   }
 }
