@@ -101,6 +101,9 @@ class LaunchSpec:
     models_dir_host: Optional[str] = None
     cache_dir_container: str = "/root/.cache"
     cache_dir_host: Optional[str] = None
+    # Repo chat templates, mounted read-only like Grimoire's /templates.
+    templates_dir_container: str = "/templates"
+    templates_dir_host: Optional[str] = None
 
 
 @dataclass
@@ -144,6 +147,8 @@ def load_specs(path: str = SPECS_PATH) -> dict[str, LaunchSpec]:
             models_dir_host=cfg.get("models_dir_host"),
             cache_dir_container=cfg.get("cache_dir_container", "/root/.cache"),
             cache_dir_host=cfg.get("cache_dir_host"),
+            templates_dir_container=cfg.get("templates_dir_container", "/templates"),
+            templates_dir_host=cfg.get("templates_dir_host"),
         )
     return specs
 
@@ -168,6 +173,8 @@ def build_launch_command(name: str, spec: LaunchSpec) -> list[str]:
         cmd += ["-v", f"{spec.models_dir_host}:{spec.models_dir_container}:ro"]
     if spec.cache_dir_host:
         cmd += ["-v", f"{spec.cache_dir_host}:{spec.cache_dir_container}"]
+    if spec.templates_dir_host:
+        cmd += ["-v", f"{spec.templates_dir_host}:{spec.templates_dir_container}:ro"]
     for k, v in spec.env.items():
         cmd += ["-e", f"{k}={v}"]
     cmd += [spec.vllm_docker_image, "vllm", *serve]

@@ -10,6 +10,7 @@
       "vllm_docker_image": "mangchi-vllm:thor-dense-candidate-v10-sharded-state",
       "models_dir_host": "/home/yeowool/models/nvfp4",
       "cache_dir_host": "/home/yeowool/.cache/mangchi-vllm",
+      "templates_dir_host": "/home/yeowool/inference/templates",
       "env": {
         "VLLM_THOR_CUTEDSL_MOE": "1",
         "VLLM_PLE_MMAP": "1",
@@ -46,6 +47,8 @@
         "--enable-auto-tool-choice",
         "--tool-call-parser",
         "qwen3_xml",
+        "--chat-template",
+        "/templates/qwen3.8-chat_template.jinja",
         "--reasoning-parser",
         "qwen3",
         "--moe-backend",
@@ -69,6 +72,7 @@
       "vllm_docker_image": "mangchi-vllm:thor-dense-candidate-v10-sharded-state",
       "models_dir_host": "/home/yeowool/models",
       "cache_dir_host": "/home/yeowool/.cache/mangchi-vllm",
+      "templates_dir_host": "/home/yeowool/inference/templates",
       "env": {
         "VLLM_CACHE_ROOT": "/root/.cache/vllm",
         "TRITON_CACHE_DIR": "/root/.cache/triton",
@@ -102,6 +106,8 @@
         "--enable-auto-tool-choice",
         "--tool-call-parser",
         "qwen3_coder",
+        "--chat-template",
+        "/templates/qwen3.8-chat_template.jinja",
         "--reasoning-parser",
         "qwen3",
         "--no-enable-flashinfer-autotune",
