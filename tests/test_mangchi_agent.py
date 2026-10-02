@@ -315,7 +315,7 @@ def test_grugthink_spec_serves_the_adapter_with_vision_and_mtp():
     assert grug.model_path == "/models/nvfp4/qwen3.8-27b-vanilla-nvidia"
     assert grug.models_dir_host == "/home/yeowool/models"
     assert args[args.index("--lora-modules") + 1] == (
-        "qwen3.8-27b-grugthink=/models/grugthink/dense-27b-d3-iter-0014"
+        "qwen3.8-27b-grugthink=/models/grugthink/dense-27b-d6-iter-0015"
     )
     assert json.loads(args[args.index("--speculative-config") + 1])["method"] == "mtp"
     assert "--mm-processor-kwargs" in args
