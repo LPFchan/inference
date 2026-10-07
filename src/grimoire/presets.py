@@ -8,7 +8,7 @@ from typing import Optional
 
 import asyncio
 
-from grimoire.registry import ModelRegistry
+from grimoire.registry import BACKEND_VLLM_REMOTE, ModelRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -139,7 +139,12 @@ class PresetManager:
                 manual_control=manual_control,
                 gpu_mask=intended_mask,
             )
-            current = set(current)
+            # Remote models run on another machine's GPU, so a preset neither
+            # stops them nor counts them as occupying its own GPUs.
+            current = {
+                m for m in current
+                if (registry.get(m) or {}).get("backend") != BACKEND_VLLM_REMOTE
+            }
             runtime_moved = current & target & set(cleared_runtime_overrides)
 
             if same_preset:
