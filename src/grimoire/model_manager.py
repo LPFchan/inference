@@ -1135,7 +1135,9 @@ class ModelManager:
                 return existing
 
         async with self._lock:
-            if self._preset_blocks(cfg, _preset_bypass):
+            # Re-read under the lock: a registry edit while waiting must not keep
+            # a remote exemption for what _start_model_locked launches locally.
+            if self._preset_blocks(self.effective_config(model_name), _preset_bypass):
                 raise RuntimeError(
                     f"Preset '{self.preset_lock}' is active. "
                     f"Deactivate the preset before manually starting models."
