@@ -292,8 +292,12 @@ class PresetRuntimeResetTests(unittest.TestCase):
             manager.prepare_preset_activation = AsyncMock(side_effect=prepare)
             manager.stop_model = AsyncMock(return_value=True)
             manager.start_model = AsyncMock()
+            # Launched configs decide; the registry was edited the other way round.
+            local, remote = FakeActive("local"), FakeActive("remote")
+            remote.cfg = {"backend": "vllm-remote"}
+            manager.active = {"local": local, "remote": remote}
             registry = MagicMock()
-            registry.get.side_effect = lambda name: {"backend": "vllm-remote"} if name == "remote" else {"file": "model.gguf"}
+            registry.get.side_effect = lambda name: {"backend": "vllm-remote"} if name == "local" else {"file": "model.gguf"}
             registry.swap_fixed.return_value = {}
 
             result = run(presets.activate("training", manager, registry))

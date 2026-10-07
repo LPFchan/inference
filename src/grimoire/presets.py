@@ -140,10 +140,12 @@ class PresetManager:
                 gpu_mask=intended_mask,
             )
             # Remote models run on another machine's GPU, so a preset neither
-            # stops them nor counts them as occupying its own GPUs.
+            # stops them nor counts them as occupying its own GPUs. Classify each
+            # by the config it was launched with, not a later registry edit.
             current = {
                 m for m in current
-                if (registry.get(m) or {}).get("backend") != BACKEND_VLLM_REMOTE
+                if (getattr(manager.active.get(m), "cfg", None) or {}).get("backend")
+                != BACKEND_VLLM_REMOTE
             }
             runtime_moved = current & target & set(cleared_runtime_overrides)
 

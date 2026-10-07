@@ -1351,12 +1351,14 @@ class ModelManager:
         """Stop an active model."""
         model_name = registry.resolve(model_name) or model_name
         async with self._lock:
-            if self.preset_lock is not None and self._preset_blocks(self.effective_config(model_name), _preset_bypass):
+            active_name, active = self._compatible_active_entry(model_name)
+            if self.preset_lock is not None and self._preset_blocks(
+                active.cfg if active else self.effective_config(model_name), _preset_bypass
+            ):
                 raise RuntimeError(
                     f"Preset '{self.preset_lock}' is active. "
                     f"Deactivate the preset before manually stopping models."
                 )
-            active_name, active = self._compatible_active_entry(model_name)
             if not active:
                 return False
             self.active.pop(active_name, None)
