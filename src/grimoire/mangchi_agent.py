@@ -177,7 +177,9 @@ def build_launch_command(name: str, spec: LaunchSpec) -> list[str]:
         cmd += ["-v", f"{spec.templates_dir_host}:{spec.templates_dir_container}:ro"]
     for k, v in spec.env.items():
         cmd += ["-e", f"{k}={v}"]
-    cmd += [spec.vllm_docker_image, "vllm", *serve]
+    # Name vllm as the entrypoint rather than the first argument: the Thor image
+    # has no entrypoint, but spark1's already runs `vllm serve`.
+    cmd += ["--entrypoint", "vllm", spec.vllm_docker_image, *serve]
     return cmd
 
 

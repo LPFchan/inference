@@ -1,0 +1,39 @@
+# spark1 (ASUS Ascent GX10, GB10) services.
+#
+# spark1 runs the same residency agent as Mangchi, reading etc/spark-agent.json
+# instead of etc/mangchi-agent.json. It serves the grugthink 27B slugs so they
+# no longer share Mangchi's memory budget with Flash-Next.
+#
+#   docker compose -f docker-compose.spark.yml up -d
+#
+# Load the `inference` skill before touching models, presets, or residency.
+
+services:
+  # Same shape as docker-compose.mangchi.yml: no GPU of its own, sibling vLLM
+  # containers launched through the Docker socket, host network so the gateway
+  # reaches :9700 and the agent reaches each vLLM container on 127.0.0.1.
+  # spark1's vLLM image already carries the agent's Python dependencies.
+  spark-agent:
+    image: spark-vllm:pin-5fd5dd5
+    container_name: spark-agent
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      MANGCHI_AGENT_SPECS: /app/etc/spark-agent.json
+      MANGCHI_AGENT_BUDGET_GIB: "100"
+    entrypoint:
+      - python3
+      - -m
+      - uvicorn
+      - grimoire.mangchi_agent:app
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "9700"
+      - --app-dir
+      - /app/src
+    volumes:
+      - .:/app
+      - /home/yeowool/models:/models:ro
+      - /usr/bin/docker:/usr/bin/docker:ro
+      - /var/run/docker.sock:/var/run/docker.sock
