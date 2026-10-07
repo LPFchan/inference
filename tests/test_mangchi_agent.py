@@ -225,7 +225,7 @@ def test_status_reports_loading_until_health_check_completes(mgr, monkeypatch):
 def test_specs_file_parses():
     assert agent.HOST_MEMORY_FLOOR_GIB == 6
     specs = agent.load_specs()
-    assert set(specs) == {"qwen3.8-flash-next", "qwen3.8-27b-grugthink"}
+    assert set(specs) == {"qwen3.8-flash-next"}
     flash = specs["qwen3.8-flash-next"]
     assert flash.vllm_docker_image == "mangchi-vllm:thor-dense-candidate-v10-sharded-state"
     assert "--enable-per-request-metrics" in flash.serve_args
@@ -310,7 +310,8 @@ def test_qsa_fp8_canary_build_is_pinned_and_thor_aware():
 
 
 def test_grugthink_spec_serves_the_adapter_with_vision_and_mtp():
-    grug = agent.load_specs()["qwen3.8-27b-grugthink"]
+    grug = agent.load_specs(str(ROOT / "etc" / "spark-agent.json"))["qwen3.8-27b-grugthink"]
+    assert grug.vllm_docker_image == "spark-vllm:pin-5fd5dd5"
     args = grug.serve_args
     assert grug.model_path == "/models/nvfp4/qwen3.8-27b-vanilla-nvidia"
     assert grug.models_dir_host == "/home/yeowool/models"
@@ -335,7 +336,7 @@ def test_docker_launch_command_shape():
     assert "-p 8002:8002" in joined
     assert "/home/yeowool/models/nvfp4:/models:ro" in joined
     assert "/home/yeowool/.cache/mangchi-vllm:/root/.cache" in joined
-    assert "vllm serve /models/qwen3.8-flash-next-abliterated-w4a4-vllm-state-mtp4-393k" in joined
+    assert "--entrypoint vllm mangchi-vllm:thor-dense-candidate-v10-sharded-state serve /models/qwen3.8-flash-next-abliterated-w4a4-vllm-state-mtp4-393k" in joined
     assert "/home/yeowool/inference/templates:/templates:ro" in joined
     assert "--chat-template /templates/qwen3.8-chat_template.jinja" in joined
     assert "--gpu-memory-utilization 0.82" in joined
