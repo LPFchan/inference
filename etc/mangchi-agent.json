@@ -89,7 +89,7 @@
         "--max-loras",
         "1",
         "--lora-modules",
-        "qwen3.8-27b-grugthink=/models/grugthink/dense-27b-d6-iter-0015",
+        "qwen3.8-27b-grugthink=/models/grugthink/dense-27b-d6-run3-iter-0004",
         "--dtype",
         "bfloat16",
         "--max-model-len",
