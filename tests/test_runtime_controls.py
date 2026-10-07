@@ -214,6 +214,23 @@ class RuntimeControlTests(unittest.TestCase):
         self.assertEqual(ModelManager(gpu_count=2).runtime_override_names(), [])
 
 
+    def test_locked_preset_does_not_gate_remote_models(self):
+        remote_cfg = {"backend": "vllm-remote", "remote-agent-url": "http://agent:9700",
+                      "remote-url": "http://agent:8003", "remote-model-id": "remote"}
+        self.registry.resolve.side_effect = lambda name: name
+        self.registry.get.side_effect = lambda name: remote_cfg if name == "remote" else {"file": "model.gguf"}
+        self.manager.preset_lock = "training"
+        with patch.object(mm, "registry", self.registry), \
+                patch.object(self.manager, "_start_model_locked", new=AsyncMock(return_value="started")) as start:
+            self.assertEqual(run(self.manager.start_model("remote")), "started")
+            start.assert_awaited_once_with("remote")
+            self.assertFalse(run(self.manager.stop_model("remote")))
+            with self.assertRaisesRegex(RuntimeError, "Preset 'training' is active"):
+                run(self.manager.start_model("model"))
+            with self.assertRaisesRegex(RuntimeError, "Preset 'training' is active"):
+                run(self.manager.stop_model("model"))
+
+
 class PresetRuntimeResetTests(unittest.TestCase):
     def test_first_activation_does_not_take_same_preset_unchanged_path(self):
         with tempfile.TemporaryDirectory() as td:
@@ -261,6 +278,32 @@ class PresetRuntimeResetTests(unittest.TestCase):
             self.assertEqual({call.args[0] for call in manager.stop_model.await_args_list}, {"target", "other"})
             self.assertEqual([call.args[0] for call in manager.start_model.await_args_list], ["target"])
             self.assertNotIn("unchanged", result)
+
+
+    def test_activation_leaves_remote_models_running(self):
+        with tempfile.TemporaryDirectory() as td:
+            presets = PresetManager(state_dir=td)
+            presets.upsert("training", "", [], {}, gpus=[])
+            manager = MagicMock()
+            manager.preset_lock = None
+            async def prepare(name, **_kwargs):
+                manager.preset_lock = name
+                return ["local", "remote"], []
+            manager.prepare_preset_activation = AsyncMock(side_effect=prepare)
+            manager.stop_model = AsyncMock(return_value=True)
+            manager.start_model = AsyncMock()
+            # Launched configs decide; the registry was edited the other way round.
+            local, remote = FakeActive("local"), FakeActive("remote")
+            remote.cfg = {"backend": "vllm-remote"}
+            manager.active = {"local": local, "remote": remote}
+            registry = MagicMock()
+            registry.get.side_effect = lambda name: {"backend": "vllm-remote"} if name == "local" else {"file": "model.gguf"}
+            registry.swap_fixed.return_value = {}
+
+            result = run(presets.activate("training", manager, registry))
+
+            manager.stop_model.assert_awaited_once_with("local", _preset_bypass=True)
+            self.assertEqual(result["stopped"], ["local"])
 
 
 if __name__ == "__main__":

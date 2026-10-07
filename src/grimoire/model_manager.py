@@ -1106,6 +1106,13 @@ class ModelManager:
         self._publish_routes()
         return active
 
+    def _preset_blocks(self, cfg, preset_bypass):
+        """Presets govern Grimoire's own GPUs. A remote model's host runs its own
+        residency agent, so a preset never locks starting or stopping it."""
+        if self.preset_lock is None or preset_bypass or self.preset_allows_manual_control:
+            return False
+        return (cfg or {}).get("backend") != BACKEND_VLLM_REMOTE
+
     async def start_model(self, model_name, _preset_bypass=False):
         """Start a model with GPU allocation priority: pinned, free, oldest eviction."""
         resolved_name = registry.resolve(model_name)
@@ -1128,7 +1135,9 @@ class ModelManager:
                 return existing
 
         async with self._lock:
-            if self.preset_lock is not None and not _preset_bypass and not self.preset_allows_manual_control:
+            # Re-read under the lock: a registry edit while waiting must not keep
+            # a remote exemption for what _start_model_locked launches locally.
+            if self._preset_blocks(self.effective_config(model_name), _preset_bypass):
                 raise RuntimeError(
                     f"Preset '{self.preset_lock}' is active. "
                     f"Deactivate the preset before manually starting models."
@@ -1344,12 +1353,14 @@ class ModelManager:
         """Stop an active model."""
         model_name = registry.resolve(model_name) or model_name
         async with self._lock:
-            if self.preset_lock is not None and not _preset_bypass and not self.preset_allows_manual_control:
+            active_name, active = self._compatible_active_entry(model_name)
+            if self.preset_lock is not None and self._preset_blocks(
+                active.cfg if active else self.effective_config(model_name), _preset_bypass
+            ):
                 raise RuntimeError(
                     f"Preset '{self.preset_lock}' is active. "
                     f"Deactivate the preset before manually stopping models."
                 )
-            active_name, active = self._compatible_active_entry(model_name)
             if not active:
                 return False
             self.active.pop(active_name, None)
