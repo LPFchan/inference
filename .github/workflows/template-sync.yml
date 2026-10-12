@@ -63,6 +63,7 @@ jobs:
           PROJECT_ID=$(python3 - <<'PY'
           from pathlib import Path
           import re
+          import subprocess
           import sys
 
           try:
@@ -82,15 +83,28 @@ jobs:
                   fence = marker[1]
                   continue
               field = re.fullmatch(r" {0,3}-[ \t]+Project id:[ \t]*(.*)", line)
-              if field:
-                  fields.append(field[1].strip())
-          if len(fields) != 1:
-              sys.exit("records/SPEC.md must contain exactly one Project id field outside code blocks")
-          project_id = fields[0]
+              table = re.fullmatch(r" {0,3}\|[ \t]*Project id[ \t]*\|[ \t]*([^|]*)\|[ \t]*", line)
+              if re.match(r" {0,3}\|[ \t]*Project id[ \t]*\|", line) and not table:
+                  sys.exit("Malformed Project id table row")
+              if field or table:
+                  fields.append((field or table)[1].strip())
+          if len(fields) > 1:
+              sys.exit("records/SPEC.md contains ambiguous Project id fields")
+          project_id = fields[0] if fields else ""
+          missing_id = not project_id
           if project_id.startswith("`") and project_id.endswith("`"):
               project_id = project_id[1:-1]
-          if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", project_id):
-              sys.exit("records/SPEC.md Project id must be a lowercase kebab-case ID, optionally wrapped in backticks")
+          if missing_id:
+              # Adopted records may omit the ID or retain an empty seed field.
+              # Preserve their shape and use the existing committed identity.
+              result = subprocess.run(["git", "log", "-1", "--format=%B", "HEAD"],
+                                      text=True, capture_output=True, check=True)
+              trailers = re.findall(r"^project: (.+)$", result.stdout, re.MULTILINE)
+              if len(trailers) != 1:
+                  sys.exit("Cannot recover one project ID from committed provenance")
+              project_id = trailers[0]
+          if not re.fullmatch(r"[A-Za-z0-9]+(?:[-_][A-Za-z0-9]+)*", project_id):
+              sys.exit("Project id must be one existing alphanumeric, hyphen or underscore ID")
           print(project_id)
           PY
           )
