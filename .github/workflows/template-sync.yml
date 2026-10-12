@@ -91,18 +91,32 @@ jobs:
           if len(fields) > 1:
               sys.exit("records/SPEC.md contains ambiguous Project id fields")
           project_id = fields[0] if fields else ""
-          missing_id = not project_id
-          if project_id.startswith("`") and project_id.endswith("`"):
+          if project_id.startswith("`") or project_id.endswith("`"):
+              if len(project_id) < 2 or not (project_id.startswith("`") and project_id.endswith("`")):
+                  sys.exit("Unbalanced Project id backticks")
               project_id = project_id[1:-1]
-          if missing_id:
+          if not project_id:
               # Adopted records may omit the ID or retain an empty seed field.
               # Preserve their shape and use the existing committed identity.
-              result = subprocess.run(["git", "log", "-1", "--format=%B", "HEAD"],
+              result = subprocess.run(["git", "log", "--format=%B%x00", "HEAD"],
                                       text=True, capture_output=True, check=True)
-              trailers = re.findall(r"^project: (.+)$", result.stdout, re.MULTILINE)
-              if len(trailers) != 1:
+              for message in result.stdout.split("\0"):
+                  message = message.lstrip("\n")
+                  if not message.strip():
+                      continue
+                  trailers = re.findall(r"^project: (.+)$", message, re.MULTILINE)
+                  if trailers:
+                      if len(trailers) != 1:
+                          sys.exit("Ambiguous project ID in committed provenance")
+                      project_id = trailers[0]
+                      break
+                  exception = (re.match(r"^(bootstrap|migration)\b", message, re.IGNORECASE)
+                               or re.search(r"^exception: (bootstrap|migration)$", message,
+                                            re.IGNORECASE | re.MULTILINE))
+                  if not exception:
+                      sys.exit("Normal commit is missing its project identity")
+              if not project_id:
                   sys.exit("Cannot recover one project ID from committed provenance")
-              project_id = trailers[0]
           if not re.fullmatch(r"[A-Za-z0-9]+(?:[-_][A-Za-z0-9]+)*", project_id):
               sys.exit("Project id must be one existing alphanumeric, hyphen or underscore ID")
           print(project_id)
