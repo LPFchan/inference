@@ -112,8 +112,8 @@ class ModelMetadataCapabilityTests(unittest.TestCase):
                 "qwen-remote": {
                     "backend": "vllm-remote",
                     "family": "qwen",
-                    "remote-agent-url": "http://mangchi.lost.plus:9700",
-                    "remote-url": "http://mangchi.lost.plus:8001",
+                    "remote-agent-url": "http://mangchi.tailaa113.ts.net:9700",
+                    "remote-url": "http://mangchi.tailaa113.ts.net:8001",
                     "remote-model-id": "qwen-remote",
                 }
             },
@@ -140,8 +140,8 @@ class ModelMetadataCapabilityTests(unittest.TestCase):
                 "plain-remote": {
                     "backend": "vllm-remote",
                     "family": "qwen",
-                    "remote-agent-url": "http://mangchi.lost.plus:9700",
-                    "remote-url": "http://mangchi.lost.plus:8002",
+                    "remote-agent-url": "http://mangchi.tailaa113.ts.net:9700",
+                    "remote-url": "http://mangchi.tailaa113.ts.net:8002",
                     "remote-model-id": "plain-remote",
                 }
             },
@@ -158,8 +158,8 @@ class ModelMetadataCapabilityTests(unittest.TestCase):
                 "bad-remote": {
                     "backend": "vllm-remote",
                     "family": "qwen",
-                    "remote-agent-url": "http://mangchi.lost.plus:9700",
-                    "remote-url": "http://mangchi.lost.plus:8001",
+                    "remote-agent-url": "http://mangchi.tailaa113.ts.net:9700",
+                    "remote-url": "http://mangchi.tailaa113.ts.net:8001",
                     "remote-model-id": "bad-remote",
                 }
             },

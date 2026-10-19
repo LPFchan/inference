@@ -239,9 +239,9 @@ class RouterModeContractTests(unittest.TestCase):
 
         config_data = {
             "backend": "vllm-remote",
-            "remote-agent-url": "http://mangchi.lost.plus:9700",
+            "remote-agent-url": "http://mangchi.tailaa113.ts.net:9700",
             "remote-model-id": "remote-model",
-            "remote-url": "http://mangchi.lost.plus:8001",
+            "remote-url": "http://mangchi.tailaa113.ts.net:8001",
         }
         fake_registry = FakeRegistry()
         with patch.object(models_routes, "registry", fake_registry):
@@ -259,7 +259,7 @@ class RouterModeContractTests(unittest.TestCase):
             json={
                 "backend": "vllm-remote",
                 "remote-model-id": "remote-model",
-                "remote-url": "http://mangchi.lost.plus:8001",
+                "remote-url": "http://mangchi.tailaa113.ts.net:8001",
             },
             headers=self.auth,
         )

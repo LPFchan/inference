@@ -12,9 +12,9 @@ from grimoire.registry import ModelRegistry
 
 REMOTE = {
     "backend": "vllm-remote",
-    "remote-agent-url": "http://mangchi.lost.plus:9700",
+    "remote-agent-url": "http://mangchi.tailaa113.ts.net:9700",
     "remote-model-id": "remote/model",
-    "remote-url": "http://mangchi.lost.plus:8001",
+    "remote-url": "http://mangchi.tailaa113.ts.net:8001",
     "backend-model-id": "/models/remote",
     "capabilities": ["completion"],
     "ctx-size": 32768,
@@ -83,13 +83,13 @@ def test_remote_active_model_controls_agent_and_exposes_backend_url():
         active.start()
         assert active.is_running()
         assert active.backend_url("v1/chat/completions") == (
-            "http://mangchi.lost.plus:8001/v1/chat/completions"
+            "http://mangchi.tailaa113.ts.net:8001/v1/chat/completions"
         )
         assert asyncio.run(active.get_backend_model_id()) == "/models/remote"
         active.stop()
     assert _Client.calls == [
-        "http://mangchi.lost.plus:9700/models/remote%2Fmodel/load",
-        "http://mangchi.lost.plus:9700/models/remote%2Fmodel/unload",
+        "http://mangchi.tailaa113.ts.net:9700/models/remote%2Fmodel/load",
+        "http://mangchi.tailaa113.ts.net:9700/models/remote%2Fmodel/unload",
     ]
     assert not active.is_running()
 
@@ -151,8 +151,8 @@ def test_manager_remote_start_bypasses_local_gpu_allocator():
 
 def test_remote_health_probe_requires_agent_residency_and_backend_health():
     active = ActiveModel("alias", dict(REMOTE), port=None, gpu=None)
-    agent_url = "http://mangchi.lost.plus:9700/models/remote%2Fmodel/status"
-    backend_url = "http://mangchi.lost.plus:8001/health"
+    agent_url = "http://mangchi.tailaa113.ts.net:9700/models/remote%2Fmodel/status"
+    backend_url = "http://mangchi.tailaa113.ts.net:8001/health"
     _AsyncClient.calls = []
     _AsyncClient.responses = {
         agent_url: _AsyncResponse({"resident": True, "alive": True}),
@@ -167,7 +167,7 @@ def test_remote_health_probe_requires_agent_residency_and_backend_health():
 
 def test_remote_health_probe_treats_confirmed_absence_as_offline():
     active = ActiveModel("alias", dict(REMOTE), port=None, gpu=None)
-    agent_url = "http://mangchi.lost.plus:9700/models/remote%2Fmodel/status"
+    agent_url = "http://mangchi.tailaa113.ts.net:9700/models/remote%2Fmodel/status"
     _AsyncClient.calls = []
     _AsyncClient.responses = {
         agent_url: _AsyncResponse({"resident": False, "registered": True}),
@@ -182,7 +182,7 @@ def test_remote_health_probe_treats_confirmed_absence_as_offline():
 def test_remote_health_probe_reports_agent_loading_without_backend_probe():
     active = ActiveModel("alias", dict(REMOTE), port=None, gpu=None)
     active.status = "loaded"
-    agent_url = "http://mangchi.lost.plus:9700/models/remote%2Fmodel/status"
+    agent_url = "http://mangchi.tailaa113.ts.net:9700/models/remote%2Fmodel/status"
     _AsyncClient.calls = []
     _AsyncClient.responses = {
         agent_url: _AsyncResponse({"resident": True, "alive": True, "status": "loading"}),
@@ -196,7 +196,7 @@ def test_remote_health_probe_reports_agent_loading_without_backend_probe():
 
 def test_remote_health_probe_keeps_previous_value_when_agent_times_out():
     active = ActiveModel("alias", dict(REMOTE), port=None, gpu=None)
-    agent_url = "http://mangchi.lost.plus:9700/models/remote%2Fmodel/status"
+    agent_url = "http://mangchi.tailaa113.ts.net:9700/models/remote%2Fmodel/status"
     _AsyncClient.calls = []
     _AsyncClient.responses = {
         agent_url: mm.httpx.ReadTimeout("agent timed out"),

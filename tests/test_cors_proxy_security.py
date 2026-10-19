@@ -22,7 +22,7 @@ def test_cors_proxy_rejects_private_control_plane_resolution(monkeypatch):
 
     response = TestClient(entrypoint.app).post(
         "/cors-proxy",
-        params={"url": "http://mangchi.lost.plus:9700/models/model/unload"},
+        params={"url": "http://mangchi.tailaa113.ts.net:9700/models/model/unload"},
         headers=AUTH,
     )
 
