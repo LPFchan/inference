@@ -20,9 +20,13 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--model", choices=[*MODEL_IDS, "embeddinggemma-2-original", "embeddinggemma-2-open"], required=True)
     parser.add_argument("--url", default="http://127.0.0.1:8791/v1/audio/transcriptions")
-    parser.add_argument("--batch-size", type=int, default=4)
+    parser.add_argument("--batch-size", type=int, help="Override the pinned benchmark batch size")
     parser.add_argument("--limit", type=int, default=0, help="Seeded sample per language; 0 evaluates the full test splits")
     args = parser.parse_args()
+    if args.batch_size is None:
+        args.batch_size = MODEL_SPECS.get(args.model, {}).get("batch_size", 1)
+    if args.batch_size < 1:
+        parser.error("--batch-size must be positive")
     manifest = args.data / "manifest.jsonl"
     samples = [json.loads(line) for line in manifest.read_text().splitlines()]
     if args.limit:
@@ -46,8 +50,12 @@ def main():
         revision = MODEL_SPECS[args.model]["revision"]
         metadata.update(model_id=MODEL_IDS[args.model], revision=revision, torch=torch.__version__, device=torch.cuda.get_device_name())
         if args.model == "qwen":
+            from huggingface_hub import snapshot_download
             from qwen_asr import Qwen3ASRModel
-            model = Qwen3ASRModel.from_pretrained(MODEL_IDS[args.model], revision=revision, dtype=torch.bfloat16,
+            # qwen-asr forwards revision to the model, but not its processor.
+            # A local pinned snapshot keeps both on the same revision offline.
+            checkpoint = snapshot_download(MODEL_IDS[args.model], revision=revision, local_files_only=True)
+            model = Qwen3ASRModel.from_pretrained(checkpoint, dtype=torch.bfloat16,
                                                 device_map="cuda:0", max_inference_batch_size=args.batch_size, max_new_tokens=512)
         else:
             from transformers import AutoProcessor
@@ -69,7 +77,7 @@ def main():
     with prediction_file.open("a", buffering=1) as output:
         for language in LANGUAGE_NAMES:
             group = [row for row in samples if row["language"] == language]
-            batch_size = args.batch_size if args.model in {"qwen", "whisper"} else 1
+            batch_size = args.batch_size if args.model in MODEL_IDS else 1
             for start in range(0, len(group), batch_size):
                 batch = group[start:start + batch_size]
                 paths = [str(args.data / row["path"]) for row in batch]
@@ -88,9 +96,12 @@ def main():
                     texts = [result["text"] for result in results]
                 elif args.model == "voxtral":
                     import soundfile as sf
-                    audio, rate = sf.read(paths[0], dtype="float32")
-                    assert rate == 16000
-                    inputs = processor(audio, return_tensors="pt").to(model.device, dtype=model.dtype)
+                    audio_inputs = []
+                    for path in paths:
+                        audio, rate = sf.read(path, dtype="float32")
+                        assert rate == processor.feature_extractor.sampling_rate
+                        audio_inputs.append(audio)
+                    inputs = processor(audio_inputs, return_tensors="pt").to(model.device, dtype=model.dtype)
                     with torch.inference_mode():
                         outputs = model.generate(**inputs)
                     texts = processor.batch_decode(outputs, skip_special_tokens=True)

@@ -8,7 +8,7 @@ from pathlib import Path
 import subprocess
 import urllib.request
 
-from huggingface_hub import hf_hub_download, snapshot_download
+from huggingface_hub import hf_hub_download
 from huggingface_hub.constants import HF_HUB_CACHE
 from filelock import FileLock
 
@@ -32,7 +32,10 @@ def download(item):
                and any(fnmatch.fnmatch(file["path"], pattern) for pattern in spec["allow_patterns"])]
     cache = Path(HF_HUB_CACHE) / ("models--" + spec["id"].replace("/", "--"))
     metadata = [file["path"] for file in files if not file["path"].endswith(".safetensors")]
-    snapshot_download(spec["id"], revision=spec["revision"], allow_patterns=metadata, max_workers=4)
+    # Concurrent snapshot_download calls mutate tqdm's shared lock. Use direct
+    # file downloads inside our existing per-model pool instead of nested pools.
+    for filename in metadata:
+        hf_hub_download(spec["id"], filename, revision=spec["revision"])
     for file in weights:
         oid = file["lfs"]["oid"]
         blob = cache / "blobs" / oid

@@ -1,15 +1,18 @@
 {
   "qwen": {
+    "batch_size": 4,
     "id": "Qwen/Qwen3-ASR-1.7B",
     "revision": "7278e1e70fe206f11671096ffdd38061171dd6e5",
     "allow_patterns": ["*.json", "model-*.safetensors", "*.txt", "*.jinja"]
   },
   "voxtral": {
+    "batch_size": 32,
     "id": "mistralai/Voxtral-Mini-4B-Realtime-2602",
     "revision": "2769294da9567371363522aac9bbcfdd19447add",
     "allow_patterns": ["*.json", "model.safetensors", "*.txt", "*.jinja"]
   },
   "whisper": {
+    "batch_size": 4,
     "id": "openai/whisper-large-v3",
     "revision": "06f233fe06e710322aca913c1bc4249a0d71fce1",
     "allow_patterns": ["*.json", "model.safetensors", "*.txt"]

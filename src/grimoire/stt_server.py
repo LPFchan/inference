@@ -118,7 +118,7 @@ def create_app(workers=None):
     async def models():
         return {"object": "list", "data": [
             {"id": name, "object": "model", "owned_by": "inference", "capabilities": ["transcription"],
-             "input_modalities": ["audio"], "languages": ["en"], "experimental_languages": ["ko", "ja", "zh"]}
+             "input_modalities": ["audio"], "languages": ["en"]}
             for name in workers
         ]}
 
