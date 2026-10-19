@@ -20,11 +20,9 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--model", choices=[*MODEL_IDS, "embeddinggemma-2-original", "embeddinggemma-2-open"], required=True)
     parser.add_argument("--url", default="http://127.0.0.1:8791/v1/audio/transcriptions")
-    parser.add_argument("--batch-size", type=int, help="Override the pinned benchmark batch size")
+    parser.add_argument("--batch-size", type=int, default=4, help="GPU batch size")
     parser.add_argument("--limit", type=int, default=0, help="Seeded sample per language; 0 evaluates the full test splits")
     args = parser.parse_args()
-    if args.batch_size is None:
-        args.batch_size = MODEL_SPECS.get(args.model, {}).get("batch_size", 1)
     if args.batch_size < 1:
         parser.error("--batch-size must be positive")
     manifest = args.data / "manifest.jsonl"
@@ -44,7 +42,8 @@ def main():
         print("Already complete", flush=True)
         return
     metadata = {"model": args.model, "hostname": platform.node(), "manifest_sha256": hashlib.sha256(manifest.read_bytes()).hexdigest(),
-                "limit_per_language": args.limit, "batch_size": args.batch_size, "known_language_when_supported": True}
+                "limit_per_language": args.limit, "batch_size": args.batch_size if args.model in MODEL_IDS else 1,
+                "known_language_when_supported": True}
     if args.model in MODEL_IDS:
         import torch
         revision = MODEL_SPECS[args.model]["revision"]
@@ -77,6 +76,8 @@ def main():
     with prediction_file.open("a", buffering=1) as output:
         for language in LANGUAGE_NAMES:
             group = [row for row in samples if row["language"] == language]
+            if args.model == "voxtral":
+                group.sort(key=lambda row: row["seconds"])
             batch_size = args.batch_size if args.model in MODEL_IDS else 1
             for start in range(0, len(group), batch_size):
                 batch = group[start:start + batch_size]
