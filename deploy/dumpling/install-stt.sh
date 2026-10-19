@@ -51,6 +51,12 @@ for stt_job in plus.lost.inference.stt plus.lost.inference.stt-gateway plus.lost
     stt_file="$HOME/Library/LaunchAgents/$stt_job.plist"
     plutil -lint "$stt_file"
     launchctl bootout "gui/$(id -u)/$stt_job" 2>/dev/null || true
-    launchctl bootstrap "gui/$(id -u)" "$stt_file"
+    # bootout can return before launchd finishes releasing the old label.
+    stt_attempt=0
+    until launchctl bootstrap "gui/$(id -u)" "$stt_file"; do
+        stt_attempt=$((stt_attempt + 1))
+        [ "$stt_attempt" -lt 10 ] || exit 1
+        sleep 1
+    done
 done
 curl --retry 10 --retry-connrefused --retry-delay 1 -fsS http://127.0.0.1:8791/health
