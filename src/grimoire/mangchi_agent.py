@@ -61,9 +61,9 @@ STARTUP_ABORT_TIMEOUT_S = int(os.environ.get("MANGCHI_AGENT_STARTUP_ABORT_TIMEOU
 
 # Trusted source networks: loopback, the LAN, and the tailnet. The agent exposes
 # process lifecycle (load/unload), so it must not answer arbitrary internet
-# clients even though it binds all interfaces (it has to serve both grimoire,
-# which resolves mangchi.lost.plus -> the LAN IP, and tailnet peers). Fails
-# closed if the env override is empty.
+# clients even though it binds all interfaces to serve LAN and tailnet peers.
+# Grimoire reaches it through mangchi.tailaa113.ts.net. Fails closed if the
+# env override is empty.
 _DEFAULT_TRUSTED = "127.0.0.0/8,10.0.0.0/24,100.64.0.0/10,::1/128"
 TRUSTED_NETWORKS = [
     ipaddress.ip_network(x.strip())

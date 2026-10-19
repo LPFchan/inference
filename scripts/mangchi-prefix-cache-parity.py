@@ -69,7 +69,7 @@ def make_prompt(n_tokens_hint):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--base-url", default="http://mangchi.lost.plus:8002")
+    ap.add_argument("--base-url", default="http://mangchi.tailaa113.ts.net:8002")
     ap.add_argument("--model", default="/models/qwen3.8-flash-next-abliterated-w4a4")
     args = ap.parse_args()
 
