@@ -101,3 +101,10 @@ character scoring. The benchmark never supplies a reference transcript to a mode
 `stt-download-reference-models.py` requires `huggingface_hub`, `filelock` and
 `aria2c`; it downloads only one pinned weight format per model, resumes ranged
 transfers outside the model cache, and verifies SHA-256 before installing blobs.
+Prepare this cache before offline evaluation. Qwen loads its model and processor
+from the same pinned local snapshot. GPU references use batches of four by
+default; `--batch-size` is configurable. Voxtral groups clips by duration to
+limit padding. Native workers use one file at a time. Qwen and
+Whisper use qwen-asr 0.0.6 / Transformers 4.57.6; Voxtral uses Transformers 5.16.1
+and mistral-common 1.12.0 in a separate repo-local environment. Native Triton CUDA
+operations also require a C compiler and matching Python development headers.
