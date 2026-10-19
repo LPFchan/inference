@@ -185,3 +185,17 @@ Default regression budget: median TTFT no worse than +20%, median decode TPS no 
 6. Served runtime is verified without `/opt/dflash` dependencies or image content.
 7. Every upstream input and served artifact is pinned by exact SHA.
 8. Lucebox retirement is blocked until A + B + C are all green.
+
+### Contract I: Dumpling Speech Transcription
+
+- `https://transcribe.lost.plus/v1/audio/transcriptions` serves the original
+  Embedding Gemma Transcribe 1.6 pipeline and the independent open reader v2 as
+  `embeddinggemma-2-original` and `embeddinggemma-2-open`.
+- Serving, authentication proxying, and Cloudflare Tunnel termination run on
+  Dumpling. The gateway reuses Common Auth's existing `chat-v1` token scope and
+  `chat` browser visibility through the inference repo's shared auth module.
+- Both native readers support English. Explicit unsupported language requests
+  fail; unlabelled foreign-language inputs remain available for evaluation.
+- The backend stays on loopback, serializes inference, holds one model resident,
+  limits uploads to 100 MiB and decoded audio to one hour, and removes uploaded
+  audio after every request. Its worker protocol is private.

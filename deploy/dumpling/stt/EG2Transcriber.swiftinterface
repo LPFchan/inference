@@ -1,0 +1,43 @@
+// swift-interface-format-version: 1.0
+// swift-compiler-version: Apple Swift version 6.4
+// swift-module-flags: -target arm64-apple-macosx14.0 -enable-library-evolution -module-name EG2Transcriber
+import Swift
+import Foundation
+import CoreML
+public struct ModelFolder {
+ @frozen public enum Prefer : Swift.String {
+  case split
+  case merged
+  public init?(rawValue: Swift.String)
+  public var rawValue: Swift.String { get }
+ }
+}
+public enum LoadStage : Swift.String {
+ case ready
+ public init?(rawValue: Swift.String)
+ public var rawValue: Swift.String { get }
+}
+public struct WindowUpdate {}
+@frozen public struct Word {
+ public let text: Swift.String
+ public let start: Swift.Double
+ public let end: Swift.Double
+}
+@_hasMissingDesignatedInitializers public final class EG2Transcriber {
+ public init(folder: Foundation.URL, prefer: ModelFolder.Prefer, units: CoreML.MLComputeUnits, onStage: ((LoadStage) -> Swift.Void)?) throws
+ public func transcribe(samples: [Swift.Float], onWindow: ((WindowUpdate) -> Swift.Void)?, isCancelled: (() -> Swift.Bool)?) throws -> [Word]
+ public func enableGPU() throws
+ deinit
+}
+
+public enum AudioDecoder {
+ public static func decode16kMono(_ url: Foundation.URL, progress: ((Swift.Double) -> Swift.Void)?) throws -> [Swift.Float]
+}
+public protocol PunctCaseDecider : AnyObject {}
+@_hasMissingDesignatedInitializers public final class HeadOnlyPunct : PunctCaseDecider {
+ public init(folder: Foundation.URL, computeUnits: CoreML.MLComputeUnits) throws
+ deinit
+}
+public enum TextFormatter {
+ public static func format(_ words: [Swift.String], with: (any PunctCaseDecider)?) -> Swift.String
+}

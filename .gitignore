@@ -8,6 +8,8 @@ build/
 *.so
 *.egg
 .venv/
+.venv-service/
+.venv-stt/
 .sisyphus/
 opencode/node_modules/
 venv/

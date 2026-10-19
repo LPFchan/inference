@@ -9,7 +9,6 @@ import httpx
 from fastapi import HTTPException, Request
 
 from grimoire import config
-from grimoire.history import identity_hash
 from grimoire.proxy.client import get_proxy_client
 
 
@@ -89,6 +88,7 @@ async def authenticate_public(request: Request) -> AuthIdentity:
 
 def account_hash(sub: str) -> str:
     """Stable Grimoire storage owner derived from common auth's immutable sub."""
+    from grimoire.history import identity_hash
     return identity_hash(f"auth.lost.plus:{sub}")
 
 
