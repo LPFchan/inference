@@ -39,6 +39,20 @@ in a separate repo-local environment. Native Triton CUDA operations require a
 C compiler and matching Python development headers. Environment freezes and
 request metadata accompany the retained results.
 
+Nemotron 3.5 ASR Streaming 0.6B uses the pinned Transformers checkpoint in
+`etc/stt-benchmark-models.json`, FP32, known-language locale prompts and greedy
+RNN-T decoding. `--nemotron-lookahead 13` selects 1.12-second chunks. The
+benchmark supplies complete files through the documented offline API; it does
+not measure live-stream latency. Its JSONL predictions resume under an
+exclusive file lock, with frozen-reference and inference-setting checks.
+
+```sh
+.venv/bin/python scripts/stt-benchmark.py \
+  --data "$HOME/models/stt-benchmark/fleurs-test" \
+  --output "$HOME/models/stt-benchmark/results" \
+  --model nemotron --batch-size 4 --nemotron-lookahead 13
+```
+
 ## Native adapters
 
 Requires macOS 27 and Xcode 27. `stt/build.sh` compiles both headless workers;

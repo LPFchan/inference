@@ -10,8 +10,39 @@ import platform
 import time
 
 LANGUAGE_NAMES = {"en": "English", "ko": "Korean", "ja": "Japanese", "zh": "Chinese"}
+NEMOTRON_LOCALES = {"en": "en-US", "ko": "ko-KR", "ja": "ja-JP", "zh": "zh-CN"}
 MODEL_SPECS = json.loads((Path(__file__).resolve().parents[1] / "etc/stt-benchmark-models.json").read_text())
 MODEL_IDS = {name: spec["id"] for name, spec in MODEL_SPECS.items()}
+
+
+def completed_paths(prediction_file, samples, model):
+    """Reject stale or duplicated predictions before resuming a measured run."""
+    expected = {row["path"]: row for row in samples}
+    done = set()
+    if prediction_file.exists():
+        for line in prediction_file.read_text().splitlines():
+            row = json.loads(line)
+            path = row["path"]
+            if path in done or path not in expected:
+                raise ValueError(f"Duplicate or unknown prediction path: {path}")
+            if row.get("model") != model or not isinstance(row.get("hypothesis"), str):
+                raise ValueError(f"Invalid prediction: {path}")
+            if any(row.get(key) != value for key, value in expected[path].items()):
+                raise ValueError(f"Prediction disagrees with frozen manifest: {path}")
+            done.add(path)
+    return done
+
+
+def preserve_metadata(path, metadata):
+    if path.exists():
+        previous = json.loads(path.read_text())
+        # A limited preflight may be extended to the full set without changing
+        # the inference settings that produced its existing predictions.
+        keys = set(previous) | set(metadata)
+        keys.discard("limit_per_language")
+        if any(previous.get(key) != metadata.get(key) for key in keys):
+            raise ValueError("Existing benchmark metadata uses different inference settings")
+    path.write_text(json.dumps(metadata, indent=2))
 
 
 def main():
@@ -22,21 +53,25 @@ def main():
     parser.add_argument("--url", default="http://127.0.0.1:8791/v1/audio/transcriptions")
     parser.add_argument("--batch-size", type=int, default=4, help="GPU batch size")
     parser.add_argument("--limit", type=int, default=0, help="Seeded sample per language; 0 evaluates the full test splits")
+    parser.add_argument("--nemotron-lookahead", type=int, choices=[0, 1, 3, 6, 13], default=13,
+                        help="Nemotron right-context frames; 13 gives 1120 ms chunks")
     args = parser.parse_args()
     if args.batch_size < 1:
         parser.error("--batch-size must be positive")
     manifest = args.data / "manifest.jsonl"
     samples = [json.loads(line) for line in manifest.read_text().splitlines()]
+    args.output.mkdir(parents=True, exist_ok=True)
+    prediction_file = args.output / f"{args.model}.jsonl"
+    # Hold the lock through model loading and inference, including resume checks.
+    from filelock import FileLock
+    run_lock = FileLock(str(args.output / f".{args.model}.lock"))
+    run_lock.acquire(timeout=0)
+    done = completed_paths(prediction_file, samples, args.model)
     if args.limit:
         # Hash order avoids treating the first N as a representative random sample.
         samples = [row for lang in LANGUAGE_NAMES for row in sorted(
             [row for row in samples if row["language"] == lang],
             key=lambda row: hashlib.sha256(f"stt-20261020:{row['path']}".encode()).hexdigest())[:args.limit]]
-    args.output.mkdir(parents=True, exist_ok=True)
-    prediction_file = args.output / f"{args.model}.jsonl"
-    done = set()
-    if prediction_file.exists():
-        done = {json.loads(line)["path"] for line in prediction_file.read_text().splitlines()}
     samples = [row for row in samples if row["path"] not in done]
     if not samples:
         print("Already complete", flush=True)
@@ -58,7 +93,12 @@ def main():
                                                 device_map="cuda:0", max_inference_batch_size=args.batch_size, max_new_tokens=512)
         else:
             from transformers import AutoProcessor
-            processor = AutoProcessor.from_pretrained(MODEL_IDS[args.model], revision=revision)
+            checkpoint = MODEL_IDS[args.model]
+            if args.model == "nemotron":
+                from huggingface_hub import snapshot_download
+                checkpoint = snapshot_download(checkpoint, revision=revision, local_files_only=True,
+                                               allow_patterns=MODEL_SPECS[args.model]["allow_patterns"])
+            processor = AutoProcessor.from_pretrained(checkpoint, revision=revision)
             if args.model == "whisper":
                 from transformers import AutoModelForSpeechSeq2Seq, pipeline
                 model = AutoModelForSpeechSeq2Seq.from_pretrained(MODEL_IDS[args.model], revision=revision,
@@ -66,17 +106,26 @@ def main():
                 recognizer = pipeline("automatic-speech-recognition", model=model, tokenizer=processor.tokenizer,
                                       feature_extractor=processor.feature_extractor, device="cuda:0",
                                       torch_dtype=torch.float16, chunk_length_s=30, batch_size=args.batch_size)
-            else:
+            elif args.model == "voxtral":
                 from transformers import VoxtralRealtimeForConditionalGeneration
                 model = VoxtralRealtimeForConditionalGeneration.from_pretrained(MODEL_IDS[args.model], revision=revision,
                                                                                 torch_dtype=torch.bfloat16).to("cuda:0").eval()
+            else:
+                from transformers import AutoModelForRNNT
+                processor.set_num_lookahead_tokens(args.nemotron_lookahead)
+                model = AutoModelForRNNT.from_pretrained(checkpoint, revision=revision,
+                                                        dtype=torch.float32).to("cuda:0").eval()
+                metadata.update(dtype="float32", num_lookahead_tokens=args.nemotron_lookahead,
+                                chunk_ms=processor.streaming_latency_ms,
+                                language_locales=NEMOTRON_LOCALES, inference="offline_file_rnnt_greedy",
+                                max_symbols_per_step=model.config.max_symbols_per_step)
         metadata["transformers"] = importlib.metadata.version("transformers")
-    (args.output / f"{args.model}.metadata.json").write_text(json.dumps(metadata, indent=2))
+    preserve_metadata(args.output / f"{args.model}.metadata.json", metadata)
     print(f"Loaded {args.model}; {len(samples)} clips remaining", flush=True)
     with prediction_file.open("a", buffering=1) as output:
         for language in LANGUAGE_NAMES:
             group = [row for row in samples if row["language"] == language]
-            if args.model == "voxtral":
+            if args.model in {"voxtral", "nemotron"}:
                 group.sort(key=lambda row: row["seconds"])
             batch_size = args.batch_size if args.model in MODEL_IDS else 1
             for start in range(0, len(group), batch_size):
@@ -95,17 +144,22 @@ def main():
                         audio_inputs.append({"raw": samples_array, "sampling_rate": sample_rate})
                     results = recognizer(audio_inputs, generate_kwargs={"language": language, "task": "transcribe", "num_beams": 1})
                     texts = [result["text"] for result in results]
-                elif args.model == "voxtral":
+                elif args.model in {"voxtral", "nemotron"}:
                     import soundfile as sf
                     audio_inputs = []
-                    for path in paths:
+                    for row, path in zip(batch, paths):
                         audio, rate = sf.read(path, dtype="float32")
                         assert rate == processor.feature_extractor.sampling_rate
+                        if args.model == "nemotron":
+                            if audio.ndim != 1 or hashlib.sha256(Path(path).read_bytes()).hexdigest() != row["sha256"]:
+                                raise ValueError(f"Audio disagrees with frozen manifest: {path}")
                         audio_inputs.append(audio)
-                    inputs = processor(audio_inputs, return_tensors="pt").to(model.device, dtype=model.dtype)
+                    kwargs = {"language": NEMOTRON_LOCALES[language], "sampling_rate": 16000} if args.model == "nemotron" else {}
+                    inputs = processor(audio_inputs, return_tensors="pt", **kwargs).to(model.device, dtype=model.dtype)
                     with torch.inference_mode():
                         outputs = model.generate(**inputs)
-                    texts = processor.batch_decode(outputs, skip_special_tokens=True)
+                    sequences = outputs.sequences if args.model == "nemotron" else outputs
+                    texts = processor.batch_decode(sequences, skip_special_tokens=True)
                 else:
                     import httpx
                     with open(paths[0], "rb") as audio:
