@@ -32,9 +32,11 @@ Patch chain in `patches/atomic-llama-cpp/`, applied in order by `Dockerfile`:
   and missing/invalid credentials return 401. LaunchAgent replacement retries
   handle launchd's asynchronous teardown. Deployment and provenance are in
   `deploy/dumpling/README.md`; no Grimoire STT serving dependency was added.
-  The full five-pipeline FLEURS comparison (2,624 clips per pipeline) is
-  complete; measured scores and exact pins are in
-  [`RSH-20261020-001`](research/RSH-20261020-001-eg2-multilingual-stt.md).
+  The FLEURS comparison covers seven pipelines with 2,624 clips each. Native
+  and local-model provenance is in
+  [`RSH-20261020-001`](research/RSH-20261020-001-eg2-multilingual-stt.md);
+  [`RSH-20261020-002`](research/RSH-20261020-002-openrouter-stt.md) adds the
+  completed MAI-Transcribe 2 and Scribe v2 API runs, costing $2.77 in total.
 
 - 2026-10-07: **Presets no longer lock remote models** — a preset governs only Grimoire's own GPUs. Models served by another machine's residency agent (`vllm-remote`, today Flash-Next on Mangchi and grugthink on spark1) can be started and stopped while a locked preset such as `training` is active, and activating a preset no longer stops them. Previously `training` returned `409 Preset 'training' is active` for every cold load, including models that never touch Grimoire's 3090.
 - 2026-10-07: **Grugthink 27B served from spark1** — `qwen3.8-27b-grugthink` and `qwen3.8-27b-vanilla` moved from Mangchi to spark1 (ASUS Ascent GX10), so loading them no longer evicts Flash-Next from Mangchi's memory budget. spark1 runs the same residency agent (`docker-compose.spark.yml`, `spark-agent`, port 9700) with `etc/spark-agent.json`, launching the identical spec on spark1's `spark-vllm:pin-5fd5dd5` build (same vLLM commit as Thor). Grimoire reaches it at spark1's Tailscale address `100.94.227.60`, since spark1's LAN address is DHCP. Sibling vLLM containers now name `vllm` as the Docker entrypoint, because spark1's image already starts `vllm serve`. The grugthink D6 sampling server that occupied spark1 was stopped; training is stopped.
