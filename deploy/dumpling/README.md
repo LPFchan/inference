@@ -1,110 +1,64 @@
-# Dumpling inference transcription
+# EmbeddingGemma speech benchmark tooling
 
-All serving processes run on Dumpling. The Common Auth protected endpoint is:
+The inference repository contains native adapters and a reproducible speech
+recognition comparison. Model assets, frozen audio, predictions and scores
+are retained under `~/models/stt` on Dumpling. GPU-reference copies and
+benchmark evidence are retained under `~/models/stt-benchmark` on Mangchi.
 
-```sh
-curl https://transcribe.lost.plus/v1/audio/transcriptions \
-  -H "Authorization: Bearer $(auth token chat-v1)" \
-  -F model=embeddinggemma-2-original -F file=@recording.wav
-```
+Measured results and exact provenance:
 
-The other model is `embeddinggemma-2-open`. Both appear at `/v1/models` and
-accept audio files. `response_format` accepts `json`, `text`, and `verbose_json`;
-the latter includes duration and native inference time. The original provides
-word timing and its punctuation/capitalization model. Both readers have an
-English vocabulary; Korean, Japanese and Chinese evaluation measures their
-out-of-language behavior. Uploads are limited to 100 MiB and one hour of decoded
-audio. Four requests may be in flight; inference is serialized and one model
-stays resident on the 8 GB M1. Uploaded audio is removed after each request and
-transcripts are not stored by the server.
+- [Original/open EG2, Qwen, Voxtral and Whisper](../../records/research/RSH-20261020-001-eg2-multilingual-stt.md)
+- [Seven-pipeline comparison with MAI-Transcribe 2 and Scribe v2](../../records/research/RSH-20261020-002-openrouter-stt.md)
 
-## Processes and authentication
+## Benchmark tools
 
-- `plus.lost.inference.stt`: native-model backend, `127.0.0.1:8791`.
-- `plus.lost.inference.stt-gateway`: API gateway, `127.0.0.1:8792`.
-- `plus.lost.inference.stt-tunnel`: outbound Cloudflare Tunnel for
-  `transcribe.lost.plus`, forwarding to the local gateway.
+- `scripts/stt-prepare-fleurs.py` freezes the four FLEURS test splits into a
+  manifest and mono 16 kHz WAVs with per-file SHA-256 hashes.
+- `scripts/stt-download-reference-models.py` prepares the pinned GPU model
+  snapshots from `etc/stt-benchmark-models.json`.
+- `scripts/stt-benchmark.py` runs local references or a native worker backend
+  and resumes saved JSONL predictions by manifest path.
+- `scripts/stt-benchmark-openrouter.py` runs MAI-Transcribe 2 and Scribe v2,
+  preserving API request IDs, costs and completed predictions.
+- `scripts/stt-score.py` computes corpus WER/CER with shared normalization.
 
-The gateway reuses `grimoire.auth.authenticate_public`, the inference repo's
-Common Auth integration. Bearer and `X-API-Key` requests validate against the
-existing `chat-v1` service; browser sessions require `chat` visibility. Explicit
-credentials are authoritative. Cookie uploads require the exact public origin.
-The gateway forwards only the request body and content type to the loopback
-backend; credentials and client identity/proxy headers are stripped.
-`/health` is gateway liveness; it does not prove a model
-has loaded. Both models are loaded lazily on their first upload.
+Use a repo-local `.venv`. Preparation needs pyarrow and soundfile; scoring
+needs jiwer. Hosted inference needs httpx and a privately supplied OpenRouter
+key. The reference-model downloader needs huggingface_hub, filelock and
+aria2c. Its resumable transfers are verified before installation in the cache.
 
-## Install and update
+English/Korean use WER; Japanese/Mandarin use CER as the primary metric.
+All four languages also have CER. Normalization is NFKC, case folding,
+punctuation/symbol replacement with spaces, whitespace collapse and
+whitespace-free character scoring. References are excluded from model input.
 
-Requires macOS 27, Xcode 27, Python 3.13, and `cloudflared`. From the committed
-inference checkout on Dumpling:
+GPU references use batches of four. Voxtral groups clips by duration; native
+workers use one file at a time. Qwen and Whisper use qwen-asr 0.0.6 /
+Transformers 4.57.6; Voxtral uses Transformers 5.16.1 and mistral-common 1.12.0
+in a separate repo-local environment. Native Triton CUDA operations require a
+C compiler and matching Python development headers. Environment freezes and
+request metadata accompany the retained results.
 
-```sh
-EG2_ORIGINAL_APP="$HOME/models/stt/EG2-Transcribe-1.6.app" \
-  sh deploy/dumpling/install-stt.sh
-```
+## Native adapters
 
-The original app is downloaded from
-`https://haku-models.tslfiles.org/eg2demo/EG2-Transcribe-1.6.dmg`.
-Its disk-image SHA-256 is
-`4ee020455bf3cd6d3184b6f8271af060cd37be0bacc3669cca9739d2a7805214`.
-Copy its `.app` from the mounted disk image to the path above. The downloader
-pins the original v5 manifest and checks its file hashes, and checks the open
-models against the pinned Hugging Face revision's checksum manifest. Initial
-Neural Engine specialization can take several minutes.
-
-Cloudflare's remotely managed `dumpling-stt` tunnel routes only
-`transcribe.lost.plus` to `http://127.0.0.1:8792`, with a final `http_status:404`
-ingress. Its token is in passage `infra/DUMPLING_STT_TUNNEL_TOKEN`; the local
-runtime copy is `~/.config/inference/stt-tunnel-token` (0600). The install script
-loads all three LaunchAgents in the logged-in user's GUI domain; Dumpling's
-auto-login keeps that domain available after reboot. Keep both HTTP listeners
-on loopback.
-
-`provision-cloudflare.py` idempotently provisions the tunnel, DNS and a
-hostname-only configuration rule disabling Browser Integrity Check. The latter
-allows ordinary HTTP clients, including Python urllib; Common Auth remains
-mandatory on the API. Feed the Cloudflare API token through stdin without
-printing or embedding it in shell arguments. Existing unrelated DNS records and
-configuration rules are preserved. The helper writes only the local tunnel
-token; retain its passage copy separately.
-
-Logs are under `~/Library/Logs/grimoire-stt/`. Stop a job with
-`launchctl bootout gui/$(id -u)/<label>`. To roll back, check out the previous
-accepted inference commit and rerun the installer. The model downloader verifies
-existing assets before reusing them. The source app stays unchanged.
-
-## Provenance
+Requires macOS 27 and Xcode 27. `stt/build.sh` compiles both headless workers;
+`stt/README.md` describes their JSON-lines interface.
 
 The original adapter reconstructs the exposed Swift library interface of app
 1.6. `stt/prepare-original.py` pins the executable hash, changes Mach-O loader
-metadata to a locally loadable library, and signs that local copy. All machine
-code stays intact. The headless host calls the original audio preprocessing,
-encoder/reader, candidate scoring, CTC readout, word timing, and punctuation.
-No app executable, derived library, model weight, or dataset is in Git. Keep the
-downloaded app's Apache license, NOTICE and Gemma policy with it.
+metadata to a locally loadable library, and signs that local copy. Machine
+code and the source app stay intact. The headless worker calls the original
+preprocessing, encoder/reader, candidate scoring, CTC readout, word timing,
+and punctuation. The app, weights and derived library stay outside Git.
 
-`stt/open/` preserves the Apache-2.0 audio and inference sources from
+The original app disk image is
+`https://haku-models.tslfiles.org/eg2demo/EG2-Transcribe-1.6.dmg`, SHA-256
+`4ee020455bf3cd6d3184b6f8271af060cd37be0bacc3669cca9739d2a7805214`.
+Retain its license, NOTICE and Gemma policy alongside the downloaded app.
+
+`stt/open/` preserves the Apache-2.0 audio and pipeline sources from
 `john-rocky/eg2-transcribe` at
-`e6b7d5df02fcfe940c194d00ad5d055f958b9c6c`, with its LICENSE. The new headless host
-calls its Core AI pipeline. Models are
-`mlboydaisuke/EmbeddingGemma-2-Transcribe-CoreAI` revision
-`76865ae46793e05617c2a7420454b0c7eb8541a4` (reader v2).
-
-Benchmark preparation, execution and scoring are `scripts/stt-prepare-fleurs.py`,
-`stt-benchmark.py`, and `stt-score.py`. Frozen audio and predictions stay outside
-Git; the research record holds measured results and provenance. English/Korean
-use WER; all languages also use CER, the primary score for Japanese/Chinese.
-Scores divide corpus edit counts by corpus reference length, using shared NFKC,
-case folding, punctuation/symbol removal, whitespace collapse, and whitespace-free
-character scoring. The benchmark never supplies a reference transcript to a model.
-`stt-download-reference-models.py` requires `huggingface_hub`, `filelock` and
-`aria2c`; it downloads only one pinned weight format per model, resumes ranged
-transfers outside the model cache, and verifies SHA-256 before installing blobs.
-Prepare this cache before offline evaluation. Qwen loads its model and processor
-from the same pinned local snapshot. GPU references use batches of four by
-default; `--batch-size` is configurable. Voxtral groups clips by duration to
-limit padding. Native workers use one file at a time. Qwen and
-Whisper use qwen-asr 0.0.6 / Transformers 4.57.6; Voxtral uses Transformers 5.16.1
-and mistral-common 1.12.0 in a separate repo-local environment. Native Triton CUDA
-operations also require a C compiler and matching Python development headers.
+`e6b7d5df02fcfe940c194d00ad5d055f958b9c6c`, with its LICENSE. The open reader
+bundle is `mlboydaisuke/EmbeddingGemma-2-Transcribe-CoreAI` revision
+`76865ae46793e05617c2a7420454b0c7eb8541a4` (reader v2). Both EG2 readers use
+English vocabularies; their CJK scores measure unsupported-language behavior.

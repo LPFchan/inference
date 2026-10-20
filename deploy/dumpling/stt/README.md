@@ -7,5 +7,5 @@ on stdin with a local audio `path`, and emit readiness and result objects on
 stdout. The Python backend owns their lifetime and serializes calls.
 
 `OpenWorker.swift` uses the preserved upstream audio and pipeline sources under
-`open/`. Deployment, model provenance, and endpoint details are in
+`open/`. Model provenance and benchmark instructions are in
 [`../README.md`](../README.md).
