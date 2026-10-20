@@ -65,6 +65,24 @@ def test_cost_limit_prevents_requests(tmp_path):
         asyncio.run(bench.run(args, "fake-key", httpx.MockTransport(lambda _: pytest.fail("cost limit bypassed"))))
 
 
+def test_limited_runs_use_shared_seed_independent_of_manifest_order(tmp_path):
+    args, row = fixture(tmp_path)
+    rows = [row]
+    for name in ("other.wav", "third.wav"):
+        (tmp_path / name).write_bytes((tmp_path / "sample.wav").read_bytes())
+        rows.append({**row, "path": name})
+    args.limit = 1
+    transport = httpx.MockTransport(lambda _: httpx.Response(200, json={"text": "ok"}))
+    for index, order in enumerate((rows, list(reversed(rows)))):
+        args.output = tmp_path / f"results-{index}"
+        (tmp_path / "manifest.jsonl").write_text("".join(json.dumps(r) + "\n" for r in order))
+        asyncio.run(bench.run(args, "fake-key", transport))
+        for model in bench.MODELS:
+            saved = json.loads((args.output / f"{model}.jsonl").read_text())
+            # Shared stt-20261020 seed ranks other.wav before sample.wav/third.wav.
+            assert saved["path"] == "other.wav"
+
+
 def test_retry_is_recorded_without_duplicate_prediction(tmp_path, monkeypatch):
     args, _ = fixture(tmp_path)
     calls = {}

@@ -63,7 +63,8 @@ async def run(args, key, transport=None):
             raise ValueError("Duplicate paths in manifest")
         if args.limit:
             rows = [row for lang in ("en", "ko", "ja", "zh")
-                    for row in [r for r in rows if r["language"] == lang][:args.limit]]
+                    for row in sorted([r for r in rows if r["language"] == lang],
+                        key=lambda r: hashlib.sha256(f"stt-20261020:{r['path']}".encode()).hexdigest())[:args.limit]]
         done = {}
         outputs = {}
         for model, spec in MODELS.items():
