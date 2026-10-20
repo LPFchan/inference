@@ -33,15 +33,20 @@ def completed_paths(prediction_file, samples, model):
     return done
 
 
-def preserve_metadata(path, metadata):
+def check_metadata(path, metadata, require_existing=False):
+    if require_existing and not path.exists():
+        raise ValueError("Saved predictions have no inference metadata")
     if path.exists():
         previous = json.loads(path.read_text())
         # A limited preflight may be extended to the full set without changing
         # the inference settings that produced its existing predictions.
-        keys = set(previous) | set(metadata)
-        keys.discard("limit_per_language")
-        if any(previous.get(key) != metadata.get(key) for key in keys):
+        keys = set(metadata) - {"limit_per_language"}
+        if any(previous.get(key) != metadata[key] for key in keys):
             raise ValueError("Existing benchmark metadata uses different inference settings")
+
+
+def preserve_metadata(path, metadata):
+    check_metadata(path, metadata)
     path.write_text(json.dumps(metadata, indent=2))
 
 
@@ -53,7 +58,7 @@ def main():
     parser.add_argument("--url", default="http://127.0.0.1:8791/v1/audio/transcriptions")
     parser.add_argument("--batch-size", type=int, default=4, help="GPU batch size")
     parser.add_argument("--limit", type=int, default=0, help="Seeded sample per language; 0 evaluates the full test splits")
-    parser.add_argument("--nemotron-lookahead", type=int, choices=[0, 1, 3, 6, 13], default=13,
+    parser.add_argument("--nemotron-lookahead", type=int, choices=[0, 3, 6, 13], default=13,
                         help="Nemotron right-context frames; 13 gives 1120 ms chunks")
     args = parser.parse_args()
     if args.batch_size < 1:
@@ -67,6 +72,15 @@ def main():
     run_lock = FileLock(str(args.output / f".{args.model}.lock"))
     run_lock.acquire(timeout=0)
     done = completed_paths(prediction_file, samples, args.model)
+    metadata = {"model": args.model, "hostname": platform.node(), "manifest_sha256": hashlib.sha256(manifest.read_bytes()).hexdigest(),
+                "limit_per_language": args.limit, "batch_size": args.batch_size if args.model in MODEL_IDS else 1,
+                "known_language_when_supported": True}
+    if args.model in MODEL_IDS:
+        metadata.update(model_id=MODEL_IDS[args.model], revision=MODEL_SPECS[args.model]["revision"])
+    if args.model == "nemotron":
+        metadata["num_lookahead_tokens"] = args.nemotron_lookahead
+    metadata_path = args.output / f"{args.model}.metadata.json"
+    check_metadata(metadata_path, metadata, require_existing=bool(done))
     if args.limit:
         # Hash order avoids treating the first N as a representative random sample.
         samples = [row for lang in LANGUAGE_NAMES for row in sorted(
@@ -76,9 +90,6 @@ def main():
     if not samples:
         print("Already complete", flush=True)
         return
-    metadata = {"model": args.model, "hostname": platform.node(), "manifest_sha256": hashlib.sha256(manifest.read_bytes()).hexdigest(),
-                "limit_per_language": args.limit, "batch_size": args.batch_size if args.model in MODEL_IDS else 1,
-                "known_language_when_supported": True}
     if args.model in MODEL_IDS:
         import torch
         revision = MODEL_SPECS[args.model]["revision"]
@@ -120,7 +131,7 @@ def main():
                                 language_locales=NEMOTRON_LOCALES, inference="offline_file_rnnt_greedy",
                                 max_symbols_per_step=model.config.max_symbols_per_step)
         metadata["transformers"] = importlib.metadata.version("transformers")
-    preserve_metadata(args.output / f"{args.model}.metadata.json", metadata)
+    preserve_metadata(metadata_path, metadata)
     print(f"Loaded {args.model}; {len(samples)} clips remaining", flush=True)
     with prediction_file.open("a", buffering=1) as output:
         for language in LANGUAGE_NAMES:
