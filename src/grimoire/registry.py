@@ -445,11 +445,14 @@ class ModelRegistry:
                 if cfg.get(field):
                     return False, f"'{field}' is no longer supported"
         elif backend == BACKEND_VLLM_REMOTE:
-            for field in ("remote-agent-url", "remote-url"):
-                if not _valid_remote_base_url(cfg.get(field)):
-                    return False, f"'{field}' must be a credential-free HTTP(S) origin"
-            if not isinstance(cfg.get("remote-model-id"), str) or not cfg["remote-model-id"]:
-                return False, "Missing 'remote-model-id' field"
+            if not _valid_remote_base_url(cfg.get("remote-url")):
+                return False, "'remote-url' must be a credential-free HTTP(S) origin"
+            # Without a residency agent the remote is kept running externally.
+            if cfg.get("remote-agent-url") is not None:
+                if not _valid_remote_base_url(cfg["remote-agent-url"]):
+                    return False, "'remote-agent-url' must be a credential-free HTTP(S) origin"
+                if not isinstance(cfg.get("remote-model-id"), str) or not cfg["remote-model-id"]:
+                    return False, "Missing 'remote-model-id' field"
             incompatible = [
                 field for field in ("file", "cpu-only", "gpu-ids", "vram-budget-mib")
                 if cfg.get(field)

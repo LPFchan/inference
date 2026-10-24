@@ -287,3 +287,39 @@ def test_remote_status_refresh_tracks_loading_then_loaded():
     assert second == {"remote": "loaded"}
     assert active.status == "loaded"
     assert publish.call_count == 2
+
+
+EXTERNAL = {
+    key: value for key, value in REMOTE.items()
+    if key not in ("remote-agent-url", "remote-model-id")
+}
+
+
+def test_external_remote_has_no_agent_lifecycle(tmp_path):
+    path = tmp_path / "models.json"
+    path.write_text(json.dumps({"models": {"remote": EXTERNAL}, "fixed": {}}))
+    registry = ModelRegistry(path=str(path), seed_path=str(tmp_path / "missing.json"))
+    assert registry.validate("remote") == (True, "OK")
+
+    _Client.calls = []
+    active = ActiveModel("alias", dict(EXTERNAL), port=None, gpu=None)
+    with patch.object(mm.httpx, "Client", _Client):
+        active.start()
+        assert active.is_running()
+        active.stop()
+    assert _Client.calls == []
+    assert not active.is_running()
+
+
+def test_external_remote_health_probe_reads_backend_health():
+    active = ActiveModel("alias", dict(EXTERNAL), port=None, gpu=None)
+    backend_url = "http://mangchi.tailaa113.ts.net:8001/health"
+    _AsyncClient.calls = []
+    with patch.object(mm.httpx, "AsyncClient", _AsyncClient):
+        _AsyncClient.responses = {backend_url: _AsyncResponse(status_code=200)}
+        assert asyncio.run(active.probe_remote_health()) is True
+        _AsyncClient.responses = {backend_url: mm.httpx.ConnectError("refused")}
+        assert asyncio.run(active.probe_remote_health()) is False
+        _AsyncClient.responses = {backend_url: mm.httpx.ReadTimeout("slow")}
+        assert asyncio.run(active.probe_remote_health()) is None
+    assert _AsyncClient.calls == [backend_url] * 3

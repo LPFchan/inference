@@ -258,13 +258,13 @@ class RouterModeContractTests(unittest.TestCase):
             "/registry/model/remote-route-validation",
             json={
                 "backend": "vllm-remote",
+                "remote-agent-url": "http://mangchi.tailaa113.ts.net:9700",
                 "remote-model-id": "remote-model",
-                "remote-url": "http://mangchi.tailaa113.ts.net:8001",
             },
             headers=self.auth,
         )
         self.assertEqual(response.status_code, 400)
-        self.assertIn("remote-agent-url", response.json()["detail"])
+        self.assertIn("remote-url", response.json()["detail"])
 
     def test_registry_predict_rejects_non_positive_and_non_integer_values(self):
         for value in (0, -2, True, 1.0, "1"):
