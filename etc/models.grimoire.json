@@ -1415,15 +1415,16 @@
       "ctx-size": 1048576,
       "added": "2026-10-25T06:33:28.207460+00:00"
     },
-    "qwen3.6-heretic-35B-A3B": {
+    "qwen3.6-35B-A3B": {
       "backend": "vllm-remote",
       "remote-url": "http://100.122.130.86:8000",
-      "backend-model-id": "Qwen3.6-35B-A3B-heretic-oQ4e",
+      "backend-model-id": "Qwen3.6-35B-A3B-heretic-oQ3",
       "capabilities": [
-        "completion"
+        "completion",
+        "multimodal"
       ],
-      "ctx-size": 32768,
-      "added": "2026-10-25T15:53:09.444381+00:00"
+      "ctx-size": 212992,
+      "added": "2026-10-25T16:58:00.374580+00:00"
     }
   },
   "fixed": {
