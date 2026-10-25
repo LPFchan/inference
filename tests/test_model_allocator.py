@@ -221,6 +221,31 @@ class AllocatorTests(unittest.TestCase):
         self.assertNotIn("chat", self.mgr.active)      # failed model not left active
         self.assertEqual(start_calls, [])              # new model never launched
 
+    def test_start_without_eviction_refuses_before_stopping_anyone(self):
+        # Both GPUs are taken, so the start would push the oldest model out.
+        # Only administrators may do that; the incumbent keeps running.
+        old = FakeActive("old", gpu=0, port=8001, started=datetime(2020, 1, 1, tzinfo=timezone.utc))
+        new = FakeActive("new", gpu=1, port=8011, started=datetime(2026, 1, 1, tzinfo=timezone.utc))
+        old.stop = MagicMock()
+        self.mgr.active = {"old": old, "new": new}
+
+        reg = MagicMock()
+        reg.resolve.side_effect = lambda n: n
+        reg.get.return_value = {"file": "x"}
+        reg.validate.return_value = (True, "OK")
+        reg.get_fixed_gpu.return_value = None
+        reg.is_fixed.return_value = False
+
+        with patch.object(mm, "registry", reg), \
+             patch.object(self.mgr, "_start_active_model", new=AsyncMock()) as start:
+            with self.assertRaises(RuntimeError) as ctx:
+                run(self.mgr.start_model("chat", evict=False))
+
+        self.assertIn("would unload old", str(ctx.exception))
+        old.stop.assert_not_called()
+        start.assert_not_called()
+        self.assertEqual(set(self.mgr.active), {"old", "new"})
+
     def test_model_budget_mib_parsing(self):
         self.assertEqual(ModelManager._model_budget_mib({"vram-budget-mib": 1500}), 1500)
         self.assertIsNone(ModelManager._model_budget_mib({}))

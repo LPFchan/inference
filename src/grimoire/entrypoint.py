@@ -28,7 +28,7 @@ from fastapi.staticfiles import StaticFiles
 
 from grimoire import config
 from grimoire.chat_template import apply_chat_template_kwargs
-from grimoire.auth import require_api, require_admin
+from grimoire.auth import is_admin, require_api, require_admin
 from grimoire.config import (
     LLAMA_SERVER_BIN,
     DEFAULT_CTX_SIZE,
@@ -329,7 +329,7 @@ async def chat_completions(request: Request):
         )
 
     try:
-        active = await manager.start_model(model_name)
+        active = await manager.start_model(model_name, evict=is_admin(request))
         history_conversation_id = _history_conversation_id(request, payload)
         history_conversation_id = _validated_history_conversation_id(
             user_hash, history_conversation_id
@@ -390,7 +390,7 @@ async def chat_responses(request: Request):
         payload.pop("max_tokens", None)
 
     try:
-        active = await manager.start_model(model_name)
+        active = await manager.start_model(model_name, evict=is_admin(request))
         client = get_proxy_client()
         headers = _backend_request_headers(request.headers)
 
@@ -448,7 +448,7 @@ async def proxy_v1(request: Request, path: str):
         raise HTTPException(status_code=404, detail="No target model resolved for proxy request")
 
     try:
-        active = await manager.start_model(model_name)
+        active = await manager.start_model(model_name, evict=is_admin(request))
         client = get_proxy_client()
         headers = _backend_request_headers(request.headers)
 
@@ -645,7 +645,7 @@ async def ensure_loaded(request: Request):
     if not model:
         raise HTTPException(status_code=400, detail="model required")
     try:
-        await manager.start_model(model)
+        await manager.start_model(model, evict=payload.get("evict") is not False)
     except RuntimeError as e:
         raise HTTPException(status_code=409, detail=str(e))
     return {"status": "ok", "model": model}

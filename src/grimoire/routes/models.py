@@ -10,7 +10,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
 
-from grimoire.auth import require_api, require_admin
+from grimoire.auth import is_admin, require_api, require_admin
 from grimoire.config import (
     DEFAULT_CTX_SIZE,
     DEFAULT_GENERATION_PARAMS,
@@ -666,7 +666,7 @@ async def props(request: Request):
         return _synthetic_props(resolved)
 
     try:
-        active = await manager.start_model(resolved)
+        active = await manager.start_model(resolved, evict=is_admin(request))
     except FileNotFoundError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except RuntimeError as e:

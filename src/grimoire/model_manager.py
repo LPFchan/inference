@@ -212,6 +212,15 @@ def _extend_optional_arg(cmd, cfg, key, flag=None):
 
 
 
+def _agent_detail(response):
+    """The residency agent's refusal reason, for the caller's 409."""
+    try:
+        detail = response.json().get("detail")
+    except (ValueError, AttributeError):
+        detail = None
+    return detail if isinstance(detail, str) and detail else f"remote agent refused: HTTP {response.status_code}"
+
+
 def _prepend_library_paths(env, paths, exclude_prefixes=()):
     existing = []
     for path in env.get("LD_LIBRARY_PATH", "").split(":"):
@@ -357,6 +366,9 @@ class ActiveModel:
         self.status = config.MODEL_STATUS_LOADING
         self.backend_type = cfg.get("backend", BACKEND_LLAMA)
         self.remote_running = False
+        # A remote agent may stop other residents to fit this one; only
+        # administrators may push other models out.
+        self.allow_evict = True
 
         self.kv_cache_store = None
         self.snapshot_staging_slot: int = 7
@@ -397,8 +409,11 @@ class ActiveModel:
         model_id = quote(self.cfg["remote-model-id"], safe="")
         url = f"{self.remote_agent_url}/models/{model_id}/load"
         timeout = float(self.cfg.get("startup-timeout", config.DEFAULT_STARTUP_TIMEOUT)) + 5
+        params = None if self.allow_evict else {"evict": "false"}
         with httpx.Client(timeout=timeout) as client:
-            response = client.post(url)
+            response = client.post(url, params=params)
+            if response.status_code == 409:
+                raise RuntimeError(_agent_detail(response))
             response.raise_for_status()
         self.remote_running = True
         return response.json()
@@ -1045,8 +1060,11 @@ class ModelManager:
             raise ValueError(f"Pinned GPU {pin} must equal primary gpu_ids[0] ({placement.primary})")
         validate_multi_gpu_selectors(cfg, placement)
 
-    async def _start_model_locked(self, model_name):
-        """Locked lifecycle body shared by ordinary starts and runtime reconfiguration."""
+    async def _start_model_locked(self, model_name, *, evict=True):
+        """Locked lifecycle body shared by ordinary starts and runtime reconfiguration.
+
+        evict=False refuses a start that would stop another model to make room.
+        """
         existing_direct = self.active.get(model_name)
         if existing_direct is not None:
             if existing_direct.is_running():
@@ -1067,6 +1085,7 @@ class ModelManager:
 
         if cfg.get("backend") == BACKEND_VLLM_REMOTE:
             active = ActiveModel(model_name, cfg, port=None, gpu=None)
+            active.allow_evict = evict
             self.active[model_name] = active
             try:
                 await self._start_active_model(active)
@@ -1091,6 +1110,11 @@ class ModelManager:
 
         budget = self._model_budget_mib(cfg)
         placement, incumbents = await self._allocate_gpu(model_name, cfg)
+        if incumbents and not evict:
+            names = ", ".join(name for name, _ in incumbents)
+            raise RuntimeError(
+                f"Loading '{model_name}' would unload {names}; only an administrator can do that"
+            )
         gpu = placement.primary
         ignored_ports = {incumbent.port for _, incumbent in incumbents if incumbent.port is not None}
         port = self._find_available_port_excluding(gpu, ignored_ports)
@@ -1137,7 +1161,7 @@ class ModelManager:
             return False
         return (cfg or {}).get("backend") != BACKEND_VLLM_REMOTE
 
-    async def start_model(self, model_name, _preset_bypass=False):
+    async def start_model(self, model_name, _preset_bypass=False, *, evict=True):
         """Start a model with GPU allocation priority: pinned, free, oldest eviction."""
         resolved_name = registry.resolve(model_name)
         if not resolved_name:
@@ -1166,7 +1190,7 @@ class ModelManager:
                     f"Preset '{self.preset_lock}' is active. "
                     f"Deactivate the preset before manually starting models."
                 )
-            return await self._start_model_locked(model_name)
+            return await self._start_model_locked(model_name, evict=evict)
 
     def _require_manual_control(self):
         if self.preset_lock is not None and not self.preset_allows_manual_control:

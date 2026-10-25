@@ -223,7 +223,7 @@ class RuntimeControlTests(unittest.TestCase):
         with patch.object(mm, "registry", self.registry), \
                 patch.object(self.manager, "_start_model_locked", new=AsyncMock(return_value="started")) as start:
             self.assertEqual(run(self.manager.start_model("remote")), "started")
-            start.assert_awaited_once_with("remote")
+            start.assert_awaited_once_with("remote", evict=True)
             self.assertFalse(run(self.manager.stop_model("remote")))
             with self.assertRaisesRegex(RuntimeError, "Preset 'training' is active"):
                 run(self.manager.start_model("model"))
