@@ -1403,6 +1403,17 @@
         "/models/gguf/eastself-gemma4-12b-boundary-pilot-sft-final-lora-tokenrep.gguf:1.0,/models/gguf/eastself-gemma4-12b-tier1-dose-v1-stronger-lora.gguf:1.0"
       ],
       "added": "2026-08-31T11:22:37.579559+00:00"
+    },
+    "DeepSeek-V4.1-Flash-1017": {
+      "backend": "vllm-remote",
+      "remote-url": "http://100.120.192.122:8888",
+      "backend-model-id": "DeepSeek-V4.1-Flash-1017",
+      "capabilities": [
+        "completion",
+        "multimodal"
+      ],
+      "ctx-size": 1048576,
+      "added": "2026-10-25T06:33:28.207460+00:00"
     }
   },
   "fixed": {

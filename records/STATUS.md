@@ -1,6 +1,6 @@
 # Current Status
 
-**Snapshot:** 2026-10-20
+**Snapshot:** 2026-10-25
 **Posture:** The Grimoire gateway serves local llama.cpp models and admits remote vLLM models through Mangchi's residency agent. The local engine remains TheTom's turboquant fork with turbo4 KV. Mangchi model artifacts are managed separately from the gateway.
 **Focus:** Serve Qwen3.8 Flash-Next and the grugthink 27B as Mangchi's registered remote models (one resident at a time) and continue Flash-Next's its decode, prefix-cache, and CUDA-graph optimization program.
 
@@ -22,6 +22,21 @@ Patch chain in `patches/atomic-llama-cpp/`, applied in order by `Dockerfile`:
 `GRIMOIRE_LLAMA_CPP_CUDA_GRAPHS=ON` is the Dockerfile default. The trail of investigation and the decision rationale are in `records/research/RSH-20260523-001`, `RSH-20260526-001` (validation matrix), `RSH-20260526-002` (V3 design, deferred), and `RSH-20260526-003` (V2+ON shipping decision with the bench data and upstream survey).
 
 ## Recent Changes
+
+- 2026-10-25: **DeepSeek-V4.1-Flash-1017 served from spark1+spark2** — the
+  [MiaAI-Lab two-Spark TensorFold recipe](https://github.com/MiaAI-Lab/DeepSeek-v4.1-Flash-1017-2x-DGX-Sparks)
+  at `27741e1` serves the EXL3 EAQ v1 2.9 bpw checkpoint at TP=2 with the full
+  1,048,576-token window, image input and DSpark drafting. spark2 (4 TB) is the
+  head and API (`100.120.192.122:8888`); spark1 is the worker over the CX7 link
+  (`192.168.100.0/24` and `192.168.101.0/24`, both rails, MTU 9000; NetworkManager
+  `cx7-a`/`cx7-b`). spark2 exports its Hugging Face cache read-only to spark1 over
+  NFS; Engram's tables and rank 1's weight file sit on spark1's own disk. The
+  recipe's systemd user unit `dsv41-tensorfold.service` on spark2 keeps both
+  ranks up, so Grimoire's `DeepSeek-V4.1-Flash-1017` is a `vllm-remote` entry
+  without a residency agent: unloading it in Grimoire does not stop the pair.
+  It needs nearly all memory on both Sparks, so spark1's `spark-agent` is
+  stopped and the grugthink 27B entries cannot load while it runs. Chat,
+  streaming, thinking off and image input pass through chat.lost.plus.
 
 - 2026-10-20: **Speech benchmark complete** — eight pipelines each have 2,624
   FLEURS test predictions across English, Korean, Japanese and Mandarin.
