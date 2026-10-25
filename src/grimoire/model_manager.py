@@ -212,6 +212,10 @@ def _extend_optional_arg(cmd, cfg, key, flag=None):
 
 
 
+class LoadRefused(RuntimeError):
+    """A load deliberately refused, e.g. it would push out another model."""
+
+
 def _agent_detail(response):
     """The residency agent's refusal reason, for the caller's 409."""
     try:
@@ -413,7 +417,7 @@ class ActiveModel:
         with httpx.Client(timeout=timeout) as client:
             response = client.post(url, params=params)
             if response.status_code == 409:
-                raise RuntimeError(_agent_detail(response))
+                raise LoadRefused(_agent_detail(response))
             response.raise_for_status()
         self.remote_running = True
         return response.json()
@@ -1112,7 +1116,7 @@ class ModelManager:
         placement, incumbents = await self._allocate_gpu(model_name, cfg)
         if incumbents and not evict:
             names = ", ".join(name for name, _ in incumbents)
-            raise RuntimeError(
+            raise LoadRefused(
                 f"Loading '{model_name}' would unload {names}; only an administrator can do that"
             )
         gpu = placement.primary

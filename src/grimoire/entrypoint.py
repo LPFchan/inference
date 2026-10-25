@@ -65,6 +65,7 @@ from grimoire.registry import (
 from grimoire.model_manager import (
     build_cmd,
     ActiveModel,
+    LoadRefused,
     ModelManager,
     detect_gpu_count,
 )
@@ -412,6 +413,8 @@ async def chat_responses(request: Request):
         upstream = await client.send(req, stream=True)
     except HTTPException:
         raise
+    except LoadRefused as e:
+        raise HTTPException(status_code=409, detail=str(e))
     except Exception as e:
         logger.error(f"Failed to proxy /v1/responses: {e}")
         raise HTTPException(status_code=502, detail="Model server unavailable")
@@ -481,6 +484,8 @@ async def proxy_v1(request: Request, path: str):
         upstream = await client.send(req, stream=True)
     except HTTPException:
         raise
+    except LoadRefused as e:
+        raise HTTPException(status_code=409, detail=str(e))
     except Exception as e:
         logger.error(f"Failed to proxy /v1/{path}: {e}")
         raise HTTPException(status_code=502, detail="Model server unavailable")
