@@ -202,6 +202,9 @@ class ResidencyManager:
         self._stop_tasks: dict[str, "asyncio.Task"] = {}
         self._load_tasks: dict[str, "asyncio.Task"] = {}
         self._closing = False
+        # Set by POST /restart: the next shutdown leaves model containers
+        # running for the restarted agent to adopt.
+        self.keep_residents = False
 
     def _used_gib(self) -> float:
         return sum(r.spec.resident_gb for r in self.resident.values())
@@ -619,7 +622,8 @@ class ResidencyManager:
         """Re-attach to model containers a previous agent left running.
 
         A graceful shutdown stops every resident, so this normally finds
-        nothing. It matters when the previous agent died without running its
+        nothing. It matters after POST /restart, which leaves them running on
+        purpose, and when the previous agent died without running its
         shutdown (crash, SIGKILL, host power loss): the container keeps holding
         GPU memory that a fresh agent would neither count against the budget nor
         be able to stop, and the next load would collide with it.
@@ -719,6 +723,9 @@ class ResidencyManager:
             # lifecycle tasks (bare gather would propagate cancellation to them).
             drain = asyncio.gather(*pending, return_exceptions=True)
             await asyncio.shield(drain)
+        if self.keep_residents:
+            logger.info("restart: leaving %s running for the next agent", sorted(self.resident) or "nothing")
+            return
         for name in list(self.resident.keys()):
             try:
                 await self._stop(name)
@@ -751,6 +758,13 @@ def create_app(manager: Optional[ResidencyManager] = None) -> FastAPI:
         if not allowed:
             return JSONResponse(status_code=403, content={"detail": "forbidden source"})
         return await call_next(request)
+
+    @app.post("/restart")
+    async def restart():
+        """Exit for the container's restart policy, keeping model containers up."""
+        mgr.keep_residents = True
+        asyncio.get_running_loop().call_later(0.2, os.kill, os.getpid(), signal.SIGTERM)
+        return {"status": "restarting", "kept": sorted(mgr.resident)}
 
     @app.post("/models/{name}/load")
     async def load_model(name: str, evict: bool = True):
