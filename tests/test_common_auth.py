@@ -171,3 +171,18 @@ def test_token_management_rejects_stale_expected_account(monkeypatch):
         asyncio.run(proxy_app.auth_tokens(req))
     asyncio.run(client.aclose())
     assert caught.value.status_code == 409
+
+
+def test_stateless_proxy_keeps_the_managers_eviction_refusal():
+    async def handler(upstream):
+        assert upstream.url.path == "/internal/ensure-loaded"
+        return httpx.Response(409, json={"detail": "Loading 'emb' would unload chat; only an administrator can do that"})
+
+    async def go():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            await proxy_app._ensure_loaded(client, "emb", evict=False)
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(go())
+    assert exc.value.status_code == 409
+    assert "only an administrator" in exc.value.detail
