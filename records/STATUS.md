@@ -23,6 +23,20 @@ Patch chain in `patches/atomic-llama-cpp/`, applied in order by `Dockerfile`:
 
 ## Recent Changes
 
+- 2026-10-26: **qwen3.6-heretic-35B-A3B served from yeowoolmac's The Rest
+  partition** — dopaemon's oQ4e MLX quant of the Heretic-abliterated
+  Qwen3.6-35B-A3B runs in oMLX 0.7.2 (release wheel with its prebuilt Metal
+  kernels, venv `~/omlx/.venv`) under the user LaunchAgent `plus.lost.omlx`
+  on `100.122.130.86:8000`; Grimoire's entry is a `vllm-remote` without a
+  residency agent. oMLX allows keyless inference; its admin API needs
+  `~/.omlx/api_key` on that Mac. The 24 GB Mac fits it only text-only with
+  MTP off: the root LaunchDaemon `plus.lost.iogpu-wired-limit` raises
+  `iogpu.wired_limit_mb` to 22528 at boot, oMLX's memory guard is pinned at
+  21.5 GiB, and the vision tower (0.83 GiB) is dropped with
+  `model_type_override: llm`, leaving the weights at 19.0 GiB. A 32k-token
+  prompt answers correctly (284 tok/s prefill, 52 tok/s decode; 79 tok/s on
+  short prompts). Chat, streaming and thinking off (`enable_thinking: false`)
+  pass through chat.lost.plus. It serves only while The Rest is booted.
 - 2026-10-25: **Only administrators push other models out** — any lost.plus account admitted to chat can use chat.lost.plus with its global token, so a request-driven load that would stop another model now needs the Common Auth administrator role, on Grimoire's GPUs and through the Mangchi/spark agents (`load?evict=false`). Everyone else loads cold models only into free room and otherwise gets a 409 naming the model it would unload.
 - 2026-10-25: **Restarts keep remote models loaded** — `POST /restart` on the gateway (administrator) and on a residency agent restart them without unloading: the gateway leaves remote models resident and an agent leaves its model containers running for the next agent to adopt. A plain stop (`docker restart`, `systemctl`, reboot) is still a shutdown and unloads. Verified live: gateway and Mangchi agent both restarted while Flash-Next stayed up, and both remote models answered within 24 seconds.
 - 2026-10-25: **DeepSeek-V4.1-Flash-1017 served from spark1+spark2** — the
