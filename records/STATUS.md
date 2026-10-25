@@ -23,6 +23,7 @@ Patch chain in `patches/atomic-llama-cpp/`, applied in order by `Dockerfile`:
 
 ## Recent Changes
 
+- 2026-10-25: **Only administrators push other models out** — any lost.plus account admitted to chat can use chat.lost.plus with its global token, so a request-driven load that would stop another model now needs the Common Auth administrator role, on Grimoire's GPUs and through the Mangchi/spark agents (`load?evict=false`). Everyone else loads cold models only into free room and otherwise gets a 409 naming the model it would unload. Mangchi's agent was restarted on this build and Flash-Next reloaded; a clean agent restart stops its residents, so it costs a ~10-minute reload.
 - 2026-10-25: **DeepSeek-V4.1-Flash-1017 served from spark1+spark2** — the
   [MiaAI-Lab two-Spark TensorFold recipe](https://github.com/MiaAI-Lab/DeepSeek-v4.1-Flash-1017-2x-DGX-Sparks)
   at `27741e1` serves the EXL3 EAQ v1 2.9 bpw checkpoint at TP=2 with the full
