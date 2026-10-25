@@ -382,9 +382,20 @@ class ActiveModel:
     def supports_kv_slots(self):
         return self.backend_type == BACKEND_LLAMA
 
+    @property
+    def remote_agent_url(self):
+        """Residency agent origin, or None when the remote is kept running externally."""
+        url = self.cfg.get("remote-agent-url")
+        return url.rstrip("/") if url else None
+
     def _start_remote(self):
+        # Without an agent the remote is kept running by its own host (systemd);
+        # loading only claims it, and wait_ready proves its /health.
+        if self.remote_agent_url is None:
+            self.remote_running = True
+            return {"status": "external"}
         model_id = quote(self.cfg["remote-model-id"], safe="")
-        url = f"{self.cfg['remote-agent-url'].rstrip('/')}/models/{model_id}/load"
+        url = f"{self.remote_agent_url}/models/{model_id}/load"
         timeout = float(self.cfg.get("startup-timeout", config.DEFAULT_STARTUP_TIMEOUT)) + 5
         with httpx.Client(timeout=timeout) as client:
             response = client.post(url)
@@ -460,11 +471,20 @@ class ActiveModel:
         if self.backend_type != BACKEND_VLLM_REMOTE:
             return None
 
+        if self.remote_agent_url is None:
+            try:
+                async with httpx.AsyncClient(
+                    timeout=config.DEFAULT_REMOTE_HEALTH_TIMEOUT
+                ) as client:
+                    backend_response = await client.get(self.backend_url("health"))
+            except httpx.ConnectError:
+                return False
+            except httpx.HTTPError:
+                return None
+            return True if backend_response.status_code == 200 else None
+
         model_id = quote(self.cfg["remote-model-id"], safe="")
-        agent_url = (
-            f"{self.cfg['remote-agent-url'].rstrip('/')}"
-            f"/models/{model_id}/status"
-        )
+        agent_url = f"{self.remote_agent_url}/models/{model_id}/status"
         try:
             async with httpx.AsyncClient(
                 timeout=config.DEFAULT_REMOTE_HEALTH_TIMEOUT
@@ -504,8 +524,12 @@ class ActiveModel:
     def _stop_remote(self):
         if not self.remote_running:
             return
+        if self.remote_agent_url is None:
+            # Unloading releases the claim; the external service keeps running.
+            self.remote_running = False
+            return
         model_id = quote(self.cfg["remote-model-id"], safe="")
-        url = f"{self.cfg['remote-agent-url'].rstrip('/')}/models/{model_id}/unload"
+        url = f"{self.remote_agent_url}/models/{model_id}/unload"
         with httpx.Client(timeout=config.DEFAULT_REMOTE_STOP_TIMEOUT) as client:
             response = client.post(url)
             response.raise_for_status()

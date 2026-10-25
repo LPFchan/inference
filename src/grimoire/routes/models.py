@@ -210,14 +210,16 @@ def _validate_model_config(data: dict, gpu_count=None) -> None:
         if not file_val or not isinstance(file_val, str):
             raise HTTPException(status_code=400, detail="'file' is required and must be a string")
     elif backend == BACKEND_VLLM_REMOTE:
-        for field in ("remote-agent-url", "remote-url"):
+        # Without a residency agent the remote is kept running externally.
+        has_agent = data.get("remote-agent-url") is not None
+        for field in ("remote-agent-url", "remote-url") if has_agent else ("remote-url",):
             if not _valid_remote_base_url(data.get(field)):
                 raise HTTPException(
                     status_code=400,
                     detail=f"'{field}' must be a credential-free HTTP(S) origin",
                 )
         remote_model_id = data.get("remote-model-id")
-        if not isinstance(remote_model_id, str) or not remote_model_id:
+        if has_agent and (not isinstance(remote_model_id, str) or not remote_model_id):
             raise HTTPException(status_code=400, detail="'remote-model-id' is required and must be a string")
         incompatible = [
             field for field in ("file", "cpu-only", "gpu-ids", "vram-budget-mib")
