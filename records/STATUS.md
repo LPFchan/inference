@@ -26,7 +26,11 @@ Patch chain in `patches/atomic-llama-cpp/`, applied in order by `Dockerfile`:
 - 2026-10-25: **DeepSeek-V4.1-Flash-1017 served from spark1+spark2** — the
   [MiaAI-Lab two-Spark TensorFold recipe](https://github.com/MiaAI-Lab/DeepSeek-v4.1-Flash-1017-2x-DGX-Sparks)
   at `27741e1` serves the EXL3 EAQ v1 2.9 bpw checkpoint at TP=2 with the full
-  1,048,576-token window, image input and DSpark drafting. spark2 (4 TB) is the
+  1,048,576-token window, image input and DSpark drafting, with drowzeys' Keys
+  abliteration overlay (`ABLIT=1`, `0bdc2036`, 104 attention tensors in layers
+  10-35) applied; the stock weight files were removed after it passed refusal,
+  arithmetic, tool-call and image checks at 53 (prose) and 72 (code) tok/s
+  through chat.lost.plus. spark2 (4 TB) is the
   head and API (`100.120.192.122:8888`); spark1 is the worker over the CX7 link
   (`192.168.100.0/24` and `192.168.101.0/24`, both rails, MTU 9000; NetworkManager
   `cx7-a`/`cx7-b`). spark2 exports its Hugging Face cache read-only to spark1 over
