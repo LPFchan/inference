@@ -681,3 +681,32 @@ def test_adopt_existing_stops_a_container_that_is_not_serving(mgr, monkeypatch):
 
     assert mgr.resident == {}
     assert stopped == ["mangchi-vllm-large"]
+
+
+def test_shutdown_stops_residents_by_default(mgr, monkeypatch):
+    run(mgr.load("small"))
+    stopped = []
+
+    async def _stop(name):
+        stopped.append(name)
+        mgr.resident.pop(name, None)
+        return True
+
+    monkeypatch.setattr(mgr, "_stop", _stop)
+    run(mgr.shutdown())
+    assert stopped == ["small"]
+
+
+def test_restart_leaves_residents_for_the_next_agent(mgr, monkeypatch):
+    run(mgr.load("small"))
+    stopped = []
+
+    async def _stop(name):
+        stopped.append(name)
+        return True
+
+    monkeypatch.setattr(mgr, "_stop", _stop)
+    mgr.keep_residents = True
+    run(mgr.shutdown())
+    assert stopped == []
+    assert "small" in mgr.resident

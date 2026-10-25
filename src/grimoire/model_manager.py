@@ -1431,10 +1431,17 @@ class ModelManager:
         """List all running active models."""
         return [name for name, active in self.active.items() if active.is_running()]
 
-    async def shutdown(self):
-        """Gracefully stop all active models."""
+    async def shutdown(self, keep_remote=False):
+        """Gracefully stop all active models.
+
+        keep_remote leaves models on other machines loaded (a restart, not a
+        shutdown); the next request for one finds it already resident.
+        """
         async with self._lock:
             for name, active in list(self.active.items()):
+                if keep_remote and active.cfg.get("backend") == BACKEND_VLLM_REMOTE:
+                    logger.info(f"Restart: leaving remote {name} loaded")
+                    continue
                 logger.info(f"Shutting down {name}")
                 await asyncio.to_thread(active.stop)
             self.active.clear()

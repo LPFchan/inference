@@ -194,7 +194,7 @@ async def lifespan(_app):
             await sampler_task
         except (asyncio.CancelledError, Exception):
             pass
-        await manager.shutdown()
+        await manager.shutdown(keep_remote=getattr(_app.state, "restarting", False))
         await close_proxy_client()
 
 
@@ -634,6 +634,23 @@ async def cors_proxy(request: Request):
         status_code=upstream.status_code,
         headers=resp_headers,
     )
+
+
+def _exit_soon():
+    """Let the response go out, then exit for the container's restart policy."""
+    asyncio.get_running_loop().call_later(0.5, os.kill, os.getpid(), signal.SIGTERM)
+
+
+@app.post("/restart")
+async def restart(request: Request):
+    """Restart the gateway, keeping models on other machines loaded.
+
+    A plain stop (docker restart, systemctl) is a shutdown and unloads them.
+    """
+    require_admin(request)
+    app.state.restarting = True
+    _exit_soon()
+    return {"status": "restarting"}
 
 
 @app.post("/internal/ensure-loaded")
