@@ -504,8 +504,8 @@ class ResidencyManager:
                 await asyncio.sleep(HOST_MEMORY_POLL_S)
         raise HTTPException(status_code=504, detail=f"'{r.name}' did not become healthy in {HEALTH_TIMEOUT_S}s")
 
-    async def load(self, name: str) -> dict:
-        task = self._ensure_load_task(name)
+    async def load(self, name: str, evict: bool = True) -> dict:
+        task = self._ensure_load_task(name, evict)
         try:
             return await asyncio.shield(task)
         except asyncio.CancelledError:
@@ -515,10 +515,10 @@ class ResidencyManager:
                 raise HTTPException(status_code=409, detail=f"load for '{name}' was cancelled")
             raise
 
-    def _ensure_load_task(self, name: str) -> "asyncio.Task":
+    def _ensure_load_task(self, name: str, evict: bool = True) -> "asyncio.Task":
         task = self._load_tasks.get(name)
         if task is None or task.done():
-            task = asyncio.ensure_future(self._load_locked(name))
+            task = asyncio.ensure_future(self._load_locked(name, evict))
             self._load_tasks[name] = task
             task.add_done_callback(lambda t, n=name: self._drop_task(self._load_tasks, n, t))
         return task
@@ -534,7 +534,7 @@ class ResidencyManager:
         if exc is not None:
             logger.error("lifecycle task for %s failed: %r", name, exc)
 
-    async def _load_locked(self, name: str) -> dict:
+    async def _load_locked(self, name: str, evict: bool = True) -> dict:
         async with self._lock:
             if self._closing:
                 raise HTTPException(status_code=503, detail="agent is shutting down")
@@ -549,6 +549,11 @@ class ResidencyManager:
                 await self._reap_group(r)
                 self.resident.pop(name, None)
             spec = self.specs[name]
+            if not evict and self._plan_evictions(spec.resident_gb, exclude=name):
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Loading '{name}' would unload another model; only an administrator can do that",
+                )
             await self._evict_until_fits(spec.resident_gb, exclude=name)
             cmd = build_launch_command(name, spec)
             env = {**os.environ, **spec.env}
@@ -748,8 +753,8 @@ def create_app(manager: Optional[ResidencyManager] = None) -> FastAPI:
         return await call_next(request)
 
     @app.post("/models/{name}/load")
-    async def load_model(name: str):
-        return await mgr.load(name)
+    async def load_model(name: str, evict: bool = True):
+        return await mgr.load(name, evict)
 
     @app.post("/models/{name}/unload")
     async def unload_model(name: str):

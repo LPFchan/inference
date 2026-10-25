@@ -100,9 +100,14 @@ def require_api(request):
     return sub, account_hash(sub)
 
 
+def is_admin(request) -> bool:
+    """Whether the loopback proxy asserted the common-auth administrator role."""
+    return request.headers.get(config.INTERNAL_AUTH_ROLE_HEADER, "") == "administrator"
+
+
 def require_admin(request):
     """Require the common-auth administrator role on manager routes."""
     sub, user_hash = require_api(request)
-    if request.headers.get(config.INTERNAL_AUTH_ROLE_HEADER, "") != "administrator":
+    if not is_admin(request):
         raise HTTPException(status_code=403, detail="Administrator access required")
     return sub, user_hash

@@ -168,6 +168,21 @@ def test_lru_eviction_succeeds_when_it_frees_enough(mgr):
     assert mgr.status()["used_gib"] == 80
 
 
+def test_load_without_eviction_refuses_instead_of_evicting(mgr):
+    mgr.budget_gib = 100
+    run(mgr.load("small"))   # 30 used, 70 free; large needs 80
+    with pytest.raises(HTTPException) as e:
+        run(mgr.load("large", evict=False))
+    assert e.value.status_code == 409
+    assert "only an administrator" in e.value.detail
+    assert set(mgr.resident) == {"small"}
+
+
+def test_load_without_eviction_still_loads_into_free_room(mgr):
+    out = run(mgr.load("small", evict=False))
+    assert out["status"] == "loaded"
+
+
 def test_eviction_blocked_when_all_pinned(mgr):
     run(mgr.load("pinned"))  # 40 pinned, 70 free
     # large needs 80 but only 70 free and the only resident is pinned.

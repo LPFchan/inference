@@ -22,8 +22,9 @@ REMOTE = {
 
 
 class _Response:
-    def __init__(self, payload=None):
+    def __init__(self, payload=None, status_code=200):
         self.payload = payload or {}
+        self.status_code = status_code
 
     def raise_for_status(self):
         return None
@@ -34,6 +35,8 @@ class _Response:
 
 class _Client:
     calls = []
+    params = []
+    response = None
 
     def __init__(self, *args, **kwargs):
         self.timeout = kwargs.get("timeout")
@@ -44,15 +47,14 @@ class _Client:
     def __exit__(self, *args):
         return False
 
-    def post(self, url):
+    def post(self, url, params=None):
         self.calls.append(url)
-        return _Response({"status": "ok"})
+        self.params.append(params)
+        return self.response or _Response({"status": "ok"})
 
 
 class _AsyncResponse(_Response):
-    def __init__(self, payload=None, status_code=200):
-        super().__init__(payload)
-        self.status_code = status_code
+    pass
 
 
 class _AsyncClient:
@@ -323,3 +325,29 @@ def test_external_remote_health_probe_reads_backend_health():
         _AsyncClient.responses = {backend_url: mm.httpx.ReadTimeout("slow")}
         assert asyncio.run(active.probe_remote_health()) is None
     assert _AsyncClient.calls == [backend_url] * 3
+
+
+def test_remote_load_without_eviction_asks_agent_not_to_evict():
+    _Client.calls, _Client.params = [], []
+    active = ActiveModel("alias", dict(REMOTE), port=None, gpu=None)
+    active.allow_evict = False
+    with patch.object(mm.httpx, "Client", _Client):
+        active.start()
+    assert _Client.params == [{"evict": "false"}]
+
+
+def test_remote_agent_refusal_surfaces_its_reason():
+    _Client.calls, _Client.params = [], []
+    _Client.response = _Response({"detail": "would unload another model"}, status_code=409)
+    active = ActiveModel("alias", dict(REMOTE), port=None, gpu=None)
+    try:
+        with patch.object(mm.httpx, "Client", _Client):
+            try:
+                active.start()
+            except RuntimeError as exc:
+                assert str(exc) == "would unload another model"
+            else:
+                raise AssertionError("a refused load must raise")
+    finally:
+        _Client.response = None
+    assert not active.is_running()

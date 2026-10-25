@@ -75,12 +75,20 @@ def _next_replica(model: str, replicas: list[dict]) -> dict:
     return replicas[i % len(replicas)]
 
 
-async def _ensure_loaded(client: httpx.AsyncClient, model: str) -> list[dict]:
+async def _ensure_loaded(client: httpx.AsyncClient, model: str, evict: bool) -> list[dict]:
     """Ask the manager to load a cold model, then re-read the route table."""
     try:
-        await client.post(f"{MANAGER_URL}/internal/ensure-loaded", json={"model": model}, timeout=600.0)
+        response = await client.post(f"{MANAGER_URL}/internal/ensure-loaded",
+                                     json={"model": model, "evict": evict}, timeout=600.0)
     except httpx.HTTPError as e:
         raise HTTPException(status_code=502, detail=f"manager unavailable: {e}")
+    if response.status_code == 409:
+        # A deliberate refusal (eviction needs an administrator), not an outage.
+        try:
+            detail = response.json().get("detail")
+        except (ValueError, AttributeError):
+            detail = None
+        raise HTTPException(status_code=409, detail=detail or f"Model '{model}' could not be loaded")
     return _routes.replicas(model)
 
 
@@ -150,7 +158,7 @@ async def proxy_v1(request: Request, path: str):
     client = get_proxy_client()
     replicas = _routes.replicas(model)
     if not replicas:
-        replicas = await _ensure_loaded(client, model)
+        replicas = await _ensure_loaded(client, model, identity.role == "administrator")
     if not replicas:
         raise HTTPException(status_code=503, detail=f"Model '{model}' not available")
 
