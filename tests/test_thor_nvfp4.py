@@ -12,7 +12,9 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "docker/mangchi-vllm"))
 from thor_nvfp4.contract import fc1_row_order, permuted_rows, scale_offset, supported
-from thor_nvfp4.install import HOOK, PATCHED_HOOK, adapt_python, device_body, patch_vllm
+from thor_nvfp4.install import (
+    HOOK, MIXED_HOOK, PATCHED_HOOK, PATCHED_MIXED_HOOK, adapt_python, device_body, patch_vllm,
+)
 
 
 class ThorNvfp4Contracts(unittest.TestCase):
@@ -151,10 +153,13 @@ class ThorNvfp4Contracts(unittest.TestCase):
                 permuted_rows(tokens)
 
     def test_registration_patch_is_idempotent_and_fail_closed(self):
-        patched = patch_vllm("before\n" + HOOK + "\nafter\n")
+        source = "before\n" + HOOK + "\n" + MIXED_HOOK + "\nafter\n"
+        patched = patch_vllm(source)
         self.assertIn(PATCHED_HOOK, patched)
+        self.assertIn(PATCHED_MIXED_HOOK, patched)
         self.assertEqual(patch_vllm(patched), patched)
-        for invalid in ("", HOOK + "\n" + HOOK, "_thor_nvfp4_make_method\n" + HOOK):
+        for invalid in ("", HOOK, source + HOOK, source + MIXED_HOOK,
+                        "_thor_nvfp4_make_method\n" + source):
             with self.assertRaises(ValueError):
                 patch_vllm(invalid)
 

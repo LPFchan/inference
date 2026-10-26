@@ -31,13 +31,22 @@ PATCHED_HOOK = (
     "ModelOptNvFp4Config.FusedMoEMethodCls = _thor_nvfp4_make_method(ModelOptNvFp4FusedMoE)"
 )
 
+# MIXED_PRECISION checkpoints (NVFP4 experts beside MXFP8 linears) construct the
+# expert method directly instead of through the registration hook.
+MIXED_HOOK = """            if quant_algo == "NVFP4":
+                return ModelOptNvFp4FusedMoE("""
+PATCHED_MIXED_HOOK = """            if quant_algo == "NVFP4":
+                return ModelOptNvFp4Config.FusedMoEMethodCls("""
+
 
 def patch_vllm(text):
-    if text.count(PATCHED_HOOK) == 1 and HOOK not in text:
+    if (text.count(PATCHED_HOOK) == 1 and HOOK not in text
+            and text.count(PATCHED_MIXED_HOOK) == 1 and MIXED_HOOK not in text):
         return text
-    if text.count(HOOK) != 1 or "_thor_nvfp4_make_method" in text:
+    if (text.count(HOOK) != 1 or text.count(MIXED_HOOK) != 1
+            or "_thor_nvfp4_make_method" in text):
         raise ValueError("Pinned vLLM ModelOpt registration hook changed")
-    return text.replace(HOOK, PATCHED_HOOK)
+    return text.replace(HOOK, PATCHED_HOOK).replace(MIXED_HOOK, PATCHED_MIXED_HOOK)
 
 
 def adapt_python(name, text):

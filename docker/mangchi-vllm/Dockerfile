@@ -108,6 +108,15 @@ COPY docker/mangchi-vllm/vllm_ple_mmap.py /opt/venv/lib/python3.12/site-packages
 COPY docker/mangchi-vllm/patch_ple_mmap.py /tmp/patch_ple_mmap.py
 RUN python /tmp/patch_ple_mmap.py
 
+# FP4-Local-format checkpoints (NVIDIA/Local Inference Lab QAD): decode
+# CSF-compressed expert block scales at load (port of vllm#60646). Their NVFP4
+# n-gram table stays on SSD through VLLM_PLE_MMAP=1; vllm_ple_nvfp4 decodes the
+# gathered rows on the GPU (decode from vllm#56273).
+COPY docker/mangchi-vllm/vllm_csf_scales.py docker/mangchi-vllm/vllm_ple_nvfp4.py \
+     /opt/venv/lib/python3.12/site-packages/
+COPY docker/mangchi-vllm/patch_csf_scales.py /tmp/patch_csf_scales.py
+RUN python /tmp/patch_csf_scales.py
+
 # SM110 supports CUDA clusters in general, but rejects the cooperative top-k launch shape
 # used by Qwen3.8's QSA indexer. Route Thor through vLLM's persistent fallback.
 COPY docker/mangchi-vllm/patch_thor_qsa.py /tmp/patch_thor_qsa.py

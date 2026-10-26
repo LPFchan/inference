@@ -2,6 +2,8 @@
 
 Adapted from blazux/qwen3.8-Flash-DGX's Apache-2.0 ``vllm_ple_mmap.py``.
 The table stays in safetensors files and random rows are read through mmap.
+NVFP4 tables read packed rows and their block scales the same way and decode
+only the gathered rows on the GPU.
 """
 
 from __future__ import annotations
@@ -55,6 +57,7 @@ def _itemsize(dtype: str) -> int:
         "F16": 2,
         "F32": 4,
         "F8_E4M3": 1,
+        "U8": 1,
     }[dtype]
 
 
@@ -171,11 +174,13 @@ class _MmapNgramEmbedding(nn.Module):
         self.org_vocab_size = int(num_embeddings)
         self.embedding_dim = int(embedding_dim)
         self.table: MmapPleTable | None = None
+        self.scale_table: MmapPleTable | None = None
         self._zeros_dtype = torch.bfloat16
+        self._pinned: dict[int, torch.Tensor | None] = {}
 
     def _pinned_buffer(self, rows: int, row_bytes: int) -> torch.Tensor | None:
-        buffer = getattr(self, "_pinned", None)
-        if buffer is None or buffer.shape[0] < rows or buffer.shape[1] != row_bytes:
+        buffer = self._pinned.get(row_bytes)
+        if buffer is None or buffer.shape[0] < rows:
             try:
                 capacity = max(rows + rows // 2, 4096)
                 buffer = torch.empty(
@@ -183,8 +188,18 @@ class _MmapNgramEmbedding(nn.Module):
                 )
             except RuntimeError:
                 buffer = None
-            self._pinned = buffer
+            self._pinned[row_bytes] = buffer
         return buffer
+
+    def _to_device(self, rows: np.ndarray, device: torch.device) -> torch.Tensor:
+        count, row_bytes = rows.shape
+        staging = (
+            self._pinned_buffer(count, row_bytes) if device.type == "cuda" else None
+        )
+        if staging is not None:
+            staging[:count].numpy()[:] = rows
+            return staging[:count].to(device, non_blocking=True)
+        return torch.from_numpy(rows).to(device)
 
     def gather(self, ids: torch.Tensor) -> torch.Tensor:
         if self.table is None:
@@ -195,48 +210,74 @@ class _MmapNgramEmbedding(nn.Module):
             )
         ids_cpu = ids.detach().to("cpu", non_blocking=False).numpy().reshape(-1)
         unique_ids, inverse = np.unique(ids_cpu, return_inverse=True)
-        rows = self.table.gather(unique_ids)
-        count = rows.shape[0]
-        staging = (
-            self._pinned_buffer(count, self.table.row_bytes)
-            if ids.device.type == "cuda"
-            else None
-        )
-        if staging is not None:
-            staging[:count].numpy()[:] = rows
-            device_rows = staging[:count].to(ids.device, non_blocking=True)
-        else:
-            device_rows = torch.from_numpy(rows).to(ids.device)
+        device_rows = self._to_device(self.table.gather(unique_ids), ids.device)
         inverse_tensor = torch.from_numpy(inverse).to(ids.device, non_blocking=True)
+        if self.scale_table is not None:
+            scales = self._to_device(self.scale_table.gather(unique_ids), ids.device)
+            return self._decode_nvfp4(device_rows, scales, inverse_tensor).reshape(
+                *ids.shape, self.embedding_dim
+            )
         gathered = device_rows.view(self.table.torch_dtype)[inverse_tensor]
         return gathered.reshape(*ids.shape, self.embedding_dim)
+
+    def _decode_nvfp4(
+        self, packed: torch.Tensor, scales: torch.Tensor, inverse: torch.Tensor
+    ) -> torch.Tensor:
+        if getattr(self, "weight_scale_2", None) is None:
+            raise RuntimeError("NVFP4 PLE embedding is missing its global scale")
+        if not packed.is_cuda:
+            from vllm_ple_nvfp4 import _dequantize_rows
+
+            return _dequantize_rows(
+                packed[inverse],
+                scales[inverse].view(torch.float8_e4m3fn),
+                self.weight_scale_2,
+                self._zeros_dtype,
+            )
+        from vllm.triton_utils import triton
+        from vllm_ple_nvfp4 import _lookup_nvfp4_ple_embedding_kernel
+
+        output = torch.empty(
+            (inverse.numel(), self.embedding_dim),
+            dtype=self._zeros_dtype,
+            device=packed.device,
+        )
+        if inverse.numel():
+            _lookup_nvfp4_ple_embedding_kernel[(inverse.numel(),)](
+                packed,
+                scales,
+                self.weight_scale_2,
+                inverse,
+                output,
+                self.embedding_dim,
+                BLOCK_D=triton.next_power_of_2(self.embedding_dim),
+            )
+        return output
 
     forward = gather
 
 
 def _load_weight_scale(
     embedding: _MmapNgramEmbedding,
+    name: str,
     loaded_weight: torch.Tensor,
     device: torch.device,
 ) -> None:
+    """Register the table's global scale: FP8 weight_scale or NVFP4 weight_scale_2."""
     if loaded_weight.numel() != 1:
-        raise ValueError(
-            "FP8 PLE embedding weight_scale must contain exactly one value"
-        )
+        raise ValueError(f"PLE embedding {name} must contain exactly one value")
     scale = loaded_weight.to(device=device, dtype=torch.float32)
     if not torch.isfinite(scale).all() or not torch.all(scale > 0):
-        raise ValueError("FP8 PLE embedding weight_scale must be positive and finite")
-    embedding.register_parameter(
-        "weight_scale", nn.Parameter(scale, requires_grad=False)
-    )
+        raise ValueError(f"PLE embedding {name} must be positive and finite")
+    embedding.register_parameter(name, nn.Parameter(scale, requires_grad=False))
 
 
 def _find_shards(
-    model_path: str, layer_idx: int
+    model_path: str, layer_idx: int, suffix: str = "weight"
 ) -> tuple[dict[int, tuple[str, int, int]], str | None, int | None]:
     shard_pattern = re.compile(
         rf"layers\.{layer_idx}\.ple\.ple_embedding\.ngram_embedding\."
-        r"shard_(\d+)\.weight$"
+        rf"shard_(\d+)\.{suffix}$"
     )
     index_path = os.path.join(model_path, "model.safetensors.index.json")
     if os.path.exists(index_path):
@@ -292,47 +333,68 @@ def _setup_table(module: nn.Module) -> None:
             f"cannot extract the PLE layer index from {module._ple_mmap_prefix!r}"
         )
     layer_idx = int(match.group(1))
-    shards, dtype, columns = _find_shards(model_path, layer_idx)
-    if not shards or dtype not in _DTYPES or columns != module.head_dim:
-        raise RuntimeError(
-            f"invalid PLE mmap table: shards={len(shards)}, dtype={dtype}, "
-            f"columns={columns}, expected_columns={module.head_dim}"
-        )
     parts = int(module.split_ngram_parts)
     vocab_size = int(embedding.org_vocab_size)
     shard_size = math.ceil(vocab_size / parts)
-    expected_indexes = set(range(parts))
-    if set(shards) != expected_indexes:
-        missing = sorted(expected_indexes - set(shards))
-        extra = sorted(set(shards) - expected_indexes)
-        raise RuntimeError(f"PLE mmap shard set mismatch: missing={missing}, extra={extra}")
-    for index, (_, _, rows) in shards.items():
-        expected = max(0, min(shard_size, vocab_size - index * shard_size))
-        if rows != expected:
+
+    def open_table(
+        suffix: str, dtypes: dict, columns_expected: int, found=None
+    ) -> MmapPleTable:
+        shards, dtype, columns = found or _find_shards(model_path, layer_idx, suffix)
+        if not shards or dtype not in dtypes or columns != columns_expected:
             raise RuntimeError(
-                f"PLE shard {index} has {rows} rows; expected {expected}"
+                f"invalid PLE mmap table {suffix}: shards={len(shards)}, "
+                f"dtype={dtype}, columns={columns}, expected_columns={columns_expected}"
             )
-    table = MmapPleTable(
-        shards,
-        shard_size,
-        columns * _itemsize(dtype),
-        _DTYPES[dtype],
-        workers=_env_int("VLLM_PLE_MMAP_WORKERS", 32),
-        chunk=_env_int("VLLM_PLE_MMAP_CHUNK", 2048),
-    )
-    if _env_int("VLLM_PLE_MMAP_PREWARM", 0):
-        logger.info(
-            "PLE mmap: prewarming %.1f GiB",
-            table.rows_total * table.row_bytes / 2**30,
+        expected_indexes = set(range(parts))
+        if set(shards) != expected_indexes:
+            missing = sorted(expected_indexes - set(shards))
+            extra = sorted(set(shards) - expected_indexes)
+            raise RuntimeError(
+                f"PLE mmap shard set mismatch: missing={missing}, extra={extra}"
+            )
+        for index, (_, _, rows) in shards.items():
+            expected = max(0, min(shard_size, vocab_size - index * shard_size))
+            if rows != expected:
+                raise RuntimeError(
+                    f"PLE shard {index} has {rows} rows; expected {expected}"
+                )
+        return MmapPleTable(
+            shards,
+            shard_size,
+            columns * _itemsize(dtype),
+            dtypes[dtype],
+            workers=_env_int("VLLM_PLE_MMAP_WORKERS", 32),
+            chunk=_env_int("VLLM_PLE_MMAP_CHUNK", 2048),
         )
-        table.prewarm()
-    embedding.table = table
+
+    # NVFP4 tables store packed uint8 rows (two values per byte) plus per-row
+    # block scales. Decide from the checkpoint: the global weight_scale_2 can
+    # arrive in a later load_weights call than the shards.
+    found = _find_shards(model_path, layer_idx)
+    nvfp4 = found[1] == "U8"
+    if nvfp4:
+        tables = [
+            open_table("weight", {"U8": torch.uint8}, module.head_dim // 2, found),
+            open_table(
+                "weight_scale", {"F8_E4M3": torch.uint8}, module.head_dim // 16
+            ),
+        ]
+    else:
+        tables = [open_table("weight", _DTYPES, module.head_dim, found)]
+    size_gib = sum(t.rows_total * t.row_bytes for t in tables) / 2**30
+    if _env_int("VLLM_PLE_MMAP_PREWARM", 0):
+        logger.info("PLE mmap: prewarming %.1f GiB", size_gib)
+        for table in tables:
+            table.prewarm()
+    embedding.table = tables[0]
+    embedding.scale_table = tables[1] if nvfp4 else None
     logger.info(
-        "PLE mmap: layer %d uses %d SSD-backed shards, %.1f GiB, dtype %s",
+        "PLE mmap: layer %d uses %d SSD-backed shards, %.1f GiB, %s",
         layer_idx,
-        len(shards),
-        table.rows_total * table.row_bytes / 2**30,
-        dtype,
+        len(tables[0].maps),
+        size_gib,
+        "NVFP4" if nvfp4 else tables[0].torch_dtype,
     )
 
 
@@ -389,11 +451,13 @@ def apply(cls: type) -> None:
         remaining = []
         loaded: set[str] = set()
         for name, weight in weights:
-            if name.startswith("ngram_embedding.shard_") and name.endswith(".weight"):
-                loaded.add("ngram_embedding.weight")
-            elif name == "ngram_embedding.weight_scale":
+            if name.startswith("ngram_embedding.shard_"):
+                # Shard rows (and NVFP4 block scales) are read from SSD on demand.
+                loaded.add("ngram_embedding." + name.rpartition(".")[2])
+            elif name in ("ngram_embedding.weight_scale", "ngram_embedding.weight_scale_2"):
                 _load_weight_scale(
                     self.ngram_embedding,
+                    name.rpartition(".")[2],
                     weight,
                     self.layer_multipliers.device,
                 )
