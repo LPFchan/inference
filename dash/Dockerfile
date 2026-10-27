@@ -16,7 +16,7 @@ COPY . .
 RUN npm run build
 
 
-FROM nginx:1.27-alpine AS runtime
+FROM nginx:1.30-alpine AS runtime
 
 # Rendered at container start by the base image's envsubst entrypoint, so the
 # API key is supplied as an environment variable rather than baked into a layer.
