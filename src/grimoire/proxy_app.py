@@ -11,6 +11,8 @@ Each worker is an independent process with its own event loop and pooled client,
 so throughput scales with --workers past the single-process ceiling.
 """
 
+import asyncio
+import contextlib
 import copy
 import json
 import logging
@@ -35,6 +37,14 @@ MANAGER_URL = os.environ.get("GRIMOIRE_MANAGER_URL", "http://127.0.0.1:9000").rs
 # Stateless /v1/* suffixes the proxy workers serve directly; everything else
 # (chat/completions, responses, models, props, ...) forwards to the manager.
 STATELESS_SUFFIXES = {"embeddings", "rerank", "reranking"}
+
+# Cloudflare drops a proxied response that sends no bytes for ~120s, and a cold
+# prefill of a long prompt can stay silent longer than that. Silent event
+# streams get a ping this often: Anthropic's own ping event on /v1/messages,
+# an SSE comment (which every SSE client ignores) everywhere else.
+SSE_KEEPALIVE_SECONDS = 15.0
+ANTHROPIC_PING = b'event: ping\ndata: {"type": "ping"}\n\n'
+SSE_COMMENT_PING = b": ping\n\n"
 
 app = FastAPI(title="Grimoire Proxy", version="0.1.0")
 
@@ -107,6 +117,37 @@ def _enforce_expected_identity(request: Request, identity: AuthIdentity) -> None
         raise HTTPException(status_code=409, detail="Browser account changed; reload and retry")
 
 
+async def _with_sse_keepalive(chunks, ping, interval=SSE_KEEPALIVE_SECONDS):
+    """Yield `chunks`, inserting `ping` whenever the stream is silent for `interval`.
+
+    Pings go out only between events, so they never split an upstream event.
+    """
+    it = chunks.__aiter__()
+    pending = None
+    tail = b"\n\n"  # last bytes sent; an event may end across two chunks
+    try:
+        while True:
+            if pending is None:
+                pending = asyncio.ensure_future(it.__anext__())
+            done, _ = await asyncio.wait({pending}, timeout=interval)
+            if not done:
+                if tail.endswith((b"\n\n", b"\r\n\r\n")):
+                    yield ping
+                continue
+            task, pending = pending, None
+            try:
+                chunk = task.result()
+            except StopAsyncIteration:
+                return
+            tail = (tail + chunk)[-4:]
+            yield chunk
+    finally:
+        if pending is not None:
+            pending.cancel()
+            with contextlib.suppress(BaseException):
+                await pending
+
+
 async def _forward_to_manager(
     request: Request, path: str, body: bytes, identity: AuthIdentity
 ) -> StreamingResponse:
@@ -121,12 +162,20 @@ async def _forward_to_manager(
     )
     upstream = await client.send(req, stream=True)
 
+    chunks = upstream.aiter_raw()
+    if upstream.headers.get("content-type", "").startswith("text/event-stream"):
+        ping = ANTHROPIC_PING if path.rstrip("/").endswith("v1/messages") else SSE_COMMENT_PING
+        chunks = _with_sse_keepalive(chunks, ping)
+
     async def body_iter():
         try:
-            async for chunk in upstream.aiter_raw():
+            async for chunk in chunks:
                 yield chunk
         finally:
-            await upstream.aclose()
+            try:
+                await chunks.aclose()
+            finally:
+                await upstream.aclose()
 
     return StreamingResponse(body_iter(), status_code=upstream.status_code,
                              headers=_backend_response_headers(upstream.headers))
