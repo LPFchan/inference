@@ -23,6 +23,17 @@ Patch chain in `patches/atomic-llama-cpp/`, applied in order by `Dockerfile`:
 
 ## Recent Changes
 
+- 2026-10-29: **Qwen3-ASR Mac training is operational** — a separate MLX
+  workflow prepares speaker/text/audio-disjoint adaptation data with frozen
+  FLEURS exclusions, trains decoder LoRA, resumes checkpoints and refines with
+  audio-conditioned GRPO. Actual starter runs complete 200 SFT and 50 GRPO
+  updates on the 24 GB M4 Pro, peaking at 4.02 GB MLX allocation. On 105 small
+  development clips, SFT improves primary errors; this GRPO run trails SFT.
+  No adapted Qwen checkpoint is deployed. Nemotron HTTPS transcription is
+  restored and verified after the training slots. Procedure:
+  [`training/qwen_asr`](../training/qwen_asr/README.md); measured evidence:
+  [`RSH-20261029-002`](research/RSH-20261029-002-qwen-asr-sft-rl.md).
+
 - 2026-10-29: **Mac transcription is live** — `transcribe.lost.plus` serves
   Nemotron 3.5 Transcribe 30B-A4B as a 19.26 GB MLX INT4 export on yeowoolmac's
   The Rest partition (M4 Pro, 24 GB). The inference Common Auth gateway and a

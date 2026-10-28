@@ -1,0 +1,6 @@
+mlx==0.32.4
+mlx-audio @ git+https://github.com/Blaizzy/mlx-audio.git@c1e429151c56ce4057c62709f958df998e301d3f
+mlx-lm==0.31.3
+soundfile==0.13.1
+jiwer==4.0.0
+pyarrow>=18,<24
