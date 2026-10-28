@@ -127,6 +127,11 @@ limits may increase, while data/model/code/hyperparameters must match. A changed
 recipe starts a new run. Sampling and utterance selection use per-step seeds.
 The lock refuses duplicate jobs writing the same run directory.
 
+On resume, `latest.json` selects the published checkpoint. A run interrupted
+before its first checkpoint restarts from the same seeded initialization.
+Unpublished checkpoint directories and metrics beyond the saved step are
+preserved under `interrupted/` before replay, so a failed save can be retried.
+
 `metrics.jsonl` records losses, gradient norms, time, MLX allocation and GRPO
 reward/advantage/completions. Initial/final `dev-*.json` record greedy transcripts
 and supervised losses; by default four clips per language. This is a plumbing

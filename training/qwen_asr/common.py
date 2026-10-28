@@ -4,6 +4,8 @@ import importlib.util
 import json
 import math
 from pathlib import Path
+import shutil
+import time
 
 ROOT = Path(__file__).resolve().parents[2]
 _spec = importlib.util.spec_from_file_location("stt_score", ROOT / "scripts/stt-score.py")
@@ -34,6 +36,39 @@ def atomic_json(path, data):
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n")
     temporary.replace(path)
+
+
+def recover_uncommitted_updates(directory, checkpoint_step):
+    """Preserve interrupted work, then replay only beyond the published checkpoint."""
+    directory = Path(directory)
+    metrics = directory / "metrics.jsonl"
+    lines = metrics.read_text().splitlines() if metrics.exists() else []
+    kept = []
+    for index, line in enumerate(lines):
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            if index != len(lines) - 1:
+                raise
+            continue  # a crash may leave the last metric write incomplete
+        if event["step"] <= checkpoint_step:
+            kept.append(line)
+    orphans = [p for p in directory.glob("step-*")
+               if p.is_dir() and p.name[5:].isdigit() and int(p.name[5:]) > checkpoint_step]
+    if len(kept) == len(lines) and not orphans:
+        return
+    recovery = directory / "interrupted" / str(time.time_ns())
+    recovery.mkdir(parents=True)
+    if metrics.exists():
+        shutil.copy2(metrics, recovery / "metrics.jsonl")
+        temporary = metrics.with_suffix(".jsonl.tmp")
+        temporary.write_text("".join(line + "\n" for line in kept))
+        temporary.replace(metrics)
+    for path in orphans:
+        path.rename(recovery / path.name)
+    atomic_json(recovery / "recovery.json", {"checkpoint_step": checkpoint_step,
+                "replayed_metric_lines": len(lines) - len(kept),
+                "unpublished_checkpoints": [p.name for p in orphans]})
 
 
 def reward(reference, hypothesis, language):

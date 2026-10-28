@@ -74,3 +74,22 @@ def test_grpo_gradient_increases_rewarded_token_probability():
         assert all((v < 0 if advantage > 0 else v > 0) for v in grad.tolist())
     loss = trainer.grpo_loss(old, old, old, 0.0, 0.02)
     assert float(loss.item()) == pytest.approx(0)
+
+
+@pytest.mark.parametrize("checkpoint_step", [0, 2])
+def test_resume_preserves_unsaved_work_and_replays_from_published_checkpoint(tmp_path, checkpoint_step):
+    import json
+    from common import recover_uncommitted_updates
+    original = "".join(json.dumps(dict(step=i)) + "\n" for i in range(1, 4)) + '{"step":'
+    (tmp_path / "metrics.jsonl").write_text(original)
+    (tmp_path / "step-000003").mkdir()
+    (tmp_path / "step-000003/adapters.safetensors").write_bytes(b"incomplete")
+    recover_uncommitted_updates(tmp_path, checkpoint_step)
+    active = [json.loads(line)["step"] for line in (tmp_path / "metrics.jsonl").read_text().splitlines()]
+    assert active == list(range(1, checkpoint_step + 1))
+    recovery, = (tmp_path / "interrupted").iterdir()
+    assert (recovery / "metrics.jsonl").read_text() == original
+    assert (recovery / "step-000003/adapters.safetensors").read_bytes() == b"incomplete"
+    assert not (tmp_path / "step-000003").exists()
+    recover_uncommitted_updates(tmp_path, checkpoint_step)
+    assert list((tmp_path / "interrupted").iterdir()) == [recovery]
