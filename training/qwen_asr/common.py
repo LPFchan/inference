@@ -36,7 +36,7 @@ def atomic_json(path, data):
     temporary.replace(path)
 
 
-def reward(reference, hypothesis, language):
+def reward(reference, hypothesis, language, korean_wer_weight=0.0):
     """CER for CJK, WER for English; no learned reward model or teacher calls."""
     import jiwer
     ref, hyp = normalize(reference), normalize(hypothesis)
@@ -44,6 +44,8 @@ def reward(reference, hypothesis, language):
         error = jiwer.wer(ref, hyp)
     else:
         error = jiwer.cer(ref.replace(" ", ""), hyp.replace(" ", ""))
+    if language == "ko" and korean_wer_weight:
+        error = (1 - korean_wer_weight) * error + korean_wer_weight * jiwer.wer(ref, hyp)
     return max(-1.0, 1.0 - error)
 
 

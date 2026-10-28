@@ -74,3 +74,43 @@ def test_grpo_gradient_increases_rewarded_token_probability():
         assert all((v < 0 if advantage > 0 else v > 0) for v in grad.tolist())
     loss = trainer.grpo_loss(old, old, old, 0.0, 0.02)
     assert float(loss.item()) == pytest.approx(0)
+
+
+def test_korean_spacing_can_receive_word_error_reward():
+    reference, hypothesis = "정말 좋은 하루", "정말좋은 하루"
+    assert reward(reference, hypothesis, "ko") == 1
+    assert reward(reference, hypothesis, "ko", korean_wer_weight=0.5) < 1
+
+
+def evaluation_rows(extra=True):
+    refs = {"en": "some english words", "ko": "정말 좋은 하루", "ja": "日本語音声", "zh": "中文语音"}
+    return {f"{lang}-{i}": {"id": f"{lang}-{i}", "language": lang, "reference": ref,
+            "hypothesis": ref + (" wrong" if lang in ("en", "ko") else "錯") if extra else ref,
+            "ended": True} for lang, ref in refs.items() for i in range(12)}
+
+
+def test_selection_accepts_real_gain_and_rejects_ties():
+    from selection import assess
+    anchor = evaluation_rows()
+    better = evaluation_rows(False)
+    assert assess(better, anchor, anchor, repetitions=40)["passes"]
+    assert not assess(anchor, anchor, anchor, repetitions=40)["passes"]
+
+
+def test_selection_retains_english_guard():
+    from selection import assess
+    anchor, candidate = evaluation_rows(), evaluation_rows(False)
+    for r in candidate.values():
+        if r["language"] == "en":
+            r["hypothesis"] += " many additional incorrect words"
+    result = assess(candidate, anchor, anchor, repetitions=40)
+    assert not result["passes"]
+    assert not result["gates"]["english_limit"]
+
+
+def test_selection_refuses_changed_evaluation_references():
+    from selection import assess
+    anchor, candidate = evaluation_rows(), evaluation_rows(False)
+    candidate["ko-0"]["reference"] = "다른 문장"
+    with pytest.raises(ValueError, match="references differ"):
+        assess(candidate, anchor, anchor, repetitions=40)

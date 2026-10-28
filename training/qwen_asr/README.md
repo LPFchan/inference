@@ -150,3 +150,39 @@ oMLX settings unchanged, runs the bounded command, then restores the backend
 and checks health on normal exit or handled interruption. SIGKILL/power loss
 can prevent shell cleanup; inspect the slot directory and LaunchAgent before
 recovering. This is temporary service downtime, not concurrent serving/training.
+
+## Ongoing single-worker hill-climb
+
+The operator authorized continued work under
+[DEC-20261029-001](../../records/decisions/DEC-20261029-001-qwen-asr-autoresearch.md).
+The [repo contract](../../skills/autoresearch/SKILL.md) defines the frozen
+validation score, per-language safeguards, independent-seed confirmation,
+resource bounds and stop behavior. Nemotron stays unloaded during this program.
+
+`prefetch.py` downloads pinned public expansion sources with verified cache
+reuse, per-file progress and retryable failures. `freeze_development.py` freezes
+FLEURS **validation** while excluding the original test. `assemble.py` attaches
+that same validation manifest to each immutable training snapshot. Prepared
+training examples remain distinct from validation/test by text and audio hash;
+known source speaker holdouts are retained.
+
+`cycle.py ROOT --runtime PYTHON --initial-root STARTER_ROOT --protected-test TEST`
+waits for calibration and the first expanded snapshot, then runs one GPU job at
+a time. It starts 5,000-step SFT and 1,000-step GRPO trials, confirms provisional
+wins with a second training seed, and updates its internal incumbent only when
+both pass `selection.py`. Profiles rotate; closed parent/data/code/profile
+combinations are not repeated. A new `latest-data.json` pointing to an immutable
+data directory opens new trials. When authorized recipes are exhausted, it
+reports `needs-new-hypothesis` for this harness to supply a genuinely new idea.
+
+GRPO can mix Korean WER into CER with `--korean-wer-weight 0.5`, so Korean spacing
+errors can generate a learning signal. The default remains CER-only for the
+original starter recipe. The fixed starting reference may be an already-adapted
+SFT-derived checkpoint. This is a new experimental recipe, not a claim that the
+longer RL stage improves quality.
+
+Freeze a source archive for each running controller; do not edit its code in
+place. `loop-state.json` and each trial's `verdict.json` are runtime evidence.
+The harness records scored trials and accepted state in the repo's LOG history,
+STATUS and PLANS. Creating `ROOT/STOP` terminates the owned child and stops new
+trials; preserve checkpoints/data and do not restore serving automatically.
