@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 
 from common import (LANGUAGES, advantages, atomic_json, load_manifests, reward,
-                    sha256, training_targets)
+                    recover_uncommitted_updates, sha256, training_targets)
 
 MODEL_ID = "mlx-community/Qwen3-ASR-1.7B-8bit"
 MODEL_REVISION = "a8379a2e2f9e313c9292cdf1af4055ab56d50d55"
@@ -165,13 +165,16 @@ def run(a):
     optimizer = optim.AdamW(learning_rate=a.learning_rate, weight_decay=0.0)
     start = 0
     if a.resume:
-        latest = json.loads((a.output / "latest.json").read_text())
-        checkpoint = a.output / latest["directory"]
-        info = load_adapter(checkpoint)
-        if sha256(checkpoint / "optimizer.safetensors") != info["optimizer_sha256"]:
-            raise ValueError("changed optimizer state")
-        optimizer.state = tree_unflatten(list(mx.load(str(checkpoint / "optimizer.safetensors")).items()))
-        start = info["step"]
+        latest_path = a.output / "latest.json"
+        if latest_path.exists():
+            latest = json.loads(latest_path.read_text())
+            checkpoint = a.output / latest["directory"]
+            info = load_adapter(checkpoint)
+            if sha256(checkpoint / "optimizer.safetensors") != info["optimizer_sha256"]:
+                raise ValueError("changed optimizer state")
+            optimizer.state = tree_unflatten(list(mx.load(str(checkpoint / "optimizer.safetensors")).items()))
+            start = info["step"]
+        recover_uncommitted_updates(a.output, start)
     eos = model._tokenizer.eos_token_id
     if eos not in model._eos_token_ids():
         raise ValueError("tokenizer EOS disagrees with runtime")

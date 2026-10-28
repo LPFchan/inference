@@ -160,6 +160,8 @@ def loop(a):
                     if repeated['candidate_score']<result['candidate_score']:best=confirm
                     state['incumbent']={'evaluation':str(evaluation(best,profile)),
                         'checkpoint':str(checkpoint(best)),'name':best.name}
+            verdict['checkpoint']=str(checkpoint(best))
+            verdict['evaluation']=str(evaluation(best,profile))
             atomic_json(out/'verdict.json',verdict)
             state['next_profile']=(profile_index+1)%len(PROFILES)
             state['closed'].append(key)

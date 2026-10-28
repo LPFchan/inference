@@ -213,3 +213,72 @@ def test_clean_expansion_preserves_holdouts_and_distinct_recordings(tmp_path):
     assert sum(r["source"] == SOURCES["aishell"][0] for r in train) == 1
     assert (output / "dev.jsonl").read_bytes() == (core / "dev.jsonl").read_bytes()
     assert metadata["dev_clips"] == len(dev) == 4
+
+
+@pytest.mark.parametrize("checkpoint_step", [0, 2])
+def test_resume_preserves_unsaved_work_and_replays_from_published_checkpoint(tmp_path, checkpoint_step):
+    import json
+    from common import recover_uncommitted_updates
+    original = "".join(json.dumps(dict(step=i)) + "\n" for i in range(1, 4)) + '{"step":'
+    (tmp_path / "metrics.jsonl").write_text(original)
+    (tmp_path / "step-000003").mkdir()
+    (tmp_path / "step-000003/adapters.safetensors").write_bytes(b"incomplete")
+    recover_uncommitted_updates(tmp_path, checkpoint_step)
+    active = [json.loads(line)["step"] for line in (tmp_path / "metrics.jsonl").read_text().splitlines()]
+    assert active == list(range(1, checkpoint_step + 1))
+    recovery, = (tmp_path / "interrupted").iterdir()
+    assert (recovery / "metrics.jsonl").read_text() == original
+    assert (recovery / "step-000003/adapters.safetensors").read_bytes() == b"incomplete"
+    assert not (tmp_path / "step-000003").exists()
+    recover_uncommitted_updates(tmp_path, checkpoint_step)
+    assert list((tmp_path / "interrupted").iterdir()) == [recovery]
+
+
+def test_controller_verdict_identifies_the_selected_confirmation(tmp_path, monkeypatch):
+    import json
+    from types import SimpleNamespace
+    import cycle
+    from common import atomic_json
+    for name in ("base", "sft200", "grpo50"):
+        folder = tmp_path / "calibration" / name
+        folder.mkdir(parents=True)
+        atomic_json(folder / "run.json", {"status": "complete"})
+        atomic_json(folder / "dev-initial.json", {"rows": list(evaluation_rows().values())})
+    for name in ("data-raw5", "data-v001-16h"):
+        folder = tmp_path / name
+        folder.mkdir()
+        atomic_json(folder / "data.json", {})
+    # Keep the base as parent; both new candidates improve, with the repeated
+    # seed scoring better. Exercise the actual controller's persisted evidence.
+    monkeypatch.setattr(cycle, "normalized_score", lambda *_: 1.0)
+    scores = iter((0.8, 0.7))
+    monkeypatch.setattr(cycle, "assess", lambda *_: {"passes": True, "candidate_score": next(scores)})
+
+    class CompletedProcess:
+        returncode = 0
+        pid = 123
+
+        def __init__(self, args, **kwargs):
+            out = Path(args[args.index("--output") + 1])
+            out.mkdir(parents=True, exist_ok=True)
+            atomic_json(out / "run.json", {"status": "complete"})
+            atomic_json(out / "latest.json", {"directory": "step-005000"})
+            atomic_json(out / "dev-step-005000.json", {"rows": list(evaluation_rows(False).values())})
+            if out.name.endswith("-confirm"):
+                (tmp_path / "STOP").touch()
+
+        def poll(self):
+            return 0
+
+    monkeypatch.setattr(cycle.subprocess, "Popen", CompletedProcess)
+    monkeypatch.setattr(cycle.signal, "signal", lambda *_: None)
+    monkeypatch.setattr(cycle.shutil, "disk_usage", lambda *_: SimpleNamespace(free=200 * (1 << 30)))
+    cycle.loop(SimpleNamespace(root=tmp_path, runtime=Path("python"),
+                              initial_root=tmp_path / "initial", protected_test=tmp_path / "test"))
+    state = json.loads((tmp_path / "loop-state.json").read_text())
+    verdict, = (tmp_path / "trials").glob("*/verdict.json")
+    accepted = json.loads(verdict.read_text())
+    assert accepted["status"] == "accepted"
+    assert "-confirm/" in accepted["checkpoint"]
+    assert accepted["checkpoint"] == state["incumbent"]["checkpoint"]
+    assert accepted["evaluation"] == state["incumbent"]["evaluation"]
