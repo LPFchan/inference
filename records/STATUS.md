@@ -30,9 +30,13 @@ Patch chain in `patches/atomic-llama-cpp/`, applied in order by `Dockerfile`:
   smokes pass; missing/invalid credentials return 401 and unsupported language
   returns 400. Twenty preflight clips, including each language's longest
   frozen FLEURS file, pass with measured MLX peak memory of 20.18 GB. oMLX is
-  stopped and disabled while transcription uses this Mac. The complete
-  2,624-clip comparison is running; the original eight predictions remain
-  unchanged. Installation and operation: [`deploy/yeowoolmac`](../deploy/yeowoolmac/README.md).
+  stopped and disabled while transcription uses this Mac. All nine pipelines
+  now have 2,624 validated predictions; the original eight files and accuracy
+  counts are unchanged. The new INT4 model's primary errors are EN 5.35% WER,
+  KO 13.77% WER, JA 4.13% CER and ZH 8.52% CER. It improves Japanese over Qwen,
+  while MAI remains best in all four languages. Full methods/results:
+  [`RSH-20261029-001`](research/RSH-20261029-001-nemotron-transcribe-mac.md).
+  Installation and operation: [`deploy/yeowoolmac`](../deploy/yeowoolmac/README.md).
 
 - 2026-10-28: **Silent streams stay open through Cloudflare** — a cold
   prefill of a long prompt on DeepSeek-V4.1-Flash-1017 sends `message_start`
