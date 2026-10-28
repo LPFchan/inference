@@ -114,3 +114,102 @@ def test_selection_refuses_changed_evaluation_references():
     candidate["ko-0"]["reference"] = "다른 문장"
     with pytest.raises(ValueError, match="references differ"):
         assess(candidate, anchor, anchor, repetitions=40)
+
+
+def test_aishell_ingestion_excludes_official_dev_and_test():
+    from expand_clean import aishell_training_member
+    assert aishell_training_member("train/S0002/BAC009S0002W0122.wav")
+    assert not aishell_training_member("dev/S0724/BAC009S0724W0122.wav")
+    assert not aishell_training_member("test/S0901/BAC009S0901W0122.wav")
+
+
+def test_distinct_training_recordings_may_repeat_a_sentence():
+    validate_splits([row("1", "같은 문장", "speaker-a", "a"),
+                     row("2", "같은 문장", "speaker-b", "b")],
+                    [row("3", "다른 문장", "speaker-c", "c")], [])
+
+
+def test_clean_expansion_preserves_holdouts_and_distinct_recordings(tmp_path):
+    np = pytest.importorskip("numpy")
+    sf = pytest.importorskip("soundfile")
+    pa = pytest.importorskip("pyarrow")
+    import pyarrow.parquet as pq
+    import io
+    import json
+    import tarfile
+    from types import SimpleNamespace
+    from common import atomic_json, load_manifests, sha256
+    from expand_clean import build, source_holdout
+    from prefetch import SOURCES
+
+    root, core, output = (tmp_path / name for name in ("root", "core", "output"))
+    for folder in (root, core / "wav", output):
+        folder.mkdir(parents=True)
+    rng = np.random.default_rng(42)
+
+    def audio_bytes():
+        stream = io.BytesIO()
+        sf.write(stream, rng.uniform(-0.1, 0.1, 32000), 16000, format="WAV", subtype="PCM_16")
+        return stream.getvalue()
+
+    manifests = {}
+    for split in ("train", "dev"):
+        rows = []
+        for lang in ("en", "ko", "ja", "zh"):
+            identifier = f"{split}-{lang}"
+            wav = core / "wav" / f"{identifier}.wav"
+            wav.write_bytes(audio_bytes())
+            rows.append(dict(id=identifier, language=lang, text=identifier, speaker=identifier,
+                             audio=f"wav/{identifier}.wav", sha256=sha256(wav), seconds=2,
+                             source="fixture", source_revision="fixture", license="fixture"))
+        manifest = core / f"{split}.jsonl"
+        manifest.write_text("".join(json.dumps(r) + "\n" for r in rows))
+        manifests[f"{split}_sha256"] = sha256(manifest)
+    protected = root / "test.jsonl"
+    protected.write_text(json.dumps(dict(reference="sealed test", sha256="sealed")) + "\n")
+    atomic_json(core / "data.json", {**manifests, "protected_manifest_sha256": sha256(protected)})
+    completed = {}
+
+    def cached(key, content):
+        path = root / str(len(completed))
+        path.write_bytes(content)
+        source = SOURCES[key.split("/")[0]]
+        completed[key] = dict(path=str(path), sha256=sha256(path), source=source[0],
+                              revision=source[1], license=source[2])
+
+    speaker = next(i for i in range(100) if not source_holdout(f"zeroth/{i}"))
+    table = pa.Table.from_pylist([
+        dict(id=str(i), speaker_id=speaker, text=text, audio=dict(bytes=audio_bytes()))
+        for i, text in enumerate(("같은 추가 문장", "같은 추가 문장", "sealed test", "dev-ko"))])
+    stream = io.BytesIO()
+    pq.write_table(table, stream)
+    cached("zeroth/data/train-00000.parquet", stream.getvalue())
+
+    cached("cv17/transcript/ja/train.tsv",
+           b"client_id\tpath\tsentence\nallowed\ta.mp3\tnew Japanese\nheld\tb.mp3\tshould exclude\n")
+    cached("cv17/transcript/ja/dev.tsv", b"client_id\tpath\tsentence\nheld\tc.mp3\tsource holdout\n")
+
+    def archive_content(members, mode="w"):
+        stream = io.BytesIO()
+        with tarfile.open(fileobj=stream, mode=mode) as archive:
+            for name in members:
+                data = audio_bytes()
+                member = tarfile.TarInfo(name)
+                member.size = len(data)
+                archive.addfile(member, io.BytesIO(data))
+        return stream.getvalue()
+
+    cached("cv17/audio/ja/train/00000.tar", archive_content(["a.mp3", "b.mp3"]))
+    cached("aishell/data_aishell/transcript/aishell_transcript_v0.8.txt",
+           "train1 中 文 音 频\ndev1 不该训练\ntest1 也不该训练\n".encode())
+    cached("aishell/data_aishell/wav/S0002.tar.gz", archive_content([
+        "train/S0002/train1.wav", "dev/S0724/dev1.wav", "test/S0901/test1.wav"], "w:gz"))
+    atomic_json(root / "prefetch.json", dict(status="complete", completed=completed))
+    build(SimpleNamespace(root=root, core=core, output=output, protected_test=protected,
+                          aishell_hours=40, seed=42))
+    train, dev, metadata = load_manifests(output, protected)
+    assert len(train) == 8
+    assert sum(r["text"] == "같은 추가 문장" for r in train) == 2
+    assert sum(r["source"] == SOURCES["aishell"][0] for r in train) == 1
+    assert (output / "dev.jsonl").read_bytes() == (core / "dev.jsonl").read_bytes()
+    assert metadata["dev_clips"] == len(dev) == 4

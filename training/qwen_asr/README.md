@@ -166,6 +166,16 @@ that same validation manifest to each immutable training snapshot. Prepared
 training examples remain distinct from validation/test by text and audio hash;
 known source speaker holdouts are retained.
 
+`expand_clean.py ROOT --core DATA_V001 --output NEW_DATA --protected-test TEST`
+curates already-cached Zeroth Korean, remaining validated Common Voice Japanese
+and AISHELL training recordings. It keeps the same frozen development set and
+English replay, reserves official source holdouts, verifies every used download
+and prepared WAV, and publishes `data.json` after verification. Distinct training
+recordings may share a sentence; held-out text remains excluded. It never starts
+a model or downloads new files. YODAS captions remain quarantined because the
+Japanese pool includes translated lecture material; language/alignment checks
+are required before treating it as Japanese speech supervision.
+
 `cycle.py ROOT --runtime PYTHON --initial-root STARTER_ROOT --protected-test TEST`
 waits for calibration and the first expanded snapshot, then runs one GPU job at
 a time. It starts 5,000-step SFT and 1,000-step GRPO trials, confirms provisional

@@ -13,18 +13,24 @@
 - Selection set: frozen 1,295 FLEURS validation clips, manifest
   `c75a4b05069eba7d11a6b50efd7bb11d43800fc66e49b761cd08fb86354acf01`.
   The original 2,624-clip test and nine predictions stay sealed.
-- Incumbent: original MLX 8-bit anchor until calibration/confirmed selection.
-  Base, starter SFT-200 and starter GRPO-50 calibration is running.
-- Live on Mac `main`: `qwen-calibrate` (`/tmp/stt-qwen-calibrate.log`),
-  `qwen-intake` (`/tmp/stt-qwen-intake.log`). Expanded training preparation
-  completed 9,852 train clips, approximately 16.5 hours, in `data-raw5`.
-- Root: `~/models/stt/qwen3-asr-hillclimb-20261029`; `qwen-cycle`
-  (`/tmp/stt-qwen-cycle.log`) waits for calibration, assembles immutable data and
-  runs 5,000-step SFT / 1,000-step spacing-aware GRPO trials with confirmation.
-  `loop-state.json` and per-trial proposals/verdicts hold runtime evidence.
-  Check all processes/saved files before launching replacements.
-- Closed starter observation: GRPO-50 trails SFT-200 on the old 105-clip dev
-  sample; larger-data/spacing-aware experiments are new hypotheses, not repeats.
+- Incumbent: original MLX 8-bit anchor. All three larger-set calibrations
+  completed; both starter adapters fail the selection gates. EN/KO WER and
+  JA/ZH CER are 4.25/10.85/4.62/6.61% for the anchor,
+  6.10/18.80/6.76/7.86% for SFT-200 and 6.15/18.94/6.76/7.86% for GRPO-50.
+  The small starter sample's gains do not generalize to this development set.
+- Live on Mac `main`: `qwen-cycle` (`/tmp/stt-qwen-cycle.log`) runs the first
+  5,000-update SFT trial from the untouched base. Immutable `data-v001-16h`
+  has 9,852 train clips / 16.5054 hours and the same frozen development set.
+  Fifteen focused tests pass on the Mac; early updates have finite losses and
+  approximately 4.1 GB measured MLX peak allocation. No long trial is scored yet.
+- Pinned intake completed all 157 files without final errors. Cached Zeroth,
+  validated CV17 Japanese and AISHELL train speech feed the next clean snapshot.
+  YODAS remains quarantined pending audio-language/alignment checks because
+  caption inspection found translated lecture material in the Japanese pool.
+- Root: `~/models/stt/qwen3-asr-hillclimb-20261029`. `loop-state.json` and
+  per-trial proposals/verdicts hold runtime evidence. A 10-minute heartbeat
+  wakes this thread with `continue`; its handle is retained in `monitor.json`.
+  Check existing processes/saved files before launching replacements.
 
 ## Migration Summary
 
