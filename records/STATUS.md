@@ -1,6 +1,6 @@
 # Current Status
 
-**Snapshot:** 2026-10-28
+**Snapshot:** 2026-10-29
 **Posture:** The Grimoire gateway serves local llama.cpp models and admits remote vLLM models through Mangchi's residency agent. The local engine remains TheTom's turboquant fork with turbo4 KV. Mangchi model artifacts are managed separately from the gateway.
 **Focus:** Serve Qwen3.8 Flash-Next and the grugthink 27B as Mangchi's registered remote models (one resident at a time) and continue Flash-Next's its decode, prefix-cache, and CUDA-graph optimization program.
 
@@ -22,6 +22,17 @@ Patch chain in `patches/atomic-llama-cpp/`, applied in order by `Dockerfile`:
 `GRIMOIRE_LLAMA_CPP_CUDA_GRAPHS=ON` is the Dockerfile default. The trail of investigation and the decision rationale are in `records/research/RSH-20260523-001`, `RSH-20260526-001` (validation matrix), `RSH-20260526-002` (V3 design, deferred), and `RSH-20260526-003` (V2+ON shipping decision with the bench data and upstream survey).
 
 ## Recent Changes
+
+- 2026-10-29: **Mac transcription is live** — `transcribe.lost.plus` serves
+  Nemotron 3.5 Transcribe 30B-A4B as a 19.26 GB MLX INT4 export on yeowoolmac's
+  The Rest partition (M4 Pro, 24 GB). The inference Common Auth gateway and a
+  dedicated Mac tunnel protect the loopback backend. All four language HTTPS
+  smokes pass; missing/invalid credentials return 401 and unsupported language
+  returns 400. Twenty preflight clips, including each language's longest
+  frozen FLEURS file, pass with measured MLX peak memory of 20.18 GB. oMLX is
+  stopped and disabled while transcription uses this Mac. The complete
+  2,624-clip comparison is running; the original eight predictions remain
+  unchanged. Installation and operation: [`deploy/yeowoolmac`](../deploy/yeowoolmac/README.md).
 
 - 2026-10-28: **Silent streams stay open through Cloudflare** — a cold
   prefill of a long prompt on DeepSeek-V4.1-Flash-1017 sends `message_start`

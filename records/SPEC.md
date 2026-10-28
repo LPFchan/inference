@@ -4,7 +4,7 @@
 **Canonical repo:** `git@github.com:LPFchan/inference.git`
 **Project id:** `inference`
 **Operator:** LPFchan
-**Last updated:** 2026-10-20
+**Last updated:** 2026-10-29
 
 ## Mission
 
@@ -132,6 +132,23 @@ These decisions were locked before Phase 1 and are not subject to renegotiation 
 - Chat settings proxy token management to common auth. Global/per-service mode, mint/rotate, listing, and revocation use common auth as the single source of truth. Plaintext secrets are neither stored nor listed by Grimoire.
 - Browser sign-in and global sign-out use absolute `auth.lost.plus` URLs. The web UI does not store bearer credentials in local storage.
 - The browser MCP proxy accepts only HTTP(S) targets whose resolved addresses are globally routable; it cannot originate requests to loopback, private, link-local, tailnet, or otherwise non-routable control-plane addresses.
+
+### Contract I: Mac Speech Transcription
+
+- `https://transcribe.lost.plus/v1/audio/transcriptions` serves
+  `nemotron-3.5-transcribe-30b-a4b-4bit` on yeowoolmac's The Rest partition
+  (M4 Pro, 24 GB), independently of Grimoire's model lifecycle and presets.
+- The loopback inference gateway uses the Common Auth contract in H. The
+  dedicated Mac tunnel reaches the gateway; the MLX backend remains loopback.
+- Requests accept one audio file and an optional advertised ISO language code.
+  Omitting the language selects automatic recognition. Responses support JSON,
+  verbose JSON and text for completed recordings.
+- One persistent MLX worker serializes inference and verifies the exported
+  model's checksums before strict loading. Model discovery and transcription
+  responses identify the exact deployment artifact.
+- Serving limits and installation are owned by
+  [`deploy/yeowoolmac/README.md`](../deploy/yeowoolmac/README.md). The deployed
+  text-transcription export omits MTP and timestamp heads.
 
 ## Pinned Upstream Repos
 
