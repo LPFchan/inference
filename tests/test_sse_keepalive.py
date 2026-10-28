@@ -40,6 +40,11 @@ class SseKeepaliveTests(unittest.TestCase):
         out = self.run_keepalive(b"data: {\"half\":", 0.18, b" 1}\n\n")
         self.assertEqual(out, [b"data: {\"half\":", b" 1}\n\n"])
 
+    def test_pings_after_event_end_split_across_chunks(self):
+        out = self.run_keepalive(b"event: message_start\ndata: {}\n", b"\n", 0.18, b"data: 1\n\n")
+        self.assertGreaterEqual(out.count(ANTHROPIC_PING), 2)
+        self.assertEqual(out.index(ANTHROPIC_PING), 2)
+
     def test_busy_stream_passes_through_unchanged(self):
         chunks = [b"data: %d\n\n" % i for i in range(5)]
         self.assertEqual(self.run_keepalive(*chunks), chunks)

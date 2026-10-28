@@ -124,14 +124,14 @@ async def _with_sse_keepalive(chunks, ping, interval=SSE_KEEPALIVE_SECONDS):
     """
     it = chunks.__aiter__()
     pending = None
-    at_boundary = True
+    tail = b"\n\n"  # last bytes sent; an event may end across two chunks
     try:
         while True:
             if pending is None:
                 pending = asyncio.ensure_future(it.__anext__())
             done, _ = await asyncio.wait({pending}, timeout=interval)
             if not done:
-                if at_boundary:
+                if tail.endswith((b"\n\n", b"\r\n\r\n")):
                     yield ping
                 continue
             task, pending = pending, None
@@ -139,8 +139,7 @@ async def _with_sse_keepalive(chunks, ping, interval=SSE_KEEPALIVE_SECONDS):
                 chunk = task.result()
             except StopAsyncIteration:
                 return
-            if chunk:
-                at_boundary = chunk.endswith((b"\n\n", b"\r\n\r\n"))
+            tail = (tail + chunk)[-4:]
             yield chunk
     finally:
         if pending is not None:
