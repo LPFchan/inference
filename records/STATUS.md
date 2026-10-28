@@ -1,6 +1,6 @@
 # Current Status
 
-**Snapshot:** 2026-10-25
+**Snapshot:** 2026-10-28
 **Posture:** The Grimoire gateway serves local llama.cpp models and admits remote vLLM models through Mangchi's residency agent. The local engine remains TheTom's turboquant fork with turbo4 KV. Mangchi model artifacts are managed separately from the gateway.
 **Focus:** Serve Qwen3.8 Flash-Next and the grugthink 27B as Mangchi's registered remote models (one resident at a time) and continue Flash-Next's its decode, prefix-cache, and CUDA-graph optimization program.
 
@@ -23,6 +23,14 @@ Patch chain in `patches/atomic-llama-cpp/`, applied in order by `Dockerfile`:
 
 ## Recent Changes
 
+- 2026-10-28: **Silent streams stay open through Cloudflare** — a cold
+  prefill of a long prompt on DeepSeek-V4.1-Flash-1017 sends `message_start`
+  and then nothing until the first token, and Cloudflare dropped it after
+  ~120 seconds (524), which Claude Code retried for up to half an hour. The
+  public proxy now pings any event stream that has been silent for 15 seconds
+  (Anthropic's ping event on `/v1/messages`, an SSE comment elsewhere). A cold
+  random-text prompt with 190 seconds of prefill answered 200 through
+  chat.lost.plus.
 - 2026-10-26: **qwen3.6-35B-A3B served from yeowoolmac's The Rest
   partition** — rayray916's oQ3 MLX quant (~3.6 bpw, 15.8 GiB with the
   vision tower, no MTP head) of the Heretic-abliterated Qwen3.6-35B-A3B runs
