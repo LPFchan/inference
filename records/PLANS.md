@@ -1,5 +1,17 @@
 # Plans
 
+## Qwen3-ASR multilingual adaptation
+
+Adapt Qwen3-ASR-1.7B to Korean, Japanese and Mandarin with balanced supervised
+LoRA training and English replay, followed by a separate GRPO refinement
+experiment. Preserve the existing frozen FLEURS test set for final evaluation;
+select checkpoints only on independent development speech. Establish real
+memory use and useful gradients on the 24 GB M4 Pro before larger runs.
+Architecture expansion remains conditional on evidence that adaptation needs
+additional capacity. Training must not deploy checkpoints automatically or
+change Grimoire. The repeatable procedure lives in
+[`training/qwen_asr`](../training/qwen_asr/README.md).
+
 ## Steady-State Architecture
 
 Single Bee binary (`Anbeeld/beellama.cpp`) serves DFlash (`--spec-type dflash`), PFlash (via standalone `pflash_daemon`), and normal traffic. Content-hash KV caching provides cross-conversation sysprompt reuse. Legacy `backend:dflash` daemon retired. See git history for the completed migration (Phases 1-7).
