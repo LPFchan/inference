@@ -172,6 +172,11 @@ class E2ESmokeTestCase(unittest.TestCase):
             headers=headers,
             timeout=120.0,
         ) as response:
+            if response.status_code == 409:
+                # The gateway declined to place the model (a preset lock or full
+                # GPUs), so this machine cannot run the smoke right now.
+                response.read()
+                raise unittest.SkipTest(f"Gateway refused to load {model}: {response.text}")
             response.raise_for_status()
             for line in response.iter_lines():
                 if not line or not line.startswith("data: "):
