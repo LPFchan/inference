@@ -13,6 +13,7 @@ LANGUAGE_NAMES = {"en": "English", "ko": "Korean", "ja": "Japanese", "zh": "Chin
 NEMOTRON_LOCALES = {"en": "en-US", "ko": "ko-KR", "ja": "ja-JP", "zh": "zh-CN"}
 MODEL_SPECS = json.loads((Path(__file__).resolve().parents[1] / "etc/stt-benchmark-models.json").read_text())
 MODEL_IDS = {name: spec["id"] for name, spec in MODEL_SPECS.items()}
+MLX_MODEL = "nemotron-3.5-transcribe-30b-a4b-4bit"
 
 
 def completed_paths(prediction_file, samples, model):
@@ -54,7 +55,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--model", choices=[*MODEL_IDS, "embeddinggemma-2-original", "embeddinggemma-2-open"], required=True)
+    parser.add_argument("--model", choices=[*MODEL_IDS, "embeddinggemma-2-original", "embeddinggemma-2-open", MLX_MODEL], required=True)
+    parser.add_argument("--mlx-model-dir", type=Path, help="Pinned MLX export used by the local transcription server")
     parser.add_argument("--url", default="http://127.0.0.1:8791/v1/audio/transcriptions")
     parser.add_argument("--batch-size", type=int, default=4, help="GPU batch size")
     parser.add_argument("--limit", type=int, default=0, help="Seeded sample per language; 0 evaluates the full test splits")
@@ -79,6 +81,15 @@ def main():
         metadata.update(model_id=MODEL_IDS[args.model], revision=MODEL_SPECS[args.model]["revision"])
     if args.model == "nemotron":
         metadata["num_lookahead_tokens"] = args.nemotron_lookahead
+    if args.model == MLX_MODEL:
+        if args.mlx_model_dir is None:
+            parser.error("--mlx-model-dir is required for the MLX benchmark")
+        from grimoire.stt_mlx_worker import prompt_for, MAX_TOKENS
+        conversion = args.mlx_model_dir / "conversion.json"
+        metadata.update(artifact_sha256=hashlib.sha256(conversion.read_bytes()).hexdigest(),
+                        conversion=json.loads(conversion.read_text()), max_tokens=MAX_TOKENS,
+                        prompts={lang: prompt_for(lang) for lang in LANGUAGE_NAMES},
+                        temperature=0, enable_thinking=False, prefill_step_size=256)
     metadata_path = args.output / f"{args.model}.metadata.json"
     check_metadata(metadata_path, metadata, require_existing=bool(done))
     if args.limit:
@@ -90,6 +101,13 @@ def main():
     if not samples:
         print("Already complete", flush=True)
         return
+    if args.model == MLX_MODEL:
+        import httpx
+        discovery = httpx.get(args.url.rsplit("/v1/", 1)[0] + "/v1/models", timeout=30)
+        discovery.raise_for_status()
+        active = next((item for item in discovery.json()["data"] if item["id"] == MLX_MODEL), {})
+        if active.get("artifact_sha256") != metadata["artifact_sha256"]:
+            raise ValueError("Server artifact differs from the frozen benchmark deployment")
     if args.model in MODEL_IDS:
         import torch
         revision = MODEL_SPECS[args.model]["revision"]
@@ -173,17 +191,25 @@ def main():
                     texts = processor.batch_decode(sequences, skip_special_tokens=True)
                 else:
                     import httpx
+                    data = {"model": args.model, "response_format": "verbose_json"}
+                    if args.model == MLX_MODEL:
+                        if hashlib.sha256(Path(paths[0]).read_bytes()).hexdigest() != batch[0]["sha256"]:
+                            raise ValueError(f"Audio disagrees with frozen manifest: {paths[0]}")
+                        data["language"] = language
                     with open(paths[0], "rb") as audio:
-                        response = httpx.post(args.url, data={"model": args.model, "response_format": "verbose_json"},
+                        response = httpx.post(args.url, data=data,
                                               files={"file": ("audio.wav", audio, "audio/wav")}, timeout=1800)
                     response.raise_for_status()
+                    if args.model == MLX_MODEL and response.headers.get("x-stt-artifact") != metadata["artifact_sha256"]:
+                        raise ValueError("Server artifact differs from the frozen benchmark deployment")
                     texts = [response.json()["text"]]
                 elapsed = time.perf_counter() - before
                 if len(texts) != len(batch):
                     raise RuntimeError("Backend returned the wrong batch size")
                 for row, text in zip(batch, texts):
+                    detail = {"inference": response.json()} if args.model == MLX_MODEL else {}
                     output.write(json.dumps({**row, "model": args.model, "hypothesis": text,
-                                             "batch_seconds": elapsed, "batch_samples": len(batch)}, ensure_ascii=False) + "\n")
+                                             "batch_seconds": elapsed, "batch_samples": len(batch), **detail}, ensure_ascii=False) + "\n")
                 print(f"{args.model} {language} {min(start + len(batch), len(group))}/{len(group)} ({elapsed:.2f}s)", flush=True)
 
 

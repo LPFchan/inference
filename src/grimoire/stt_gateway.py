@@ -1,4 +1,4 @@
-"""Dumpling's transcription gateway using the inference system's Common Auth."""
+"""Transcription gateway using the inference system's Common Auth."""
 from contextlib import asynccontextmanager
 import os
 
@@ -50,7 +50,7 @@ async def forward(request, path):
         raise HTTPException(503, "Transcription backend unavailable") from error
     return Response(upstream.content, status_code=upstream.status_code,
                     headers={key: value for key, value in upstream.headers.items()
-                             if key.lower() in {"content-type", "x-stt-model", "x-stt-seconds"}})
+                             if key.lower() in {"content-type", "x-stt-model", "x-stt-seconds", "x-stt-artifact"}})
 
 
 @app.get("/v1/models")

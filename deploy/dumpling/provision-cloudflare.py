@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Provision Dumpling STT ingress. Read the Cloudflare API token from stdin."""
+"""Provision dedicated STT ingress. Read the Cloudflare API token from stdin."""
 import json
+import argparse
 from pathlib import Path
 import sys
 import urllib.error
@@ -11,6 +12,10 @@ TUNNEL_NAME = "dumpling-stt"
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--tunnel-name", default=TUNNEL_NAME)
+    args = parser.parse_args()
+    tunnel_name = args.tunnel_name
     key = sys.stdin.readline().strip()
     if not key:
         raise SystemExit("A Cloudflare API token is required on stdin")
@@ -30,14 +35,14 @@ def main():
     zone = api("GET", "/zones?name=lost.plus")[0]
     account, zone_id = zone["account"]["id"], zone["id"]
     records = api("GET", f"/zones/{zone_id}/dns_records?name={HOSTNAME}")
-    tunnels = api("GET", f"/accounts/{account}/cfd_tunnel?is_deleted=false&name={TUNNEL_NAME}")
+    tunnels = api("GET", f"/accounts/{account}/cfd_tunnel?is_deleted=false&name={tunnel_name}")
     if tunnels:
         tunnel = tunnels[0]
     else:
         if records:
             raise RuntimeError("Hostname already has a DNS record; refusing to replace it")
         tunnel = api("POST", f"/accounts/{account}/cfd_tunnel",
-                     {"name": TUNNEL_NAME, "config_src": "cloudflare"})
+                     {"name": tunnel_name, "config_src": "cloudflare"})
     tunnel_id = tunnel["id"]
     target = tunnel_id + ".cfargotunnel.com"
     if any(record["type"] != "CNAME" or record["content"] != target for record in records):
@@ -60,8 +65,8 @@ def main():
     path.chmod(0o600)
     path.write_text(token + "\n")
     rule = {
-        "ref": "dumpling_stt_api_bic",
-        "description": "Allow ordinary HTTP clients for the authenticated Dumpling STT API",
+        "ref": tunnel_name.replace("-", "_") + "_api_bic",
+        "description": "Allow ordinary HTTP clients for the authenticated STT API",
         "expression": 'http.host eq "transcribe.lost.plus"',
         "action": "set_config", "action_parameters": {"bic": False}, "enabled": True,
     }
