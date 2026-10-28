@@ -23,14 +23,22 @@
   has 9,852 train clips / 16.5054 hours and the same frozen development set.
   Fifteen focused tests pass on the Mac; early updates have finite losses and
   approximately 4.1 GB measured MLX peak allocation. No long trial is scored yet.
-- Pinned intake completed all 157 files without final errors. Cached Zeroth,
-  validated CV17 Japanese and AISHELL train speech feed the next clean snapshot.
+- Pinned intake completed all 157 files without final errors. The next immutable
+  snapshot, `data-v002-clean`, is verified: 67,794 clips / 108.5695 hours,
+  including 48.95 h Korean, 13.12 h Japanese, 45.00 h Mandarin and 1.50 h English.
+  Its train manifest is `180554e0676f47a46ba99f8e5a2b9996ad1288bc5554b2e1492879010116273d`;
+  development bytes remain identical. `next-data-ready.json` retains the queued
+  snapshot; it does not change the active trial's inputs.
   YODAS remains quarantined pending audio-language/alignment checks because
   caption inspection found translated lecture material in the Japanese pool.
 - Root: `~/models/stt/qwen3-asr-hillclimb-20261029`. `loop-state.json` and
   per-trial proposals/verdicts hold runtime evidence. A 10-minute heartbeat
   wakes this thread with `continue`; its handle is retained in `monitor.json`.
   Check existing processes/saved files before launching replacements.
+- The active controller/trainer is frozen at `code/655b245`. Reviewed recovery
+  and selected-verdict fixes are prepared at `code/dc60e3f` for future runs.
+  Preserve existing run contracts; verify that any accepted confirmation's
+  persisted verdict identifies the same checkpoint as the incumbent.
 
 ## Migration Summary
 
