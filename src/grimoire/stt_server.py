@@ -1,4 +1,4 @@
-"""Private Dumpling STT backend, behind the local inference auth gateway."""
+"""Private native/MLX STT backend, behind the local inference auth gateway."""
 from __future__ import annotations
 
 import asyncio
@@ -7,6 +7,8 @@ import json
 import logging
 import os
 from pathlib import Path
+import hashlib
+import sys
 import tempfile
 
 from fastapi import FastAPI, HTTPException, Request
@@ -48,11 +50,11 @@ class NativeWorker:
         except ValueError as error:
             raise RuntimeError("Native worker returned invalid JSON") from error
 
-    async def transcribe(self, path):
+    async def transcribe(self, path, **options):
         async with self.lock:
             await self.start()
             try:
-                self.process.stdin.write((json.dumps({"path": str(path)}) + "\n").encode())
+                self.process.stdin.write((json.dumps({"path": str(path), **options}) + "\n").encode())
                 await self.process.stdin.drain()
                 result = await asyncio.wait_for(self._read(), 600)
             except BaseException:
@@ -76,15 +78,23 @@ class NativeWorker:
 
 
 def create_app(workers=None):
+    from grimoire.stt_mlx_worker import MODEL_NAME, LANGUAGES
+    artifact = None
     if workers is None:
-        build = Path(os.environ["GRIMOIRE_STT_BUILD"])
-        models = Path(os.environ["GRIMOIRE_STT_MODELS"])
-        workers = {
-            MODEL_NAMES[0]: NativeWorker([str(build / "eg2-original-worker"), str(models / "eg2-original-v5")]),
-            MODEL_NAMES[1]: NativeWorker([str(build / "eg2-open-worker"), str(models / "eg2-open-v2"),
-                                         os.environ.get("GRIMOIRE_STT_OPEN_FORM", "gpu-ane")]),
-        }
-    # M1 has 8 GB shared memory. Keep only one native model resident.
+        if os.environ.get("GRIMOIRE_STT_MLX_MODEL"):
+            model_dir = Path(os.environ["GRIMOIRE_STT_MLX_MODEL"])
+            artifact = hashlib.sha256((model_dir / "conversion.json").read_bytes()).hexdigest()
+            workers = {MODEL_NAME: NativeWorker([
+                sys.executable, "-m", "grimoire.stt_mlx_worker", "--model-dir", str(model_dir)])}
+        else:
+            build = Path(os.environ["GRIMOIRE_STT_BUILD"])
+            models = Path(os.environ["GRIMOIRE_STT_MODELS"])
+            workers = {
+                MODEL_NAMES[0]: NativeWorker([str(build / "eg2-original-worker"), str(models / "eg2-original-v5")]),
+                MODEL_NAMES[1]: NativeWorker([str(build / "eg2-open-worker"), str(models / "eg2-open-v2"),
+                                             os.environ.get("GRIMOIRE_STT_OPEN_FORM", "gpu-ane")]),
+            }
+    # Shared Apple memory requires one resident model and serialized inference.
     gate = asyncio.Lock()
     pending = 0
 
@@ -108,6 +118,8 @@ def create_app(workers=None):
                 await other.stop()
         async with worker.lock:
             await worker.start()
+        if name == MODEL_NAME and artifact and worker.metadata.get("artifact_sha256") != artifact:
+            raise RuntimeError("Loaded model differs from the server deployment")
         return worker
 
     @app.get("/health")
@@ -119,6 +131,10 @@ def create_app(workers=None):
         return {"object": "list", "data": [
             {"id": name, "object": "model", "owned_by": "inference", "capabilities": ["transcription"],
              "input_modalities": ["audio"], "languages": ["en"]}
+             if name != MODEL_NAME else
+             {"id": name, "object": "model", "owned_by": "inference", "capabilities": ["transcription"],
+              "input_modalities": ["audio"], "languages": list(LANGUAGES), "artifact_sha256": artifact,
+              "streaming": False, "max_audio_seconds": 600}
             for name in workers
         ]}
 
@@ -137,7 +153,7 @@ def create_app(workers=None):
             # Make Starlette's form parser consume the bounded, cached body.
             request._body = bytes(body)
             form = await request.form(max_files=1, max_fields=20)
-            name = form.get("model", MODEL_NAMES[0])
+            name = form.get("model", next(iter(workers)))
             if not isinstance(name, str):
                 raise HTTPException(400, "model must be a string")
             worker_for(name)
@@ -149,7 +165,10 @@ def create_app(workers=None):
                 raise HTTPException(400, "response_format must be json, verbose_json, or text")
             if form.get("stream") not in {None, "false", "False", "0"}:
                 raise HTTPException(400, "Streaming is not supported")
-            if form.get("language") not in {None, "en", "English", "english"}:
+            language = form.get("language")
+            if name == MODEL_NAME and language is not None and language not in LANGUAGES:
+                raise HTTPException(400, "Unsupported language; use an advertised ISO language code")
+            if name != MODEL_NAME and language not in {None, "en", "English", "english"}:
                 raise HTTPException(400, "These EG2 readers currently support English only")
             suffix = Path(upload.filename or "audio.wav").suffix[:12]
             with tempfile.TemporaryDirectory(prefix="grimoire-stt-") as directory:
@@ -159,13 +178,15 @@ def create_app(workers=None):
                         target.write(chunk)
                 async with gate:
                     worker = await load(name)
-                    result = await worker.transcribe(path)
+                    result = await worker.transcribe(path, language=language) if name == MODEL_NAME else await worker.transcribe(path)
             headers = {"x-stt-model": name, "x-stt-seconds": str(result["seconds"])}
+            if artifact:
+                headers["x-stt-artifact"] = artifact
             if response_format == "text":
                 return PlainTextResponse(result["text"], headers=headers)
             if response_format == "json":
                 return JSONResponse({"text": result["text"]}, headers=headers)
-            return JSONResponse({"task": "transcribe", "language": "english", **result}, headers=headers)
+            return JSONResponse({"task": "transcribe", "language": language if name == MODEL_NAME else "english", **result}, headers=headers)
         except HTTPException:
             raise
         except ValueError as error:

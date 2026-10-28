@@ -1,0 +1,5 @@
+mlx-audio[stt] @ git+https://github.com/Blaizzy/mlx-audio.git@c1e429151c56ce4057c62709f958df998e301d3f
+fastapi==0.149.0
+uvicorn==0.54.0
+python-multipart==0.0.32
+httpx==0.28.1
