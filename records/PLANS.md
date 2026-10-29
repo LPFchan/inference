@@ -5,11 +5,11 @@
 Follow [DEC-20261029-001](decisions/DEC-20261029-001-qwen-asr-autoresearch.md)
 and [the single-worker contract](../skills/autoresearch/SKILL.md).
 
-- Train longer on the new 16.5-hour snapshot, then confirm any improvement.
-- Add remaining Zeroth/CV17 and AISHELL training speech as immutable larger
-  snapshots with measured usable hours. Admit YODAS only after audio-language
-  and transcript-alignment checks; translated captions cannot be ASR targets.
-- Test mixed CER/WER Korean rewards against the equal-reward/spacing problem.
+- Compare lower-rate SFT and the verified 108.6-hour mixture against the frozen
+  base, confirming only recipes that pass all selection gates.
+- Finish mixed CER/WER Korean GRPO and measure full validation before adoption.
+- Admit YODAS only after audio-language and transcript-alignment checks;
+  translated captions cannot be ASR targets.
 - Mine hard training examples and test smaller learning rates/longer windows.
 - Expand adapter capacity or layers only after simpler adaptations plateau.
 

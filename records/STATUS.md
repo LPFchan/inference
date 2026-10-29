@@ -18,11 +18,17 @@
   JA/ZH CER are 4.25/10.85/4.62/6.61% for the anchor,
   6.10/18.80/6.76/7.86% for SFT-200 and 6.15/18.94/6.76/7.86% for GRPO-50.
   The small starter sample's gains do not generalize to this development set.
-- Live on Mac `main`: `qwen-cycle` (`/tmp/stt-qwen-cycle.log`) runs the first
-  5,000-update SFT trial from the untouched base. Immutable `data-v001-16h`
-  has 9,852 train clips / 16.5054 hours and the same frozen development set.
-  Fifteen focused tests pass on the Mac; early updates have finite losses and
-  approximately 4.1 GB measured MLX peak allocation. No long trial is scored yet.
+- Closed trial `sft-1716b8bc1e5c73e3`: 5,000 updates from the base on
+  `data-v001-16h` (9,852 clips / 16.5054 hours), LR 3e-5, seed 21774173.
+  Full validation primary errors are EN 4.69%, KO 19.21%, JA 6.80%, ZH 7.75%;
+  Korean CER also rises from 4.33% to 6.33%, so spacing alone does not explain
+  the regression. Score 1.4724 against base 1.0; paired delta CI95
+  [0.3733, 0.5746]. Rejected. All 5,000 updates are finite; optimization takes
+  84.90 minutes, the complete run 100.62 minutes, peak MLX allocation 4.15 GB.
+- Live on Mac `main`: `qwen-cycle` (`/tmp/stt-qwen-cycle.log`) runs
+  `grpo-103d0a8dd807ff06`, 1,000 spacing-aware GRPO updates on the same snapshot
+  at LR 1e-6, Korean WER weight 0.5. Its fixed reference is starter SFT-200;
+  the incumbent remains the untouched base. No RL verdict yet.
 - Pinned intake completed all 157 files without final errors. The next immutable
   snapshot, `data-v002-clean`, is verified: 67,794 clips / 108.5695 hours,
   including 48.95 h Korean, 13.12 h Japanese, 45.00 h Mandarin and 1.50 h English.
@@ -35,6 +41,8 @@
   per-trial proposals/verdicts hold runtime evidence. A 10-minute heartbeat
   wakes this thread with `continue`; its handle is retained in `monitor.json`.
   Check existing processes/saved files before launching replacements.
+  The completed trial's final adapter/optimizer, full outputs and verified
+  `first-long-sft-summary.json` are mirrored on Dumpling and Mangchi.
 - The active controller/trainer is frozen at `code/655b245`. Reviewed recovery
   and selected-verdict fixes are prepared at `code/dc60e3f` for future runs.
   Preserve existing run contracts; verify that any accepted confirmation's
