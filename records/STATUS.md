@@ -93,6 +93,10 @@
   159 focused tests pass, and both affected tests skip when MLX is blocked.
   The test-only fix leaves every frozen training/scoring file byte-identical.
   Evidence: `proposals/next-rl-after-parent-failure-20261030`.
+- **Data scout:** sampled WorldSpeech TRAIN labels have unspaced Korean,
+  edited Japanese minutes and Traditional Chinese; no trial is admitted.
+  AliMeeting label conventions remain unaudited beyond the scout's small
+  download cap. Evidence: `proposals/next-data-after-v008-loss-20261030`.
 - **Intake protocol deviation:** the data worker reports displaying one unique
   sealed test reference through two exclusion-related files, without using it.
   The parent did not reopen it. No new test prediction/scoring occurred;
