@@ -59,6 +59,8 @@ def arguments():
                    help="GRPO only: divide group-centered rewards by this fixed value instead of the group std")
     p.add_argument("--max-draws", type=int, default=1,
                    help="GRPO only: groups tried per update while all rewards are equal")
+    p.add_argument("--reference-member", action="store_true",
+                   help="GRPO only: add the TRAIN transcript to each group as an off-policy member")
     p.add_argument("--korean-wer-weight", type=float, default=0.0)
     p.add_argument("--sampler", choices=("replacement", "sentence-epoch"), default="replacement",
                    help="SFT only: draw with replacement, or each source sentence at most once")
@@ -82,6 +84,8 @@ def arguments():
     if a.advantage_scale is not None and (
             a.stage != "grpo" or not (math.isfinite(a.advantage_scale) and a.advantage_scale > 0)):
         p.error("--advantage-scale must be positive and finite, and is only valid for GRPO")
+    if a.reference_member and (a.stage != "grpo" or a.max_draws != 1):
+        p.error("--reference-member is only valid for GRPO with --max-draws 1")
     if a.base_reference and a.stage != "grpo":
         p.error("--base-reference is only valid for GRPO")
     if a.sampler != "replacement" and a.stage != "sft":
@@ -108,7 +112,7 @@ def training_settings(a):
     settings = {key: getattr(a, key) for key in (
         "stage", "accumulate", "rank", "scale", "learning_rate", "group_size",
         "temperature", "beta", "max_tokens", "seed", "memory_gb", "korean_wer_weight",
-        "base_reference", "advantage_scale", "sampler", "max_draws")}
+        "base_reference", "advantage_scale", "sampler", "max_draws", "reference_member")}
     # --steps is only a stop target; the decay endpoint is fixed for the whole run.
     settings["lr_schedule"] = None if a.lr_decay_start is None else {
         "decay_start": a.lr_decay_start, "decay_end": a.lr_decay_end}
@@ -478,19 +482,30 @@ def run(a):
                 if informative(rewards) or attempt + 1 == a.max_draws:
                     break
                 skipped.append({"id": row["id"], "rewards": rewards})
-            adv = advantages(rewards, a.advantage_scale)
+            members, member_rewards = list(group), list(rewards)
+            if a.reference_member:
+                # The TRAIN transcript joins the group under the unchanged reward. As an
+                # off-policy member its behaviour probability is one, so its ratio is its
+                # current probability; its advantage is never negative, so the clip cannot bind.
+                members.append((model._tokenizer.encode(row["text"], add_special_tokens=False) + [eos],
+                                row["text"], True))
+                member_rewards.append(reward(row["text"], row["text"], lang, a.korean_wer_weight))
+            adv = advantages(member_rewards, a.advantage_scale)
             current = dict(tree_flatten(model.trainable_parameters()))
             old_probs = [mx.stop_gradient(log_probs(model, *ctx, tokens, a.temperature))
-                         for tokens, _, _ in group]
+                         for tokens, _, _ in members]
             mx.eval(old_probs)
+            if a.reference_member:
+                reference_probability = float(mx.exp(old_probs[-1]).mean().item())
+                old_probs[-1] = mx.zeros_like(old_probs[-1])
             model.load_weights(list(reference.items()), strict=False)
             try:
                 ref_probs = [mx.stop_gradient(log_probs(model, *ctx, tokens, a.temperature))
-                             for tokens, _, _ in group]
+                             for tokens, _, _ in members]
                 mx.eval(ref_probs)
             finally:
                 model.load_weights(list(current.items()), strict=False)
-            for (tokens, _, _), old, ref, advantage in zip(group, old_probs, ref_probs, adv):
+            for (tokens, _, _), old, ref, advantage in zip(members, old_probs, ref_probs, adv):
                 def objective(m):
                     lp = log_probs(m, *ctx, tokens, a.temperature)
                     return grpo_loss(lp, old, ref, advantage, a.beta)
@@ -499,12 +514,15 @@ def run(a):
                 grads = grad if grads is None else tree_map(lambda x, y: x + y, grads, grad)
                 mx.eval(grads)
                 losses.append(float(loss.item()))
-            grads = tree_map(lambda g: g / a.group_size, grads)
+            grads = tree_map(lambda g: g / len(members), grads)
             diagnostics = {"id": row["id"], "rewards": rewards, "advantages": adv,
                            "zero_advantage": all(abs(x) < 1e-8 for x in adv),
                            "completions": [text for _, text, _ in group],
                            "draws": attempt + 1, "exhausted": not informative(rewards),
                            "skipped": skipped}
+            if a.reference_member:
+                diagnostics.update(reference_reward=member_rewards[-1],
+                                   reference_mean_probability=reference_probability)
         grads, norm = optim.clip_grad_norm(grads, max_norm=1.0)
         mx.eval(grads, norm)
         norm_value = float(norm.item())

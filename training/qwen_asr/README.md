@@ -204,6 +204,24 @@ experimental recipe with no accuracy claim. The value is stored in the
 exact-match resume contract; the default reproduces the previous rows,
 rollouts and updates.
 
+`--reference-member` (GRPO only, requires `--max-draws 1`) adds the training
+row's own transcript as an additional group member. Only the TRAIN transcript of the
+sampled row is used, never development or test text. With the default group size, the four policy samples,
+their row, seed and rewards are unchanged; the transcript is tokenized like
+SFT targets (one EOS) and scored with the unchanged reward, so it gets 1.
+Advantages are standardized and gradients averaged over every member (five
+with the default group size). The transcript's behaviour probability is taken as one, so its
+ratio is its current token probability at the training temperature: each transcript token is pushed in
+proportion to how likely the policy already finds it. Its advantage is never
+negative, so the clip cannot bind; the same KL penalty applies to its tokens.
+All-perfect groups still give zero advantage. Metrics keep the four sampled
+`rewards`/`completions`; `advantages` has five entries (transcript last), plus
+`reference_reward` and the transcript's mean token probability before the
+update (`reference_mean_probability`). This mixes a supervised term into the
+RL objective. It follows the mixed-policy GRPO idea of MP-GRPO and LUFFY
+without their exact losses or policy shaping, and carries no accuracy claim.
+The flag is stored in the exact-match resume contract.
+
 Use `--base-reference` to start directly from the untouched ASR base. Zero-delta
 LoRA initialization preserves that base as the starting policy and fixed KL
 reference. This flag is valid for GRPO, is mutually exclusive with
