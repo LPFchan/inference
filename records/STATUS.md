@@ -27,6 +27,7 @@
   | One-pass SFT selected, seed 21774173 | 3.99 | 10.58 | 4.29 | 4.94 | 0.8839 |
   | One-pass SFT confirmation, seed 21775174 | 4.06 | 10.55 | 4.53 | 5.24 | 0.9158 |
   | Late-decay SFT, closed | 4.01 | 10.47 | 4.52 | 5.14 | 0.9074 |
+  | 20-second TRAIN extension, closed | 3.96 | 10.44 | 4.34 | 5.18 | 0.8956 |
   | SFT-parent single-draw GRPO, closed | 3.99 | 10.50 | 4.25 | 5.30 | 0.8965 |
   | Uniform two-seed SFT average, closed | 3.89 | 10.67 | 4.49 | 5.14 | 0.9110 |
   | Base-init GRPO `bc8f2d8f6f19a369`, first seed | 4.15 | 10.41 | 4.63 | 5.65 | 0.9392 |
@@ -72,15 +73,15 @@
   Exact prefix/native acceptance and all 3,776 unique preregistered TRAIN draws
   verify. No confirmation or KSS run, and no start/end/shape/peak-LR/budget/seed
   variants from this result. Evidence: `parallel/sft-5866097875feb182`.
-- **Longer-clip SFT:** `parallel/sft-f42871766adb064c`, `main:qwen-sft-v008`,
-  uses unchanged `code/1412c1f`, seed 21774173 and 944 × 4 sentence-epoch draws.
-  v008 contains 10,154 clips/30.7208 h; every WAV, ordered v005 subset,
-  frozen validation, exclusion and both preregistered draw hashes validate.
-  Its separate ten-update longest-clip probe passes at 4.72094 GB physical
-  peak, below the registered 4.75 GB limit, with normal pressure. Intake
-  source is `code/ed0d1bb` (PR31). Both KSS contracts must use v008, including
-  a new matched base run; the v005 base cannot be substituted.
-  Evidence: `proposals/next-data-after-confirmed-20261030`.
+- **Closed 20-second TRAIN extension:** `sft-f42871766adb064c` completes 944
+  updates and all 1,295 validation clips, score 0.8956 vs incumbent 0.8839.
+  English/Korean improve, but Chinese exceeds its limit; gain, CJK and
+  confidence gates fail. Paired delta CI95 is [-0.0335,+0.0517], with no
+  empty/truncated outputs. The fixed 944-update recipe closes without
+  confirmation, KSS or cap/budget/LR/seed variants from this result.
+  v008's 10,154 clips/30.7208 h and all 3,776 unique preregistered draws verify;
+  memory preflight passed at 4.72094 GB. Preserve the data and frozen evidence
+  under `proposals/next-data-after-confirmed-20261030` and the trial directory.
 - **Reference-member GRPO:** `parallel/grpo-c34dabc489294800`, frozen
   `code/e49648d`, has accepted default first-update parity and a ten-update
   feature preflight. All 224 adapter/450 optimizer tensors match the retained
