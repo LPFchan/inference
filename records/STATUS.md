@@ -102,8 +102,12 @@
   `code/1a162b0`, same GRPO recipe with fixed advantage divisor 0.03), and
   `qwen-sft-sentence-confirm` → `parallel/sft-a11b015fbeee0082` (frozen
   `code/1412c1f`, base init, rank16, LR3e-5, seed21775174, 944×4 updates,
-  each drawn source sentence used at most once). One model worker slot is
-  free after the half-strength rejection. All three use v005 written-form
+  each drawn source sentence used at most once). The fourth worker,
+  `qwen-kss-sft-first`, runs the first SFT seed's preregistered 512-clip KSS
+  veto as `parallel/kss-v001-sft-ce33a3d7a476e297`, frozen `code/f119906`.
+  It overlaps FLEURS confirmation validation; both seeds still need both
+  unchanged acceptance checks. Its contract equals the retained KSS base
+  run except for the checkpoint. The three training runs use v005 written-form
   FLEURS train (8,966 clips / 25.14 h),
   supervisor `code/1ae82c5`, a 4.5 GiB MLX guideline and a 5 GB physical
   footprint budget. The first GRPO trial changes only TRAIN data relative

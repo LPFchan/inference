@@ -13,9 +13,18 @@ and [the four-slot contract](../skills/autoresearch/SKILL.md).
 - Preserve the rejected expanded-data snapshots. Use the merged literal-quote
   Common Voice parser when rebuilding intake to recover swallowed records.
 - Complete independent confirmations of one-sentence-epoch SFT and
-  written-form direct-base GRPO, then apply each registered separate-cohort
-  KSS veto to both passing seeds and recheck the incumbent before adoption.
+  written-form direct-base GRPO. Apply each registered separate-cohort KSS
+  veto to both seeds and recheck the incumbent before adoption; independent
+  evaluation work may overlap confirmation.
   Keep speaker/pretraining uncertainty explicit.
+- After one-pass SFT confirmation passes full FLEURS gates, test conditional
+  continuation `grpo-76cf17e6620b34fb`: unchanged frozen `code/3ee30f6`,
+  1,000 updates, fresh optimizer, and the first SFT adapter as both start and
+  fixed KL reference. Require unchanged gates against the current incumbent
+  and matching SFT parent on both independently seeded stages, then its own
+  KSS veto. No variants after a parent-relative first-seed failure. Accepted
+  scope, provenance and guard binding: program-root
+  `proposals/next-after-first-wins-20261030/parent-review.json`.
 - Score the live fixed-advantage-scale GRPO trial with unchanged FLEURS
   selection, independent confirmation and KSS veto.
 - Admit YODAS only after audio-language and transcript-alignment checks;
