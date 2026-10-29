@@ -11,6 +11,9 @@ and [the four-slot contract](../skills/autoresearch/SKILL.md).
   confirmation; both KSS vetoes and final incumbent recheck remain required.
 - Preserve the registered redraw cap and 1,000-update budget; its first-seed
   failure closes the recipe without cap or learning-setting sweeps.
+- Test the registered one-pass SFT late-linear decay, with endpoint 944
+  independent of partial stop targets. Pause at 500 for exact twin-prefix
+  tensor/optimizer verification before applying decay; keep all gates fixed.
 - Fill free slots with fresh TRAIN-grounded SFT and RL proposals. Preserve
   sealed evaluation inputs, current incumbent capture and source/data hashes;
   no parameter sweeps selected from validation errors.
