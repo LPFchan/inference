@@ -12,10 +12,11 @@ and [the four-slot contract](../skills/autoresearch/SKILL.md).
 
 - Preserve the rejected expanded-data snapshots. Use the merged literal-quote
   Common Voice parser when rebuilding intake to recover swallowed records.
-- Score the live FLEURS one-sentence-epoch SFT and both direct-base GRPO
-  trials, including fixed advantage scaling, with unchanged FLEURS selection,
-  independent-seed confirmation and the preregistered separate-cohort KSS
-  veto before adoption. Keep speaker/pretraining uncertainty explicit.
+- Complete the one-sentence-epoch SFT confirmation, then apply the registered
+  separate-cohort KSS veto to both passing seeds before any adoption. Keep
+  speaker/pretraining uncertainty explicit.
+- Score both live direct-base GRPO trials, including fixed advantage scaling,
+  with unchanged FLEURS selection, independent confirmation and KSS veto.
 - Score the live half-strength candidate `wa05-bce1c6b780deb965`,
   independently of the rejected raw endpoint's score; share
   an identical confirmation training run rather than launching it twice.

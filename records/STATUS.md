@@ -8,7 +8,8 @@
 
 - Selection: [DEC-20261029-001](decisions/DEC-20261029-001-qwen-asr-autoresearch.md),
   amended by [DEC-20261029-002](decisions/DEC-20261029-002-four-slot-qwen-asr-autoresearch.md).
-  Original MLX 8-bit anchor remains incumbent; all ten full trials are rejected.
+  Original MLX 8-bit anchor remains incumbent. Ten completed trials are
+  rejected; one-pass SFT passed its first seed and awaits confirmation/KSS.
   Frozen selection set: 1,295 FLEURS validation clips (EN 394, KO 226, JA 266,
   ZH 409), manifest `c75a4b05069eba7d11a6b50efd7bb11d43800fc66e49b761cd08fb86354acf01`.
   The original 2,624-clip test and all nine published predictions remain sealed.
@@ -27,6 +28,7 @@
   | SFT filtered expanded v2 `9b8cfb528c942378` | 4.53 | 15.98 | 5.22 | 7.53 | 1.2475 |
   | SFT unfiltered v006 `100c0aa4969e4145` | 5.67 | 19.63 | 7.12 | 7.88 | 1.5147 |
   | SFT written-form v005 `0812e3d33da50ccb` | 4.30 | 11.24 | 5.94 | 5.25 | 1.0390 |
+  | SFT one sentence-epoch `ce33a3d7a476e297`, first seed | 3.99 | 10.58 | 4.29 | 4.94 | 0.8839 |
 
 - The batch-32 trial completed 625 updates on the same ordered 20,000 draws,
   seed 21774173, LR 3e-5 and frozen source `code/655b245` as batch-4 × 5,000.
@@ -63,6 +65,20 @@
   rejected with no confirmation or adoption. The final checkpoint, frozen
   contracts, complete predictions, metrics and integrity report are retained
   under `parallel/sft-0812e3d33da50ccb` and verified on all three hosts.
+- One-sentence-epoch SFT `ce33a3d7a476e297` completed 944 × 4 updates and
+  all 1,295 validation clips. It passes every unchanged first-seed gate:
+  CJK score 0.8839, paired delta CI95 [-0.1740, -0.0511], with all four
+  primary errors below base and no empty or truncated outputs. All 3,776
+  actual TRAIN draws are unique source sentences and match the preregistered
+  sequence hash. Full evidence and final adapter/optimizer are retained under
+  its run directory and independently hash-verified on all three hosts.
+  Confirmation `sft-a11b015fbeee0082` is running from the identical frozen
+  source/recipe with seed 21775174. Both seeds must also pass their registered
+  separate-cohort KSS veto before adoption; the base remains incumbent.
+  The diagnostic score delta against the rejected 5,000-update SFT is
+  -0.1552, CI95 [-0.2512, -0.0551]. Sampling, recording choice, order,
+  acoustic coverage and update count change together, so this does not
+  establish repetition as the cause of the difference.
 - Operator authorized four research agents and at most four model workers,
   5 GB each / 20 GB total. Launcher PR21 is merged as `6497a26`. Three full
   training trials remain active under `main` tmux: `qwen-rl-fleurs` →
@@ -70,8 +86,8 @@
   reference, rank16, LR1e-5, seed21325231, 1,000 GRPO updates),
   `qwen-rl-fixed-scale` → `parallel/grpo-c3b0b430fab2ba0c` (frozen
   `code/1a162b0`, same GRPO recipe with fixed advantage divisor 0.03), and
-  `qwen-sft-sentence-epoch` → `parallel/sft-ce33a3d7a476e297` (frozen
-  `code/1412c1f`, base init, rank16, LR3e-5, seed21774173, 944×4 updates,
+  `qwen-sft-sentence-confirm` → `parallel/sft-a11b015fbeee0082` (frozen
+  `code/1412c1f`, base init, rank16, LR3e-5, seed21775174, 944×4 updates,
   each drawn source sentence used at most once). The fourth worker,
   `qwen-wa05`, evaluates `parallel/wa05-bce1c6b780deb965` with frozen
   `code/655b245` and the registered half-strength final SFT adapter.
@@ -100,8 +116,8 @@
   four pinned actual clip IDs and peaks at 4.246 GB physical / 3.886 GB MLX.
   Both complete TRAIN sequence hashes match before launch. This trial changes
   sampling, recording choice, order, acoustic coverage and training length
-  together; it does not isolate the effect of repetition. Full accuracy is
-  pending; confirmation seed 21775174 has registered trial `sft-a11b015fbeee0082`.
+  together; it does not isolate the effect of repetition. The first seed
+  passes full validation; confirmation and KSS acceptance remain pending.
 - A single half-strength variant of the written-form SFT is preregistered:
   scale only the final step-5,000 adapter's LoRA B tensors by 0.5, then evaluate
   all 1,295 clips with frozen `code/655b245`, regardless of the raw endpoint's
