@@ -28,6 +28,7 @@
   | One-pass SFT confirmation, seed 21775174 | 4.06 | 10.55 | 4.53 | 5.24 | 0.9158 |
   | Late-decay SFT, closed | 4.01 | 10.47 | 4.52 | 5.14 | 0.9074 |
   | 20-second TRAIN extension, closed | 3.96 | 10.44 | 4.34 | 5.18 | 0.8956 |
+  | SFT-parent cap-eight GRPO, closed | 3.95 | 10.64 | 4.22 | 5.51 | 0.9094 |
   | SFT-parent single-draw GRPO, closed | 3.99 | 10.50 | 4.25 | 5.30 | 0.8965 |
   | Uniform two-seed SFT average, closed | 3.89 | 10.67 | 4.49 | 5.14 | 0.9110 |
   | Base-init GRPO `bc8f2d8f6f19a369`, first seed | 4.15 | 10.41 | 4.63 | 5.65 | 0.9392 |
@@ -56,16 +57,14 @@
   each contract matches retained `parallel/kss-v001-base` except adapter SHA.
   Its resume-status reporting bug is frozen: monitor actual admission,
   prediction count and full summary. No baseline predictions are repeated.
-- **Active model job:** `main:qwen-rl-redraw` →
-  `parallel/grpo-ae448ecc75d8e01f` uses the registered cap of eight
-  same-language draws, frozen `code/eff20cb`, accepted in PR28 (`fbdfd86`).
-  It starts/references the selected SFT adapter, uses LR 1e-5/seed 21325231
-  and targets 1,000 updates. It resumed optimizer step 10 after native
-  acceptance: exact default tensors; 18 probe groups/four redraw steps;
-  4.263 GB physical peak with normal pressure. It must beat matching parent
-  and current incumbent, independently confirm both stages, pass both KSS
-  cohorts and recheck the incumbent. First-seed failure closes its cap.
-  Packet: `proposals/next-rl-confirmed-20261030/parent-implementation-binding.json`.
+- **Closed bounded-redraw GRPO:** `grpo-ae448ecc75d8e01f` finishes 1,000
+  updates and all 1,295 validation clips, scoring 0.9094 vs incumbent 0.8839.
+  Chinese exceeds its limit; gain, CJK and confidence gates fail. Paired
+  score-delta CI95 is [-0.0233,+0.0699], with no empty/truncated outputs.
+  All 2,508 rollout groups match the frozen draw rule; 966 updates carry
+  reward differences, with 34 exhausting the cap. Checkpoint/source/data
+  hashes verify. No confirmation or KSS, and no cap/LR/beta/step/temperature/
+  seed variants. Evidence: `parallel/grpo-ae448ecc75d8e01f`.
 - **Closed late-decay SFT:** `sft-5866097875feb182` completes 944 updates and
   all 1,295 validation clips, scoring 0.9074 vs incumbent 0.8839. Japanese and
   Chinese exceed their regression limits; gain, CJK and confidence gates fail.

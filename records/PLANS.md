@@ -6,11 +6,6 @@ Follow [DEC-001](decisions/DEC-20261029-001-qwen-asr-autoresearch.md),
 [DEC-002](decisions/DEC-20261029-002-four-slot-qwen-asr-autoresearch.md)
 and [the four-slot contract](../skills/autoresearch/SKILL.md).
 
-- Score the live bounded-redraw SFT-parent GRPO recipe against the current
-  incumbent and matching parent. Only a passing first seed enters independent two-stage
-  confirmation; both KSS vetoes and final incumbent recheck remain required.
-- Preserve the registered redraw cap and 1,000-update budget; its first-seed
-  failure closes the recipe without cap or learning-setting sweeps.
 - Score full reference-member GRPO: four sampled TRAIN transcripts plus their
   reference, with redraw off. Preserve current-incumbent/matching-parent gates,
   independent confirmation and both KSS vetoes; no setting sweeps after failure.
