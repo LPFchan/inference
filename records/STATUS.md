@@ -6,7 +6,8 @@
 
 ## Autoresearch — Qwen3-ASR
 
-- Selection: [DEC-20261029-001](decisions/DEC-20261029-001-qwen-asr-autoresearch.md).
+- Selection: [DEC-20261029-001](decisions/DEC-20261029-001-qwen-asr-autoresearch.md),
+  amended by [DEC-20261029-002](decisions/DEC-20261029-002-four-slot-qwen-asr-autoresearch.md).
   Original MLX 8-bit anchor remains incumbent; all five full trials are rejected.
   Frozen selection set: 1,295 FLEURS validation clips (EN 394, KO 226, JA 266,
   ZH 409), manifest `c75a4b05069eba7d11a6b50efd7bb11d43800fc66e49b761cd08fb86354acf01`.

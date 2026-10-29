@@ -1,21 +1,34 @@
 ---
 name: autoresearch
 scope: qwen-asr
-description: Single-worker multilingual Qwen3-ASR training and selection contract.
+description: Four-slot multilingual Qwen3-ASR training and selection contract.
 ---
 
 # Qwen3-ASR autoresearch contract
 
-Read `records/decisions/DEC-20261029-001-qwen-asr-autoresearch.md`, the Autoresearch
-section of STATUS and the Qwen section of PLANS. The operator prohibits
-subagents. This harness proposes, runs and selects one trial at a time.
+Read `records/decisions/DEC-20261029-001-qwen-asr-autoresearch.md`,
+`records/decisions/DEC-20261029-002-four-slot-qwen-asr-autoresearch.md`, the
+Autoresearch section of STATUS and the Qwen section of PLANS. Four research
+agents propose and run trials; the supervisor alone selects, updates truth
+docs and commits.
 
-## Slot
+## Slots
 
 - M4 Pro 24 GB: `yeowoolmac-the-rest.tailaa113.ts.net`, `main` tmux session.
 - Nemotron backend `plus.lost.inference.stt` stays booted out; no auto-restore.
   Preserve gateway/tunnel, oMLX settings and every existing model/data/result.
-- CPU downloads/preparation may overlap one serialized GPU job. Check existing
+- At most four model workers. Slot 1 is `ROOT/.gpu-loop.lock` (serial drivers);
+  launch every other model process (`train.py` or a `batching.py` probe) in
+  tmux with `parallel.py run ROOT [--job-dir DIR] [--wait N] -- COMMAND`.
+  Budget: at most 5,000,000,000 bytes footprint per new worker, 20,000,000,000
+  reserved in total; pass `--memory-gb 4.5` or less. Admission denial exits
+  75 (retry later); a stopped worker keeps its logs and checkpoints.
+- Each job owns a directory under `ROOT/parallel/` and runs a frozen
+  `ROOT/code/` source. Trainers use `--output` as the job; probes need
+  `--job-dir` with the report inside it. Never write `loop-state.json`,
+  `ROOT/trials/` or another agent's job. `parallel.py status ROOT` shows
+  slots, workers, reservations, pressure and live launchers (read-only).
+- CPU downloads/preparation may overlap GPU jobs. Check existing
   processes/logs before launching; never duplicate an active download or run.
 - Runtime Python: `~/inference-qwen-training/.venv/bin/python` (pinned, isolated).
 - New work/evidence: `~/models/stt/qwen3-asr-hillclimb-20261029`.
