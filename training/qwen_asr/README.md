@@ -64,6 +64,39 @@ source-file hashes and rejected duplicates. Existing completed data is verified
 and reused; changed settings require a new output directory. Partial downloads
 are cached for retry. Models/audio/checkpoints stay outside Git.
 
+## Written-form data and an external Korean probe
+
+`prepare_fleurs_style.py` prepares the pinned FLEURS training split using
+`raw_transcription` targets and copies an existing frozen development split.
+It excludes held-out sentence IDs across all four languages, normalized text,
+audio hashes and any supplied probe. Unknown FLEURS speakers remain unknown;
+speaker separation and the base model's pretraining exposure are unestablished.
+
+Prepare the evaluation-only KSS probe first, excluding every adaptation pool:
+
+```sh
+.venv/bin/python training/qwen_asr/prepare_fleurs_style.py probe "$PROBE" \
+  --cache "$CACHE" --dev "$DEV_DATA" --protected-test "$FROZEN_TEST" \
+  --train-pool "$TRAIN_DATA/train.jsonl"
+.venv/bin/python training/qwen_asr/prepare_fleurs_style.py train "$STYLE_DATA" \
+  --cache "$CACHE" --dev "$DEV_DATA" --protected-test "$FROZEN_TEST" \
+  --exclude "$PROBE/probe.jsonl"
+```
+
+Repeat `--train-pool` for each other adaptation manifest. KSS uses written
+`original_script` targets, a fixed seed and separate digit/non-digit cohorts
+(256 clips each by default); an incomplete cohort is refused. Report each
+cohort separately. The balanced probe does not estimate natural-population
+accuracy. KSS is CC BY-NC-SA 4.0 and stays evaluation-only; FLEURS is CC BY 4.0.
+
+Both paths verify pinned download hashes and converted mono 16 kHz PCM16 WAVs.
+Prepared manifests retain source, license, code and exclusion hashes. Keep
+cache/audio/output outside Git and use a new directory for changed settings.
+Preparation checks free disk and memory pressure between parquet row groups;
+a single audio row group can occupy several GB. This recipe establishes no
+accuracy improvement until a completed training run passes selection and
+independent confirmation.
+
 ## SFT
 
 ```sh
