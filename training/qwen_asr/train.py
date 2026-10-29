@@ -51,6 +51,8 @@ def arguments():
     p.add_argument("--group-size", type=int, default=4)
     p.add_argument("--temperature", type=float, default=0.7)
     p.add_argument("--beta", type=float, default=0.02)
+    p.add_argument("--advantage-scale", type=float,
+                   help="GRPO only: divide group-centered rewards by this fixed value instead of the group std")
     p.add_argument("--korean-wer-weight", type=float, default=0.0)
     p.add_argument("--max-tokens", type=int, default=256)
     p.add_argument("--save-every", type=int, default=25)
@@ -67,6 +69,9 @@ def arguments():
         p.error("Korean WER weight must be between zero and one")
     if a.group_size < 2 or a.temperature <= 0 or a.beta < 0 or a.memory_gb <= 0:
         p.error("invalid GRPO/memory settings")
+    if a.advantage_scale is not None and (
+            a.stage != "grpo" or not (math.isfinite(a.advantage_scale) and a.advantage_scale > 0)):
+        p.error("--advantage-scale must be positive and finite, and is only valid for GRPO")
     if a.base_reference and a.stage != "grpo":
         p.error("--base-reference is only valid for GRPO")
     if a.external and a.stage != "evaluate":
@@ -83,7 +88,7 @@ def training_settings(a):
     return {key: getattr(a, key) for key in (
         "stage", "accumulate", "rank", "scale", "learning_rate", "group_size",
         "temperature", "beta", "max_tokens", "seed", "memory_gb", "korean_wer_weight",
-        "base_reference")}
+        "base_reference", "advantage_scale")}
 
 
 def external_plan(manifest, per_cohort, seed):
@@ -430,7 +435,7 @@ def run(a):
             group = [sample(row, ctx, a.temperature) for _ in range(a.group_size)]
             rewards = [reward(row["text"], text, lang, a.korean_wer_weight) if ended else -1.0
                        for tokens, text, ended in group]
-            adv = advantages(rewards)
+            adv = advantages(rewards, a.advantage_scale)
             current = dict(tree_flatten(model.trainable_parameters()))
             old_probs = [mx.stop_gradient(log_probs(model, *ctx, tokens, a.temperature))
                          for tokens, _, _ in group]
