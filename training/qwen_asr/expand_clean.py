@@ -2,7 +2,6 @@
 """Curate cached read speech without admitting unverified translated captions."""
 import argparse
 from collections import Counter
-import csv
 import fcntl
 import hashlib
 import io
@@ -12,7 +11,7 @@ import random
 import shutil
 import tarfile
 
-from common import atomic_json, load_manifests, read_jsonl, sha256, text_key, validate_splits
+from common import atomic_json, load_manifests, read_jsonl, read_tsv, sha256, text_key, validate_splits
 from prefetch import SOURCES
 
 
@@ -159,9 +158,7 @@ def build(a):
     # speakers/sentences, including those absent from the small pilot dev.
     metadata = {}
     for split in ("train", "dev"):
-        path = cached(f"cv17/transcript/ja/{split}.tsv")
-        with path.open(newline="") as stream:
-            metadata[split] = list(csv.DictReader(stream, delimiter="\t"))
+        metadata[split] = read_tsv(cached(f"cv17/transcript/ja/{split}.tsv"))
     held_speakers = {r["client_id"] for r in metadata["dev"]}
     held_text = {text_key(r["sentence"]) for r in metadata["dev"]}
     wanted = {Path(r["path"]).name: r for r in metadata["train"]

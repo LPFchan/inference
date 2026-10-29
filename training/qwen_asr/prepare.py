@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Prepare pinned real speech for adaptation; frozen FLEURS is exclusion-only."""
 import argparse
-import csv
 import fcntl
 import io
 import json
@@ -15,7 +14,7 @@ import soundfile as sf
 from huggingface_hub import HfApi, hf_hub_download
 from scipy.signal import resample_poly
 
-from common import atomic_json, load_manifests, read_jsonl, sha256, text_key, validate_splits
+from common import atomic_json, load_manifests, read_jsonl, read_tsv, sha256, text_key, validate_splits
 
 CV = ("fsicoli/common_voice_17_0", "8262c16bf297c87a9cd88c51997c4758ed7a8ba2", "cc0-1.0")
 KO = ("kresnik/zeroth_korean", "1fe937899f828af822293d05e086200946088bdf", "cc-by-4.0")
@@ -142,8 +141,7 @@ def prepare(args):
         metadata = {}
         for split in ("dev", "train"):
             tsv = download(CV, f"transcript/{locale}/{split}.tsv")
-            with tsv.open(newline="") as stream:
-                metadata[split] = list(csv.DictReader(stream, delimiter="\t"))
+            metadata[split] = read_tsv(tsv)
         excluded_speakers = {f"cv17/{r['client_id']}" for r in metadata["dev"]}
         excluded_text = {text_key(r["sentence"]) for r in metadata["dev"]}
         for split in ("dev", "train"):

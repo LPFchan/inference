@@ -1,4 +1,5 @@
 """CPU-only data, reward and checkpoint-contract helpers."""
+import csv
 import hashlib
 import importlib.util
 import json
@@ -25,6 +26,20 @@ def sha256(path):
 
 def text_key(text):
     return normalize(text).replace(" ", "")
+
+
+def read_tsv(path):
+    """Read a Common Voice TSV with one record per physical line.
+
+    Sentences contain unbalanced double quotes; default CSV quoting lets one
+    such record swallow the following lines into a single giant target.
+    The pinned mirror's own loader also reads these files with QUOTE_NONE.
+    """
+    with Path(path).open(newline="", encoding="utf-8") as stream:
+        rows = list(csv.DictReader(stream, delimiter="\t", quoting=csv.QUOTE_NONE))
+    if any(None in row or None in row.values() for row in rows):
+        raise ValueError(f"malformed TSV record: {path}")
+    return rows
 
 
 def read_jsonl(path):
