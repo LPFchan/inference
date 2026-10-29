@@ -8,7 +8,7 @@
 
 - Selection: [DEC-20261029-001](decisions/DEC-20261029-001-qwen-asr-autoresearch.md),
   amended by [DEC-20261029-002](decisions/DEC-20261029-002-four-slot-qwen-asr-autoresearch.md).
-  Original MLX 8-bit anchor remains incumbent; all eight full trials are rejected.
+  Original MLX 8-bit anchor remains incumbent; all nine full trials are rejected.
   Frozen selection set: 1,295 FLEURS validation clips (EN 394, KO 226, JA 266,
   ZH 409), manifest `c75a4b05069eba7d11a6b50efd7bb11d43800fc66e49b761cd08fb86354acf01`.
   The original 2,624-clip test and all nine published predictions remain sealed.
@@ -25,6 +25,7 @@
   | Base GRPO `b62373c31be7ca27`, LR 1e-5 | 5.18 | 13.96 | 6.13 | 7.98 | 1.2741 |
   | SFT filtered v1 `8db65348fd229db0` | 4.57 | 16.01 | 5.94 | 7.69 | 1.3084 |
   | SFT filtered expanded v2 `9b8cfb528c942378` | 4.53 | 15.98 | 5.22 | 7.53 | 1.2475 |
+  | SFT unfiltered v006 `100c0aa4969e4145` | 5.67 | 19.63 | 7.12 | 7.88 | 1.5147 |
 
 - The batch-32 trial completed 625 updates on the same ordered 20,000 draws,
   seed 21774173, LR 3e-5 and frozen source `code/655b245` as batch-4 × 5,000.
@@ -48,20 +49,25 @@
   the rejected filtered-v1 control is -0.0609, CI95 [-0.1201, 0.0018]; that
   interval includes zero. Source mix, speakers and draw order also change,
   so this does not isolate data quantity. No confirmation or adoption.
+- Unfiltered expanded-v006 SFT `100c0aa4969e4145` also completed full validation:
+  score 1.5147, delta CI95 [0.4256, 0.6203] against base. Gain, all language
+  and confidence gates fail; empty/truncation pass. Its diagnostic delta
+  against the rejected expanded filtered run is 0.2672, CI95 [0.1992, 0.3449].
+  It is rejected with no confirmation or adoption.
 - Operator authorized four research agents and at most four model workers,
-  5 GB each / 20 GB total. Launcher PR21 is merged as `6497a26`. Three full
-  trials remain active under `main` tmux:
-  `qwen-sft-expand-v2` → `parallel/sft-9b8cfb528c942378` (same-filter expanded
-  pool, 51,079 clips / 78.12 h, supervisor `code/3976a1e`);
-  `qwen-sft-v006-raw` → `parallel/sft-100c0aa4969e4145` (removal-only
-  unfiltered v2, 67,793 clips / 108.57 h); and `qwen-sft-fleurs-style` →
-  `parallel/sft-0812e3d33da50ccb` (written-form v005, 8,966 clips / 25.14 h).
-  The latter two supervisors are `code/1ae82c5`. All use frozen trainer
-  `code/655b245`, base init, rank16, LR3e-5, seed21774173, 5,000 × 4 updates,
-  a 4.5 GiB MLX guideline and a 5 GB physical-footprint budget. Data changes
-  corpus/speaker/text/source mix and draw order; quantity is not isolated.
-  Actual-run code and inputs stay immutable. Confirm provisional winners with
-  an independent seed before adoption.
+  5 GB each / 20 GB total. Launcher PR21 is merged as `6497a26`. Two full
+  trials remain active under `main` tmux: `qwen-sft-fleurs-style` →
+  `parallel/sft-0812e3d33da50ccb` (frozen `code/655b245`, base init, rank16,
+  LR3e-5, seed21774173,5,000×4 SFT updates), and `qwen-rl-fleurs` →
+  `parallel/grpo-bc8f2d8f6f19a369` (frozen `code/3ee30f6`, base init and KL
+  reference, rank16, LR1e-5, seed21325231,1,000 GRPO updates). Both use v005
+  written-form FLEURS train (8,966 clips / 25.14 h), supervisor `code/1ae82c5`,
+  a 4.5 GiB MLX guideline and a 5 GB physical-footprint budget. The GRPO trial
+  changes only TRAIN data relative to closed `b62373c31be7ca27`; domain,
+  acoustics, speakers, target conventions and draw order move together.
+  Actual-run code and inputs stay immutable. Both hypotheses require unchanged
+  full1,295 FLEURS gates, independent-seed confirmation and their preregistered
+  per-cohort KSS veto before adoption. The original base remains incumbent.
 - Native microbatch-2 probe PR20 fails acceptance: about 9.02% relative gradient
   difference, 1.029× end-to-end speedup and a brief 5.006 GB physical peak.
   Its timings overlap the batch-32 run. Training stays serial within each
@@ -96,7 +102,7 @@
   clips; report the cohorts separately. External evaluator PR24 passed native
   smoke and a complete 512-clip base extension on frozen `f119906`, preserving
   the four saved smoke rows. A resume-status reporting fix awaits fresh review.
-  The written-form trial is running; its adoption also requires the unchanged
+  The written-form trials are running; their adoption also requires the unchanged
   FLEURS gates, independent confirmation and the preregistered separate-cohort
   KSS veto. No accuracy gain is established. Commands and frozen evidence are
   in the prepared files and proposal packets under the program root.
