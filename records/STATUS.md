@@ -8,7 +8,7 @@
 
 - Selection: [DEC-20261029-001](decisions/DEC-20261029-001-qwen-asr-autoresearch.md),
   amended by [DEC-20261029-002](decisions/DEC-20261029-002-four-slot-qwen-asr-autoresearch.md).
-  Original MLX 8-bit anchor remains incumbent; all seven full trials are rejected.
+  Original MLX 8-bit anchor remains incumbent; all eight full trials are rejected.
   Frozen selection set: 1,295 FLEURS validation clips (EN 394, KO 226, JA 266,
   ZH 409), manifest `c75a4b05069eba7d11a6b50efd7bb11d43800fc66e49b761cd08fb86354acf01`.
   The original 2,624-clip test and all nine published predictions remain sealed.
@@ -24,6 +24,7 @@
   | SFT batch-32 `c3422927b2181bc0` | 5.39 | 19.42 | 6.91 | 7.86 | 1.4918 |
   | Base GRPO `b62373c31be7ca27`, LR 1e-5 | 5.18 | 13.96 | 6.13 | 7.98 | 1.2741 |
   | SFT filtered v1 `8db65348fd229db0` | 4.57 | 16.01 | 5.94 | 7.69 | 1.3084 |
+  | SFT filtered expanded v2 `9b8cfb528c942378` | 4.53 | 15.98 | 5.22 | 7.53 | 1.2475 |
 
 - The batch-32 trial completed 625 updates on the same ordered 20,000 draws,
   seed 21774173, LR 3e-5 and frozen source `code/655b245` as batch-4 × 5,000.
@@ -41,6 +42,12 @@
   gates fail; English/empty/truncation gates pass. The imperfect,
   development-informed filter does not rescue this recipe. It is rejected;
   both completed trials retain their final checkpoints and exact predictions.
+- Filtered expanded-v2 SFT `9b8cfb528c942378` completed full validation:
+  score 1.2475, paired delta CI95 [0.1739, 0.3309] against base. It fails
+  CJK/gain/confidence gates and is rejected. The diagnostic delta against
+  the rejected filtered-v1 control is -0.0609, CI95 [-0.1201, 0.0018]; that
+  interval includes zero. Source mix, speakers and draw order also change,
+  so this does not isolate data quantity. No confirmation or adoption.
 - Operator authorized four research agents and at most four model workers,
   5 GB each / 20 GB total. Launcher PR21 is merged as `6497a26`. Three full
   trials remain active under `main` tmux:
