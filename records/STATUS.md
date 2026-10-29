@@ -99,9 +99,11 @@
   FLEURS training clips / 25.14 h, identical frozen development bytes and zero
   held-out sentence-ID/text/audio overlap. Train/dev speaker separation is
   unestablished. The evaluation-only KSS probe has 256 digit and 256 other
-  clips; report the cohorts separately. External evaluator PR24 passed native
-  smoke and a complete 512-clip base extension on frozen `f119906`, preserving
-  the four saved smoke rows. A resume-status reporting fix awaits fresh review.
+  clips; report the cohorts separately. External evaluator PR24 is merged as
+  `6cb2975`, including the resume-status reporting fix. Its numerical evidence
+  remains pinned to `f119906`: native smoke extended to all 512 base clips,
+  preserving the four saved rows. The merged head passed 75 focused CPU tests
+  and automated review with no findings; no benchmark CI is configured.
   The written-form trials are running; their adoption also requires the unchanged
   FLEURS gates, independent confirmation and the preregistered separate-cohort
   KSS veto. No accuracy gain is established. Commands and frozen evidence are
