@@ -55,19 +55,31 @@
   against the rejected expanded filtered run is 0.2672, CI95 [0.1992, 0.3449].
   It is rejected with no confirmation or adoption.
 - Operator authorized four research agents and at most four model workers,
-  5 GB each / 20 GB total. Launcher PR21 is merged as `6497a26`. Two full
+  5 GB each / 20 GB total. Launcher PR21 is merged as `6497a26`. Three full
   trials remain active under `main` tmux: `qwen-sft-fleurs-style` →
   `parallel/sft-0812e3d33da50ccb` (frozen `code/655b245`, base init, rank16,
-  LR3e-5, seed21774173,5,000×4 SFT updates), and `qwen-rl-fleurs` →
+  LR3e-5, seed21774173,5,000×4 SFT updates), `qwen-rl-fleurs` →
   `parallel/grpo-bc8f2d8f6f19a369` (frozen `code/3ee30f6`, base init and KL
-  reference, rank16, LR1e-5, seed21325231,1,000 GRPO updates). Both use v005
+  reference, rank16, LR1e-5, seed21325231,1,000 GRPO updates), and
+  `qwen-rl-fixed-scale` → `parallel/grpo-c3b0b430fab2ba0c` (frozen
+  `code/1a162b0`, same GRPO recipe with fixed advantage divisor 0.03).
+  All three use v005
   written-form FLEURS train (8,966 clips / 25.14 h), supervisor `code/1ae82c5`,
-  a 4.5 GiB MLX guideline and a 5 GB physical-footprint budget. The GRPO trial
+  a 4.5 GiB MLX guideline and a 5 GB physical-footprint budget. The first GRPO trial
   changes only TRAIN data relative to closed `b62373c31be7ca27`; domain,
   acoustics, speakers, target conventions and draw order move together.
-  Actual-run code and inputs stay immutable. Both hypotheses require unchanged
+  Actual-run code and inputs stay immutable. All three hypotheses require unchanged
   full1,295 FLEURS gates, independent-seed confirmation and their preregistered
   per-cohort KSS veto before adoption. The original base remains incumbent.
+- Fixed-scale tooling PR26 is merged as `ff86b09`: 84 focused tests pass,
+  automated review has no findings, and no benchmark CI is configured.
+  Its native one-update preflight matches the control's TRAIN clip, rewards
+  and completion strings exactly. The measured gradient norm differs from
+  its expected scaled value by 0.0678%, within the preregistered 0.1% tolerance;
+  physical peak is 4.035 GB and MLX peak is 3.911 GB. Full accuracy is pending.
+  The target-gloss removal proposal is held as a diagnostic: duration regression
+  does not establish which individual spans are spoken, and it claims no
+  primary-score improvement. Prepared v007 and its TRAIN evidence are preserved.
 - Native microbatch-2 probe PR20 fails acceptance: about 9.02% relative gradient
   difference, 1.029× end-to-end speedup and a brief 5.006 GB physical peak.
   Its timings overlap the batch-32 run. Training stays serial within each

@@ -12,8 +12,8 @@ and [the four-slot contract](../skills/autoresearch/SKILL.md).
 
 - Preserve the rejected expanded-data snapshots. Use the merged literal-quote
   Common Voice parser when rebuilding intake to recover swallowed records.
-- Score the live FLEURS written-form SFT and direct-base GRPO trials with unchanged
-  FLEURS selection,
+- Score the live FLEURS written-form SFT and both direct-base GRPO trials,
+  including fixed advantage scaling, with unchanged FLEURS selection,
   independent-seed confirmation and the preregistered separate-cohort KSS
   veto before adoption. Keep speaker/pretraining uncertainty explicit.
 - Admit YODAS only after audio-language and transcript-alignment checks;
