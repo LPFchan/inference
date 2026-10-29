@@ -18,9 +18,6 @@ and [the four-slot contract](../skills/autoresearch/SKILL.md).
   Keep speaker/pretraining uncertainty explicit.
 - Score the live fixed-advantage-scale GRPO trial with unchanged FLEURS
   selection, independent confirmation and KSS veto.
-- Score the live half-strength candidate `wa05-bce1c6b780deb965`,
-  independently of the rejected raw endpoint's score; share
-  an identical confirmation training run rather than launching it twice.
 - Admit YODAS only after audio-language and transcript-alignment checks;
   translated captions cannot be ASR targets.
 - Mine hard training examples and test smaller learning rates/longer windows.

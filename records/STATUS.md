@@ -8,7 +8,7 @@
 
 - Selection: [DEC-20261029-001](decisions/DEC-20261029-001-qwen-asr-autoresearch.md),
   amended by [DEC-20261029-002](decisions/DEC-20261029-002-four-slot-qwen-asr-autoresearch.md).
-  Original MLX 8-bit anchor remains incumbent. Ten completed trials are
+  Original MLX 8-bit anchor remains incumbent. Eleven completed trials are
   rejected; one-pass SFT and written-form GRPO passed their first seeds and
   await confirmation/KSS.
   Frozen selection set: 1,295 FLEURS validation clips (EN 394, KO 226, JA 266,
@@ -31,6 +31,7 @@
   | SFT written-form v005 `0812e3d33da50ccb` | 4.30 | 11.24 | 5.94 | 5.25 | 1.0390 |
   | SFT one sentence-epoch `ce33a3d7a476e297`, first seed | 3.99 | 10.58 | 4.29 | 4.94 | 0.8839 |
   | Base GRPO written-form v005 `bc8f2d8f6f19a369`, first seed | 4.15 | 10.41 | 4.63 | 5.65 | 0.9392 |
+  | Half-strength final SFT `wa05-bce1c6b780deb965` | 3.99 | 10.52 | 4.77 | 5.34 | 0.9370 |
 
 - The batch-32 trial completed 625 updates on the same ordered 20,000 draws,
   seed 21774173, LR 3e-5 and frozen source `code/655b245` as batch-4 × 5,000.
@@ -101,15 +102,14 @@
   `code/1a162b0`, same GRPO recipe with fixed advantage divisor 0.03), and
   `qwen-sft-sentence-confirm` → `parallel/sft-a11b015fbeee0082` (frozen
   `code/1412c1f`, base init, rank16, LR3e-5, seed21775174, 944×4 updates,
-  each drawn source sentence used at most once). The fourth worker,
-  `qwen-wa05`, evaluates `parallel/wa05-bce1c6b780deb965` with frozen
-  `code/655b245` and the registered half-strength final SFT adapter.
-  All four use v005 written-form FLEURS train (8,966 clips / 25.14 h),
+  each drawn source sentence used at most once). One model worker slot is
+  free after the half-strength rejection. All three use v005 written-form
+  FLEURS train (8,966 clips / 25.14 h),
   supervisor `code/1ae82c5`, a 4.5 GiB MLX guideline and a 5 GB physical
   footprint budget. The first GRPO trial changes only TRAIN data relative
   to closed `b62373c31be7ca27`; domain, acoustics, speakers, target conventions
   and draw order move together. Actual-run code and inputs stay immutable.
-  All four hypotheses require unchanged full1,295 FLEURS gates,
+  The remaining hypotheses require unchanged full1,295 FLEURS gates,
   independent-seed confirmation and their preregistered per-cohort KSS veto
   before adoption. The original base remains incumbent.
 - Fixed-scale tooling PR26 is merged as `ff86b09`: 84 focused tests pass,
@@ -131,19 +131,18 @@
   sampling, recording choice, order, acoustic coverage and training length
   together; it does not isolate the effect of repetition. The first seed
   passes full validation; confirmation and KSS acceptance remain pending.
-- A single half-strength variant of the written-form SFT is preregistered:
-  scale only the final step-5,000 adapter's LoRA B tensors by 0.5, then evaluate
-  all 1,295 clips with frozen `code/655b245`, regardless of the raw endpoint's
-  score. No coefficient sweep or intermediate checkpoint is included.
-  The source finished 5,000 updates and failed full validation. Derived
-  candidate `wa05-bce1c6b780deb965` has started full evaluation: all 112
-  LoRA B tensors are exactly halved, with unchanged A tensors/header and
-  verified source/derived hashes. Admission passed with normal pressure.
-  Its coefficient and artifact were frozen before source validation was read.
-  Independent confirmation uses the source SFT recipe at seed 21775174; train
-  it once and derive the same final-step coefficient. Primary and per-cohort KSS
-  gates remain unchanged. Packet: `proposals/next-score-candidate-20261029`;
-  `parallel-trials.json` records its active command and artifact binding.
+- Half-strength final SFT `wa05-bce1c6b780deb965` completed all 1,295
+  validation clips using the preregistered alpha0.5 final-step derivation.
+  CJK score is 0.9370, paired delta CI95 [-0.1060, -0.0220]. Gain,
+  confidence, English, empty and truncation gates pass, but Japanese CER
+  rises from 4.62% to 4.77%: +3.21% relative exceeds its frozen 2% limit.
+  It is rejected with no confirmation or adoption. No other coefficient or
+  intermediate checkpoint was scored. The coefficient and all 112 exactly
+  halved LoRA B tensors were frozen before source validation was read.
+  Source/derived hashes, complete predictions, metrics, integrity and
+  diagnostic comparison with raw SFT are retained and verified on all three
+  hosts. Packet: `proposals/next-score-candidate-20261029`; run:
+  `parallel/wa05-bce1c6b780deb965`. The original base remains incumbent.
 - Native microbatch-2 probe PR20 fails acceptance: about 9.02% relative gradient
   difference, 1.029× end-to-end speedup and a brief 5.006 GB physical peak.
   Its timings overlap the batch-32 run. Training stays serial within each
