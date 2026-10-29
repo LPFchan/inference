@@ -89,6 +89,10 @@ microsteps. It is independent of corpus size. Cache is capped at 128 MiB and
 MLX allocation at 18 GiB by default. These limits do not measure total process
 RSS or all other Mac applications. Actual memory/time must be measured.
 
+Each microstep's gradient is added and evaluated immediately. A lazy running
+sum would keep every microstep gradient alive until the update ends: about
+26 MB each at rank 16, or roughly 0.8 GB at `--accumulate 32`.
+
 ## GRPO
 
 ```sh
