@@ -473,3 +473,259 @@ def test_sentence_epoch_budget_is_refused_before_model_load(tmp_path, monkeypatc
                        "sentence epoch exhausted for ko at microstep 3"):
         trainer.run(args)
     assert not loads and not (args.output / "run.json").exists()
+
+
+@pytest.mark.parametrize("pool_size", [1, 2, 7, 1000])
+def test_grpo_attempt_zero_keeps_the_legacy_row(pool_size):
+    import random
+    from common import grpo_row
+    pool = [f"row-{i}" for i in range(pool_size)]
+    for seed in (0, 21325231, 21326232):
+        for step in (1, 2, 10, 1000):
+            assert grpo_row(pool, seed, step, 0) == random.Random(seed + step).choice(pool)
+
+
+def test_grpo_redraws_follow_the_string_seed_law_without_touching_global_random():
+    import random
+    from common import grpo_row
+    pool = list(range(1000))
+    random.seed(99)
+    state = random.getstate()
+    draws = [grpo_row(pool, 21325231, step, attempt) for step, attempt in ((1, 1), (1, 7), (2, 1), (1000, 7))]
+    assert draws == [520, 63, 322, 13]  # fixed across processes and PYTHONHASHSEED
+    for seed, step, attempt in ((0, 1, 1), (21325231, 3, 2), (21326232, 999, 7)):
+        expected = random.Random(f"grpo-redraw:{seed}:{step}:{attempt}").choice(pool)
+        assert grpo_row(pool, seed, step, attempt) == grpo_row(pool, seed, step, attempt) == expected
+    assert random.getstate() == state
+    assert len({grpo_row(pool, 7, 3, attempt) for attempt in range(1, 8)}) > 1  # attempt changes the row
+    # Redraws are with replacement: a two-row pool must repeat across eight attempts, a single row always.
+    assert len({grpo_row(["a", "b"], 7, 3, attempt) for attempt in range(8)}) <= 2
+    assert {grpo_row(["only"], 7, 3, attempt) for attempt in range(8)} == {"only"}
+
+
+def test_informative_groups_need_raw_reward_spread():
+    from common import informative
+    assert not informative([0.0] * 4)
+    assert not informative([0.8] * 4)
+    assert not informative([-1.0] * 4)  # all truncated
+    assert informative([0.8, 0.8, 0.8, 0.7])
+    assert informative([-1.0, -1.0, -1.0, 0.0])
+
+
+@pytest.mark.parametrize("stage,extra", [
+    ("grpo", ["--base-reference"]), ("sft", []), ("evaluate", [])])
+def test_max_draws_defaults_to_one_and_is_bound_to_resume_settings(monkeypatch, stage, extra):
+    trainer, args = parse_training_args(monkeypatch, stage, extra)
+    assert args.max_draws == 1 and trainer.training_settings(args)["max_draws"] == 1
+    if stage == "grpo":
+        trainer, args = parse_training_args(monkeypatch, stage, [*extra, "--max-draws", "8"])
+        assert trainer.training_settings(args)["max_draws"] == 8
+
+
+@pytest.mark.parametrize("stage,value", [
+    ("grpo", "0"), ("grpo", "-1"), ("grpo", "1.5"), ("sft", "8"), ("evaluate", "2"), ("sft", "0")])
+def test_invalid_max_draws_is_rejected(monkeypatch, stage, value):
+    extra = ["--base-reference"] if stage == "grpo" else []
+    with pytest.raises(SystemExit) as error:
+        parse_training_args(monkeypatch, stage, [*extra, "--max-draws", value])
+    assert error.value.code == 2
+
+
+GRPO_TEXT = {1: "abcd", 2: "abc", 3: "zzzz"}  # rewards 1.0, 0.75 and 0.0 against "abcd"
+GRPO_EOS = 9
+
+
+def fake_grpo_runtime(monkeypatch, tmp_path, script):
+    """Real MLX on CPU with a tiny decoder; rollouts replay `script` completions in call order."""
+    import json
+    from types import ModuleType, SimpleNamespace
+    mx = pytest.importorskip("mlx.core")
+    nn = pytest.importorskip("mlx.nn")
+    optim = pytest.importorskip("mlx.optimizers")
+    pytest.importorskip("jiwer")
+    from common import atomic_json, sha256
+
+    class LoRALinear(nn.Module):
+        @staticmethod
+        def from_base(linear, r, scale):
+            layer = LoRALinear()
+            out_dims, in_dims = linear.weight.shape
+            layer.linear, layer.scale = linear, scale
+            layer.lora_a = mx.random.uniform(-0.1, 0.1, (in_dims, r))
+            layer.lora_b = mx.zeros((r, out_dims))
+            return layer
+
+        def __call__(self, x):
+            return self.linear(x) + self.scale * (x @ self.lora_a) @ self.lora_b
+
+    class Block(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.q_proj, self.k_proj, self.v_proj, self.o_proj = (nn.Linear(4, 4, bias=False) for _ in range(4))
+
+    class Decoder(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.embed_tokens = nn.Embedding(10, 4)
+            self.layers = [Block() for _ in range(28)]
+
+        def __call__(self, inputs_embeds):
+            h = inputs_embeds
+            for block in self.layers:
+                h = h + 0.1 * block.o_proj(block.q_proj(h) + block.k_proj(h) + block.v_proj(h))
+            return h
+
+    class Tokenizer:
+        eos_token_id = GRPO_EOS
+
+        def encode(self, text, add_special_tokens=False):
+            return [1]
+
+        def decode(self, tokens, skip_special_tokens=True):
+            return "".join(GRPO_TEXT[t] for t in tokens)
+
+    contexts = []
+
+    class Model(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.model, self.lm_head = Decoder(), nn.Linear(4, 10, bias=False)
+            self._tokenizer = Tokenizer()
+
+        def _eos_token_ids(self):
+            return [GRPO_EOS]
+
+        def _preprocess_audio(self, path):
+            marker = int(Path(path).read_text())  # each clip's audio is its own marker
+            contexts.append(marker)
+            return None, None, marker
+
+        def get_audio_features(self, features, mask):
+            return mx.zeros((1, 1, 4))
+
+        def _build_prompt(self, count, language):
+            return mx.array([[count, 0, 0]])
+
+        def _build_inputs_embeds(self, prompt, audio):
+            return mx.full((1, prompt.shape[1], 4), float(prompt[0, 0].item() % 7) / 7)
+
+    remaining = list(script)
+
+    def generate_step(prompt, model, input_embeddings, max_tokens, sampler, prefill_step_size):
+        completion = remaining.pop(0) if remaining and int(prompt[0].item()) < 1000 else [1, GRPO_EOS]
+        for token in completion[:max_tokens]:
+            yield token, None
+
+    for name in ("mlx_audio", "mlx_audio.stt", "mlx_audio.lm", "mlx_lm", "mlx_lm.tuner"):
+        monkeypatch.setitem(sys.modules, name, ModuleType(name))
+    monkeypatch.setitem(sys.modules, "mlx_audio.stt.utils", SimpleNamespace(load_model=lambda path: Model()))
+    monkeypatch.setitem(sys.modules, "mlx_audio.lm.generate", SimpleNamespace(generate_step=generate_step))
+    monkeypatch.setitem(sys.modules, "mlx_lm.sample_utils", SimpleNamespace(make_sampler=lambda temp: None))
+    monkeypatch.setitem(sys.modules, "mlx_lm.tuner.lora", SimpleNamespace(LoRALinear=LoRALinear))
+    monkeypatch.setattr(mx, "set_memory_limit", lambda limit: None)
+    monkeypatch.setattr(mx, "set_cache_limit", lambda limit: None)
+    seeds, updates = [], []
+    real_seed = mx.random.seed
+    monkeypatch.setattr(mx.random, "seed", lambda value: (seeds.append(value), real_seed(value))[1])
+
+    class RecordingAdamW(optim.AdamW):
+        def update(self, model, gradients):
+            updates.append(len(targets))
+            return super().update(model, gradients)
+
+    monkeypatch.setattr(optim, "AdamW", RecordingAdamW)
+
+    model_dir, data = tmp_path / "model", tmp_path / "data"
+    model_dir.mkdir()
+    (model_dir / "model.safetensors").write_bytes(b"fake weights")
+    atomic_json(model_dir / "training-source.json", {"id": "mlx-community/Qwen3-ASR-1.7B-8bit",
+                                                     "revision": "a8379a2e2f9e313c9292cdf1af4055ab56d50d55"})
+    data.mkdir()
+    rows = {"train": [], "dev": []}
+    for split, base in (("train", 0), ("dev", 1000)):
+        for index, lang in enumerate(lang for lang in ("en", "ko", "ja", "zh") for _ in range(3 if split == "train" else 1)):
+            marker = base + index
+            audio = data / f"{marker}.wav"
+            audio.write_text(str(marker))
+            rows[split].append(dict(id=f"{split}/{lang}/{marker}", language=lang,
+                                    text="abcd" if split == "train" else f"dev {lang}",
+                                    speaker=f"speaker-{marker}", audio=audio.name, sha256=sha256(audio)))
+        (data / f"{split}.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows[split]))
+    protected = tmp_path / "test.jsonl"
+    protected.write_text("")
+    atomic_json(data / "data.json", {"train_sha256": sha256(data / "train.jsonl"),
+                                     "dev_sha256": sha256(data / "dev.jsonl"),
+                                     "protected_manifest_sha256": sha256(protected)})
+    trainer = importlib.util.module_from_spec(
+        spec := importlib.util.spec_from_file_location("qwen_train_redraw", DIRECTORY / "train.py"))
+    spec.loader.exec_module(trainer)
+    targets = []
+    real_targets = trainer.training_targets
+
+    def recording_targets(prompt, completion):
+        targets.append((prompt[0], tuple(completion)))  # which context and completion feed a likelihood
+        return real_targets(prompt, completion)
+
+    monkeypatch.setattr(trainer, "training_targets", recording_targets)
+
+    def configure(extra):
+        monkeypatch.setattr(sys, "argv", ["train.py", "grpo", "--model", str(model_dir), "--data", str(data),
+                                          "--protected-test", str(protected), "--output", str(tmp_path / "run"),
+                                          "--base-reference", "--skip-initial-eval", "--eval-clips", "1",
+                                          "--max-tokens", "2", "--seed", "11", *extra])
+        return trainer.arguments()
+
+    (tmp_path / "run").mkdir()
+    pools = {lang: [r for r in rows["train"] if r["language"] == lang] for lang in ("ko", "ja", "zh")}
+    return SimpleNamespace(trainer=trainer, configure=configure, pools=pools, contexts=contexts,
+                           targets=targets, seeds=seeds, updates=updates, remaining=remaining,
+                           output=tmp_path / "run", cpu=lambda: mx.stream(mx.cpu))
+
+
+EQUAL, TRUNCATED, MIXED = [[1, GRPO_EOS]] * 4, [[3, 3, 3]] * 4, [[1, GRPO_EOS], [2, GRPO_EOS]] * 2
+
+
+@pytest.mark.parametrize("max_draws,steps", [
+    # KO wins on the last draw after an all-perfect and an all-truncated group; JA wins at once;
+    # ZH exhausts the cap on equal groups and still takes its normal update.
+    (3, [[EQUAL, TRUNCATED, MIXED], [MIXED], [EQUAL, TRUNCATED, EQUAL]]),
+    (1, [[MIXED], [EQUAL], [TRUNCATED]]),
+])
+def test_grpo_redraw_updates_once_per_step_on_the_stopping_group(monkeypatch, tmp_path, max_draws, steps):
+    import json
+    from common import grpo_row
+    script = [completion for groups in steps for group in groups for completion in group]
+    env = fake_grpo_runtime(monkeypatch, tmp_path, script)
+    args = env.configure(["--steps", "3", "--max-draws", str(max_draws)])
+    with env.cpu():  # keep the fake decoder off the GPU
+        env.trainer.run(args)
+    assert not env.remaining
+    rewards_of = {id(EQUAL): [1.0] * 4, id(TRUNCATED): [-1.0] * 4, id(MIXED): [1.0, 0.75] * 2}
+    texts_of = {id(EQUAL): ["abcd"] * 4, id(TRUNCATED): ["zzzz" * 2] * 4, id(MIXED): ["abcd", "abc"] * 2}
+    events = [json.loads(line) for line in (env.output / "metrics.jsonl").read_text().splitlines()]
+    assert [e["step"] for e in events] == [1, 2, 3]
+    assert env.seeds == [11, 12, 13, 14]  # once at load, then once per logical step, never per draw
+    assert len(env.updates) == 3  # exactly one optimizer update per logical step
+    drawn, start = [], 0
+    for step, (event, groups, lang) in enumerate(zip(events, steps, ("ko", "ja", "zh")), 1):
+        rows = [grpo_row(env.pools[lang], 11, step, attempt) for attempt in range(len(groups))]
+        final, final_row = groups[-1], rows[-1]
+        drawn += [int(r["audio"][:-4]) for r in rows]
+        assert event["draws"] == len(groups)
+        assert event["exhausted"] == (final is not MIXED)
+        assert event["skipped"] == [{"id": r["id"], "rewards": rewards_of[id(g)]}
+                                    for r, g in zip(rows[:-1], groups[:-1])]
+        assert (event["id"], event["rewards"]) == (final_row["id"], rewards_of[id(final)])
+        assert event["completions"] == texts_of[id(final)]
+        assert event["zero_advantage"] == (final is not MIXED)
+        # Old, reference and policy likelihoods all use the stopping context and completions only.
+        used = env.targets[start:env.updates[step - 1]]
+        completions = [tuple(c[:2]) for c in final]
+        assert used == [(int(final_row["audio"][:-4]), c) for c in completions] * 3
+        start = env.updates[step - 1]
+    assert env.contexts[:len(drawn)] == drawn  # discarded draws were transcribed, then dropped
+    assert env.contexts[len(drawn):] == [1000, 1001, 1002, 1003]  # final development evaluation
+    assert json.loads((env.output / "run.json").read_text())["contract"]["settings"]["max_draws"] == max_draws
+    changed = env.configure(["--steps", "4", "--max-draws", str(max_draws + 1), "--resume"])
+    with pytest.raises(ValueError, match="identical inputs/settings/code"):
+        env.trainer.run(changed)
