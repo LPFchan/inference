@@ -11,6 +11,12 @@ and [the four-slot contract](../skills/autoresearch/SKILL.md).
   confirmation; both KSS vetoes and final incumbent recheck remain required.
 - Retain the running base-init GRPO confirmation as the registered comparison
   control. A win against the original anchor alone cannot advance the trunk.
+- If the admitted uniform two-seed adapter average passes, confirm it with
+  two fresh ingredient seeds; neither ingredient is a separate candidate.
+  Keep the registered 1/2 weights, rank-32 representation and KSS scope.
+- Test the registered bounded equal-reward redraw recipe after default-path
+  tensor parity, native memory acceptance and source review. Keep exactly
+  1,000 optimizer updates; a first-seed failure closes the registered cap.
 - Fill free slots with fresh TRAIN-grounded SFT and RL proposals. Preserve
   sealed evaluation inputs, current incumbent capture and source/data hashes;
   no parameter sweeps selected from validation errors.

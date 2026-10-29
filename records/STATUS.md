@@ -61,6 +61,15 @@
   and current incumbent with unchanged gates, then pass its own both-seed KSS
   veto and incumbent recheck. A first parent-relative failure closes the recipe.
   Packet: `proposals/next-after-first-wins-20261030/parent-review.json`.
+- **Adapter average evaluation:** `main:qwen-sft-soup` →
+  `parallel/soup-6bc17d90adcbb97d` evaluates the uniform mean of the two
+  confirmed SFT adapters, represented exactly by rank-32 concatenation.
+  Frozen evaluator `code/1412c1f`, all 1,295 validation clips, unchanged
+  incumbent/anchor gates. The first failure closes this recipe; a pass
+  requires a second average from two fresh training seeds and both KSS
+  vetoes with a contract-matched rank-32 base. Provenance and the 224-tensor
+  construction check: `proposals/next-sft-confirmed-20261030/parent-review.json`
+  and `parent-validation.json`. No accuracy result is available yet.
 - Root: `~/models/stt/qwen3-asr-hillclimb-20261029`.
   `parallel-trials.json.incumbent` is current authority; adoption evidence is
   `parallel/sft-ce33a3d7a476e297/adoption.json`. The legacy driver's
@@ -70,8 +79,8 @@
 - Operator authorized at most four research/model workers, 5e9 physical bytes
   each/20e9 total reservations. Model launches use frozen supervisor
   `code/1ae82c5` in existing `main` tmux and `--memory-gb 4.5` or less.
-  Two model slots are available for fresh TRAIN-grounded proposals. The
-  ten-minute completion heartbeat is exactly `continue`.
+  Model capacity follows measured reservations; fresh proposals and native
+  acceptance checks share admission. The ten-minute heartbeat is `continue`.
 - Closed earlier areas: v001 SFT LR 3e-5/1e-5, starter-SFT-parent GRPO,
   base GRPO LR1e-6/1e-5, matched 20k-draw batch 32, numeral-filtered v1,
   expanded filtered/raw v006, 5,000-update written-form SFT and single
