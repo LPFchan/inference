@@ -8,7 +8,7 @@
 
 - Selection: [DEC-20261029-001](decisions/DEC-20261029-001-qwen-asr-autoresearch.md),
   amended by [DEC-20261029-002](decisions/DEC-20261029-002-four-slot-qwen-asr-autoresearch.md).
-  Original MLX 8-bit anchor remains incumbent; all five full trials are rejected.
+  Original MLX 8-bit anchor remains incumbent; all six full trials are rejected.
   Frozen selection set: 1,295 FLEURS validation clips (EN 394, KO 226, JA 266,
   ZH 409), manifest `c75a4b05069eba7d11a6b50efd7bb11d43800fc66e49b761cd08fb86354acf01`.
   The original 2,624-clip test and all nine published predictions remain sealed.
@@ -22,12 +22,19 @@
   | SFT `b508876066da8567`, LR 1e-5 | 4.93 | 20.07 | 6.59 | 7.91 | 1.4915 |
   | Base GRPO `2e5b6950468db2d0`, LR 1e-6 | 4.27 | 10.85 | 4.70 | 6.67 | 1.0091 |
   | SFT batch-32 `c3422927b2181bc0` | 5.39 | 19.42 | 6.91 | 7.86 | 1.4918 |
+  | Base GRPO `b62373c31be7ca27`, LR 1e-5 | 5.18 | 13.96 | 6.13 | 7.98 | 1.2741 |
 
 - The batch-32 trial completed 625 updates on the same ordered 20,000 draws,
   seed 21774173, LR 3e-5 and frozen source `code/655b245` as batch-4 × 5,000.
   Paired score delta CI95 [0.3932, 0.5919]; all language/gain gates fail,
   empty/truncation gates pass. Larger effective batch does not rescue this
   recipe. Full evidence: `batch32-summary.json` under the program root.
+- Direct-base GRPO `b62373c31be7ca27` completed 1,000 updates and all 1,295
+  validation clips. Its CJK score is 1.2741, paired delta CI95 [0.2112, 0.3461];
+  all four primary errors regress. 328 outputs differ from base. Gain, language
+  and confidence gates fail; empty/truncation gates pass. It is rejected with
+  no confirmation or adoption. Full integrity, selection and metrics are retained
+  under `parallel/grpo-b62373c31be7ca27`.
 - Operator authorized four research agents and at most four model workers,
   5 GB each / 20 GB total. Launcher PR21 is merged as `6497a26`; native
   admission evidence is retained. Four full trials run in `main` tmux:
