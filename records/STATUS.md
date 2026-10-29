@@ -55,20 +55,23 @@
   against the rejected expanded filtered run is 0.2672, CI95 [0.1992, 0.3449].
   It is rejected with no confirmation or adoption.
 - Operator authorized four research agents and at most four model workers,
-  5 GB each / 20 GB total. Launcher PR21 is merged as `6497a26`. Three full
+  5 GB each / 20 GB total. Launcher PR21 is merged as `6497a26`. Four full
   trials remain active under `main` tmux: `qwen-sft-fleurs-style` →
   `parallel/sft-0812e3d33da50ccb` (frozen `code/655b245`, base init, rank16,
   LR3e-5, seed21774173,5,000×4 SFT updates), `qwen-rl-fleurs` →
   `parallel/grpo-bc8f2d8f6f19a369` (frozen `code/3ee30f6`, base init and KL
   reference, rank16, LR1e-5, seed21325231,1,000 GRPO updates), and
   `qwen-rl-fixed-scale` → `parallel/grpo-c3b0b430fab2ba0c` (frozen
-  `code/1a162b0`, same GRPO recipe with fixed advantage divisor 0.03).
-  All three use v005
+  `code/1a162b0`, same GRPO recipe with fixed advantage divisor 0.03), and
+  `qwen-sft-sentence-epoch` → `parallel/sft-ce33a3d7a476e297` (frozen
+  `code/1412c1f`, base init, rank16, LR3e-5, seed21774173, 944×4 updates,
+  each drawn source sentence used at most once).
+  All four use v005
   written-form FLEURS train (8,966 clips / 25.14 h), supervisor `code/1ae82c5`,
   a 4.5 GiB MLX guideline and a 5 GB physical-footprint budget. The first GRPO trial
   changes only TRAIN data relative to closed `b62373c31be7ca27`; domain,
   acoustics, speakers, target conventions and draw order move together.
-  Actual-run code and inputs stay immutable. All three hypotheses require unchanged
+  Actual-run code and inputs stay immutable. All four hypotheses require unchanged
   full1,295 FLEURS gates, independent-seed confirmation and their preregistered
   per-cohort KSS veto before adoption. The original base remains incumbent.
 - Fixed-scale tooling PR26 is merged as `ff86b09`: 84 focused tests pass,
@@ -80,6 +83,16 @@
   The target-gloss removal proposal is held as a diagnostic: duration regression
   does not establish which individual spans are spoken, and it claims no
   primary-score improvement. Prepared v007 and its TRAIN evidence are preserved.
+- Sentence-epoch tooling PR27 is merged as `160f433`. All 105 focused tests
+  pass after installing missing `filelock` in the repo-local test environment;
+  the native training environment is unchanged. Automated review has no
+  findings; no benchmark CI is configured. Native replacement-mode first loss
+  and gradient norm exactly match the control. The opt-in preflight uses the
+  four pinned actual clip IDs and peaks at 4.246 GB physical / 3.886 GB MLX.
+  Both complete TRAIN sequence hashes match before launch. This trial changes
+  sampling, recording choice, order, acoustic coverage and training length
+  together; it does not isolate the effect of repetition. Full accuracy is
+  pending; confirmation seed 21775174 has registered trial `sft-a11b015fbeee0082`.
 - A single half-strength variant of the written-form SFT is preregistered:
   scale only the final step-5,000 adapter's LoRA B tensors by 0.5, then evaluate
   all 1,295 clips with frozen `code/655b245`, regardless of the raw endpoint's
