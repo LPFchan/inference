@@ -64,6 +64,26 @@
   and current incumbent, independently confirm both stages, pass both KSS
   cohorts and recheck the incumbent. First-seed failure closes its cap.
   Packet: `proposals/next-rl-confirmed-20261030/parent-implementation-binding.json`.
+- **SFT native prefix:** `parallel/sft-5866097875feb182`,
+  `main:qwen-sft-cooldown`, frozen `code/b67c149` (PR30), stops at update 500.
+  All named adapter/optimizer tensors and TRAIN draws/losses/gradient norms
+  must match the retained twin before update 501; the fixed endpoint is 944.
+  Parent verification passes 140 focused CPU tests. Automated review and native
+  acceptance remain pending; the incumbent is unchanged.
+- **Longer-clip SFT:** `parallel/sft-f42871766adb064c`, `main:qwen-sft-v008`,
+  uses unchanged `code/1412c1f`, seed 21774173 and 944 × 4 sentence-epoch draws.
+  v008 contains 10,154 clips/30.7208 h; every WAV, ordered v005 subset,
+  frozen validation, exclusion and both preregistered draw hashes validate.
+  Its separate ten-update longest-clip probe passes at 4.72094 GB physical
+  peak, below the registered 4.75 GB limit, with normal pressure. Intake
+  source is `code/ed0d1bb` (PR31). Both KSS contracts must use v008, including
+  a new matched base run; the v005 base cannot be substituted.
+  Evidence: `proposals/next-data-after-confirmed-20261030`.
+- **Intake protocol deviation:** the data worker reports displaying one unique
+  sealed test reference through two exclusion-related files, without using it.
+  The parent did not reopen it. No new test prediction/scoring occurred;
+  v008 retains zero held-out ID/text/audio overlap. The deviation and limits
+  are recorded in that packet's `parent-protocol-deviation.json`.
 - **Closed single-draw SFT-parent GRPO:** `grpo-76cf17e6620b34fb` completes
   1,000 updates and all 1,295 validation clips, score 0.8965 vs parent/current
   incumbent 0.8839. KO/JA errors fall, while ZH rises to 5.2957%, exceeding
