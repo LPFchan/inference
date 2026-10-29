@@ -151,6 +151,14 @@ current policies share frozen weights; only reference adapters are copied.
 There is no critic, external judge, paid API, or independent rollout server.
 Gradients are averaged across group members and globally clipped at 1.0.
 
+`--advantage-scale S` (GRPO only, positive and finite) replaces the group
+standard deviation with a fixed divisor: each advantage is `(reward - group
+mean) / S`, with no epsilon. Groups therefore push in proportion to their
+reward spread instead of each being rescaled to unit standard deviation.
+Omitted, the default `(reward - mean) / (std + 1e-6)` is unchanged. The value
+is stored in the exact-match resume contract and is unrelated to the LoRA
+`--scale`.
+
 Use `--base-reference` to start directly from the untouched ASR base. Zero-delta
 LoRA initialization preserves that base as the starting policy and fixed KL
 reference. This flag is valid for GRPO, is mutually exclusive with

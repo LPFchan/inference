@@ -36,6 +36,19 @@ def test_identical_rollouts_have_no_fabricated_advantage():
     assert low + high == pytest.approx(0)
 
 
+def test_fixed_advantage_scale_divides_centered_rewards():
+    near_tie = [0.5625, 0.7291666666666667, 0.7291666666666667, 0.5625]
+    assert advantages(near_tie, None) == advantages(near_tie)
+    assert advantages(near_tie) == pytest.approx([-1, 1, 1, -1], rel=1e-4)  # std + 1e-6 default
+    spread = 1 / 12 / 0.03  # each sample sits 1/12 from the group mean: 2.7778
+    assert advantages(near_tie, 0.03) == pytest.approx([-spread, spread, spread, -spread], rel=1e-12)
+    assert advantages([0.8, 0.8], 0.03) == [0, 0]
+    assert advantages([-1.0] * 4, 0.03) == [0] * 4
+    for invalid in (0, -0.03, float("nan"), float("inf")):
+        with pytest.raises(ValueError, match="advantage scale"):
+            advantages(near_tie, invalid)
+
+
 @pytest.mark.parametrize("field,value", [("sha256", "a"), ("speaker", "s1"),
                                          ("text", "안녕하세요!")])
 def test_train_dev_overlap_is_rejected(field, value):
@@ -96,6 +109,24 @@ def test_reference_modes_are_explicit_and_bound_to_resume_settings(monkeypatch, 
 def test_missing_or_conflicting_reference_modes_are_rejected(monkeypatch, stage, extra):
     with pytest.raises(SystemExit) as error:
         parse_training_args(monkeypatch, stage, extra)
+    assert error.value.code == 2
+
+
+@pytest.mark.parametrize("extra,scale", [([], None), (["--advantage-scale", "0.03"], 0.03)])
+def test_advantage_scale_is_bound_to_grpo_resume_settings(monkeypatch, extra, scale):
+    trainer, args = parse_training_args(monkeypatch, "grpo", ["--base-reference", *extra])
+    assert args.scale == 1.0  # LoRA multiplier is a separate setting
+    assert trainer.training_settings(args)["advantage_scale"] == scale
+
+
+@pytest.mark.parametrize("stage,value", [
+    ("grpo", "0"), ("grpo", "-0.03"), ("grpo", "nan"), ("grpo", "inf"),
+    ("sft", "0.03"), ("evaluate", "0.03"),
+])
+def test_invalid_advantage_scale_is_rejected(monkeypatch, stage, value):
+    extra = ["--base-reference"] if stage == "grpo" else []
+    with pytest.raises(SystemExit) as error:
+        parse_training_args(monkeypatch, stage, [*extra, "--advantage-scale", value])
     assert error.value.code == 2
 
 

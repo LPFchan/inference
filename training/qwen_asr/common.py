@@ -100,8 +100,13 @@ def reward(reference, hypothesis, language, korean_wer_weight=0.0):
     return max(-1.0, 1.0 - error)
 
 
-def advantages(rewards):
+def advantages(rewards, scale=None):
+    """Group-centered rewards over the group std, or over a fixed positive scale if given."""
     mean = sum(rewards) / len(rewards)
+    if scale is not None:
+        if not (math.isfinite(scale) and scale > 0):
+            raise ValueError("advantage scale must be positive and finite")
+        return [(value - mean) / scale for value in rewards]
     variance = sum((value - mean) ** 2 for value in rewards) / len(rewards)
     return [(value - mean) / (math.sqrt(variance) + 1e-6) for value in rewards]
 
