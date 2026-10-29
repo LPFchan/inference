@@ -13,6 +13,7 @@ _spec = importlib.util.spec_from_file_location("stt_score", ROOT / "scripts/stt-
 _score = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_score)
 normalize = _score.normalize
+summarize = _score.summarize
 LANGUAGES = {"en": "English", "ko": "Korean", "ja": "Japanese", "zh": "Chinese"}
 
 

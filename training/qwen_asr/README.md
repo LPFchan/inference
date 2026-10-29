@@ -195,6 +195,39 @@ set for selection, then run the untouched 2,624-clip FLEURS test once for each
 accepted final candidate with the shared scorer. Keep English regressions
 visible. Do not merge/quantize/deploy adapters on the strength of training loss.
 
+### External probe
+
+`evaluate --external PROBE.jsonl` transcribes a frozen external manifest instead
+of development. It never trains, never runs the development evaluation and
+never changes the primary FLEURS score. Pass the checkpoint's own training data as `--data`; the
+run refuses a checkpoint trained on other data.
+
+```sh
+.venv/bin/python training/qwen_asr/train.py evaluate \
+  --model "$HOME/models/stt/qwen-base-8bit" --data TRAINING_DATA \
+  --protected-test "$HOME/models/stt/fleurs-test/manifest.jsonl" \
+  --external PROBE/probe.jsonl \
+  --eval-clips 2 --memory-gb 4.5 --output RUN
+```
+
+Add `--init-adapter CHECKPOINT` to evaluate a checkpoint.
+
+Before loading the model it checks the manifest against `probe.json`'s
+`probe_sha256`, and each WAV's hash, 16 kHz mono PCM16 format and declared
+duration. It also rejects any shared clip, text or speaker with `--data` and
+the frozen test. The model gets audio and the known language only. Decoding
+matches development: greedy, `--max-tokens`, 128 MiB cache.
+
+`--eval-clips` counts clips per cohort. Every model gets the same seeded subset,
+and a larger count keeps the smaller one's clips. Each clip is appended to
+`predictions.jsonl` with the run's contract hash as soon as it finishes. Repeat
+with `--resume` and a larger `--eval-clips` to continue: saved clips are not
+decoded again. A changed model, checkpoint, code, data, probe or setting is
+refused, as are foreign or duplicate rows. `summary-N.json` (N clips) reports
+WER and CER per language and cohort using the shared scorer, plus empty and
+truncated output counts. A finished summary is never overwritten. Cohorts may
+be deliberately balanced, so never pool them into one accuracy.
+
 ## Sharing the serving Mac
 
 The 20 GB Nemotron service must be unloaded for training. The trainer refuses

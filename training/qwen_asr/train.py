@@ -2,16 +2,20 @@
 """Qwen3-ASR decoder LoRA SFT and serialized, audio-conditioned GRPO on MLX."""
 import argparse
 import fcntl
+import hashlib
 import json
 import math
+import os
 import platform
 import random
 import socket
 import time
 from pathlib import Path
+import wave
 
-from common import (LANGUAGES, advantages, atomic_json, load_manifests, reward,
-                    recover_uncommitted_updates, sha256, training_targets)
+from common import (LANGUAGES, advantages, atomic_json, load_manifests, read_jsonl, reward,
+                    recover_uncommitted_updates, sha256, summarize, training_targets,
+                    validate_splits)
 
 MODEL_ID = "mlx-community/Qwen3-ASR-1.7B-8bit"
 MODEL_REVISION = "a8379a2e2f9e313c9292cdf1af4055ab56d50d55"
@@ -50,7 +54,10 @@ def arguments():
     p.add_argument("--korean-wer-weight", type=float, default=0.0)
     p.add_argument("--max-tokens", type=int, default=256)
     p.add_argument("--save-every", type=int, default=25)
-    p.add_argument("--eval-clips", type=int, default=4, help="per language on development only")
+    p.add_argument("--eval-clips", type=int, default=4,
+                   help="per language on development only; per cohort with --external")
+    p.add_argument("--external", type=Path,
+                   help="frozen external probe manifest to transcribe instead of development")
     p.add_argument("--memory-gb", type=float, default=18.0)
     p.add_argument("--seed", type=int, default=20261029)
     a = p.parse_args()
@@ -62,6 +69,8 @@ def arguments():
         p.error("invalid GRPO/memory settings")
     if a.base_reference and a.stage != "grpo":
         p.error("--base-reference is only valid for GRPO")
+    if a.external and a.stage != "evaluate":
+        p.error("--external is only valid for evaluate")
     if a.stage == "grpo" and not (a.init_adapter or a.base_reference):
         p.error("GRPO requires --init-adapter or --base-reference")
     a.learning_rate = a.learning_rate or (1e-4 if a.stage == "sft" else 1e-6)
@@ -75,6 +84,72 @@ def training_settings(a):
         "stage", "accumulate", "rank", "scale", "learning_rate", "group_size",
         "temperature", "beta", "max_tokens", "seed", "memory_gb", "korean_wer_weight",
         "base_reference")}
+
+
+def external_plan(manifest, per_cohort, seed):
+    """Verify a frozen external probe; return its rows and a seeded, nested per-cohort subset.
+
+    The subset for N clips per cohort is a prefix of the subset for any larger N,
+    so a smoke run extends to the full probe without changing earlier clips.
+    """
+    manifest = Path(manifest)
+    if sha256(manifest) != json.loads((manifest.parent / "probe.json").read_text())["probe_sha256"]:
+        raise ValueError("changed external manifest")
+    rows = read_jsonl(manifest)
+    for row in rows:
+        path = manifest.parent / row["audio"]
+        if sha256(path) != row["sha256"]:
+            raise ValueError(f"changed audio: {row['id']}")
+        with wave.open(str(path)) as audio:
+            layout = (audio.getnchannels(), audio.getsampwidth(), audio.getframerate())
+            seconds = audio.getnframes() / audio.getframerate()
+        if layout != (1, 2, 16000) or abs(seconds - row["seconds"]) > 1e-3 or not 1 <= seconds <= 15:
+            raise ValueError(f"unexpected external audio format or duration: {row['id']}")
+        if not row.get("cohort"):
+            raise ValueError(f"missing external cohort: {row['id']}")
+    plan = []
+    for cohort in sorted({row["cohort"] for row in rows}):
+        group = sorted((row for row in rows if row["cohort"] == cohort), key=lambda row: row["id"])
+        random.Random(seed).shuffle(group)
+        plan += group[:per_cohort]
+    return rows, plan
+
+
+def saved_predictions(path, probe, contract_sha256):
+    """Completed external rows; reject anything not produced under this exact contract."""
+    path = Path(path)
+    text = path.read_text() if path.exists() else ""
+    lines = text.splitlines()
+    if text and not text.endswith("\n"):
+        try:
+            json.loads(lines[-1])
+        except json.JSONDecodeError:
+            lines.pop()  # an interrupted worker may leave its last write incomplete
+        temporary = path.with_suffix(".jsonl.tmp")
+        temporary.write_text("".join(line + "\n" for line in lines))
+        temporary.replace(path)
+    expected = {row["id"]: row for row in probe}
+    saved = {}
+    for line in lines:
+        row = json.loads(line)
+        source = expected.get(row["id"])
+        if (row["id"] in saved or source is None or row["contract_sha256"] != contract_sha256
+                or (row["reference"], row["language"], row["cohort"])
+                != (source["text"], source["language"], source["cohort"])):
+            raise ValueError(f"saved external prediction drift: {row['id']}")
+        saved[row["id"]] = row
+    return saved
+
+
+def cohort_metrics(rows):
+    """Shared-scorer WER/CER per language and cohort; never pooled across cohorts."""
+    groups = {}
+    for row in rows:
+        groups.setdefault(f"{row['language']}/{row['cohort']}", []).append(row)
+    return {key: {**summarize(group),
+                  "empty_outputs": sum(not row["hypothesis"].strip() for row in group),
+                  "truncated_outputs": sum(not row["ended"] for row in group)}
+            for key, group in sorted(groups.items())}
 
 
 def main():
@@ -104,6 +179,11 @@ def run(a):
     from mlx_lm.tuner.lora import LoRALinear
 
     train, dev, data_meta = load_manifests(a.data, a.protected_test)
+    if a.external:
+        a.external = a.external.resolve()
+        probe, plan = external_plan(a.external, a.eval_clips, a.seed)
+        # Also proves the probe shares no clip, text or speaker with this training data.
+        validate_splits(train + dev, probe, read_jsonl(a.protected_test))
     pools = {lang: [r for r in train if r["language"] == lang] for lang in LANGUAGES}
     if any(not pool for pool in pools.values()):
         raise ValueError("all four training languages required")
@@ -115,6 +195,9 @@ def run(a):
     if source != {"id": MODEL_ID, "revision": MODEL_REVISION}:
         raise ValueError("unexpected base model source")
     init = a.init_adapter.resolve() if a.init_adapter else None
+    if a.external and init and json.loads((init / "checkpoint.json").read_text())["contract"]["data"][
+            "train_sha256"] != data_meta["train_sha256"]:
+        raise ValueError("--data must be the checkpoint's own training data")
     settings = training_settings(a)
     contract = {"settings": settings, "model_files": model_files,
                 "data": {k: data_meta[k] for k in (
@@ -122,6 +205,8 @@ def run(a):
                 "init_adapter_sha256": sha256(init / "adapters.safetensors") if init else None,
                 "code": {p.name: sha256(p) for p in Path(__file__).parent.glob("*.py")},
                 "scorer_sha256": sha256(Path(__file__).resolve().parents[2] / "scripts/stt-score.py")}
+    if a.external:
+        contract["external_sha256"] = sha256(a.external)
     run_file = a.output / "run.json"
     if run_file.exists():
         if not a.resume or json.loads(run_file.read_text())["contract"] != contract:
@@ -131,6 +216,19 @@ def run(a):
     else:
         atomic_json(run_file, {"contract": contract, "platform": platform.platform(),
                               "started": time.time(), "status": "running"})
+    if a.external:
+        contract_sha256 = hashlib.sha256(json.dumps(contract, sort_keys=True).encode()).hexdigest()
+        predictions = a.output / "predictions.jsonl"
+        summary = a.output / f"summary-{len(plan)}.json"
+        if summary.exists():
+            raise FileExistsError(f"external evaluation already complete: {summary}")
+        saved = saved_predictions(predictions, probe, contract_sha256)
+        if a.resume:
+            result = json.loads(run_file.read_text())
+            result.update(status="running")
+            result.pop("finished", None)
+            result.pop("peak_memory_bytes", None)
+            atomic_json(run_file, result)
 
     mx.set_memory_limit(int(a.memory_gb * (1 << 30)))
     mx.set_cache_limit(128 << 20)
@@ -248,6 +346,38 @@ def run(a):
         atomic_json(a.output / f"dev-{tag}.json", {"rows": results,
                     "seconds": time.perf_counter() - started,
                     "peak_memory_bytes": mx.get_peak_memory()})
+
+    if a.external:
+        with predictions.open("a") as stream:
+            for row in plan:
+                if row["id"] in saved:
+                    continue
+                began = time.perf_counter()
+                # The model sees audio and the known language only. An absolute
+                # path replaces the --data root inside context().
+                audio_only = {"audio": str(a.external.parent / row["audio"]), "language": row["language"]}
+                _, text, ended = sample(audio_only, context(audio_only), 0.0)
+                saved[row["id"]] = {
+                    "id": row["id"], "language": row["language"], "cohort": row["cohort"],
+                    "reference": row["text"], "hypothesis": text, "ended": ended,
+                    "seconds": row["seconds"], "batch_seconds": time.perf_counter() - began,
+                    "batch_samples": 1, "contract_sha256": contract_sha256}
+                stream.write(json.dumps(saved[row["id"]], ensure_ascii=False) + "\n")
+                stream.flush()
+                os.fsync(stream.fileno())
+                mx.clear_cache()
+        atomic_json(summary, {
+            "manifest": str(a.external), "manifest_sha256": contract["external_sha256"],
+            "contract_sha256": contract_sha256, "init_adapter": str(init) if init else None,
+            "clips": len(plan), "seed": a.seed,
+            "scope": "balanced external probe; cohorts separate, not natural-population accuracy "
+                     "or input to the primary FLEURS score",
+            "cohorts": cohort_metrics([saved[row["id"]] for row in plan]),
+            "peak_memory_bytes": mx.get_peak_memory()})
+        result = json.loads(run_file.read_text())
+        result.update(status="complete", finished=time.time(), peak_memory_bytes=mx.get_peak_memory())
+        atomic_json(run_file, result)
+        return
 
     if start == 0 and not a.skip_initial_eval and not (a.output / "dev-initial.json").exists():
         evaluate("initial")
