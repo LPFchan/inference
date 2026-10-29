@@ -110,10 +110,21 @@ independent confirmation.
   --output "$HOME/models/stt/qwen-sft" --steps 200
 ```
 
-All 112 attention projections in the 28 decoder blocks receive rank-16 LoRA
-(scale 1, equivalent alpha 16). The quantized base, audio encoder, projector,
-embeddings and normalization stay frozen. Audio features are detached before
-decoder training. Qwen's native chat/audio prompt and known language prefix are
+By default (`--lora-targets attention`) all 112 attention projections in the 28
+decoder blocks (`q/k/v/o_proj`) receive rank-16 LoRA (scale 1, equivalent alpha
+16): 224 adapter tensors, 6.42M trainable parameters. `--lora-targets
+attention-mlp` (SFT and evaluate only; GRPO refuses it) also wraps the 84 decoder
+MLP projections `model.layers.N.mlp.{gate,up,down}_proj`: 196 modules, 392
+tensors, 17.43M parameters. The attention adapters are built first in their
+original order, so their seeded initialization is the same under either
+placement; every `lora_b` starts at zero, so either placement starts as the
+untouched base. The extra 11.0M fp32 parameters add about 44 MB each for
+weights, the running gradient sum, the current microstep gradient and both
+AdamW moments (about 0.22 GB), plus activations kept for the MLP adapters'
+gradients. Measure the actual fit before a full run. Either way the quantized
+base, audio encoder, projector, embeddings and normalization stay frozen.
+Audio features are detached before decoder training. Qwen's native chat/audio
+prompt and known language prefix are
 used exactly as in inference. Teacher forcing supervises the first transcript
 token through EOS; prompt/audio tokens carry no loss. Frozen FLEURS references
 are never model input or used for checkpoint selection.
@@ -155,7 +166,8 @@ its first decayed update and resume with the same schedule:
 
 Each microstep's gradient is added and evaluated immediately. A lazy running
 sum would keep every microstep gradient alive until the update ends: about
-26 MB each at rank 16, or roughly 0.8 GB at `--accumulate 32`.
+26 MB each at rank 16 (70 MB with `attention-mlp`), or roughly 0.8 GB at
+`--accumulate 32`.
 
 ## GRPO
 
@@ -248,6 +260,11 @@ reproduction of its full training pipeline or a quality guarantee.
 
 `step-NNNNN/` stores adapter and optimizer safetensors plus a hash-checked
 checkpoint manifest. `latest.json` points only to a completed checkpoint.
+The placement is part of the resume contract and of each checkpoint manifest;
+manifests written before `--lora-targets` existed count as `attention`. Loading
+an adapter (`--init-adapter` or resume) requires the same rank, scale and
+placement and exactly the expected tensor names and shapes, so an MLP adapter
+never loads into an attention-only run or the reverse.
 Repeat the same command with `--resume --steps NEW_TOTAL` to continue; step
 limits may increase, while data/model/code/hyperparameters must match. A changed
 recipe starts a new run. Sampling and utterance selection use per-step seeds.
@@ -284,7 +301,11 @@ run refuses a checkpoint trained on other data.
   --eval-clips 2 --memory-gb 4.5 --output RUN
 ```
 
-Add `--init-adapter CHECKPOINT` to evaluate a checkpoint.
+Add `--init-adapter CHECKPOINT` to evaluate a checkpoint, and `--lora-targets
+attention-mlp` when it was trained with MLP adapters. A matched base evaluation
+for such a candidate uses the same flag without `--init-adapter`, so the two
+contracts differ only in the adapter hash. Compare the new base transcripts
+with the retained attention-only base to measure native parity.
 
 Before loading the model it checks the manifest against `probe.json`'s
 `probe_sha256`, and each WAV's hash, 16 kHz mono PCM16 format and declared

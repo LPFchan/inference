@@ -8,6 +8,7 @@ import math
 import os
 import platform
 import random
+import re
 import socket
 import time
 from pathlib import Path
@@ -20,6 +21,7 @@ from common import (LANGUAGES, advantages, atomic_json, decayed_learning_rate, g
 MODEL_ID = "mlx-community/Qwen3-ASR-1.7B-8bit"
 MODEL_REVISION = "a8379a2e2f9e313c9292cdf1af4055ab56d50d55"
 SCHEDULE = ("ko", "ja", "zh") * 3 + ("en",)
+DECODER_MLP = re.compile(r"model\.layers\.\d+\.mlp\.(gate|up|down)_proj")
 
 
 def grpo_loss(log_probs, old_probs, reference_probs, advantage, beta):
@@ -47,6 +49,8 @@ def arguments():
     p.add_argument("--accumulate", type=int, default=4)
     p.add_argument("--rank", type=int, default=16)
     p.add_argument("--scale", type=float, default=1.0, help="LoRA multiplier (alpha/rank)")
+    p.add_argument("--lora-targets", choices=("attention", "attention-mlp"), default="attention",
+                   help="decoder LoRA placement; attention-mlp (SFT/evaluate) adds gate/up/down")
     p.add_argument("--learning-rate", type=float)
     p.add_argument("--lr-decay-start", type=int,
                    help="SFT only: keep the peak rate through this optimizer update, then decay linearly")
@@ -86,6 +90,8 @@ def arguments():
         p.error("--advantage-scale must be positive and finite, and is only valid for GRPO")
     if a.reference_member and (a.stage != "grpo" or a.max_draws != 1):
         p.error("--reference-member is only valid for GRPO with --max-draws 1")
+    if a.lora_targets != "attention" and a.stage == "grpo":
+        p.error("--lora-targets attention-mlp is only valid for SFT and evaluate")
     if a.base_reference and a.stage != "grpo":
         p.error("--base-reference is only valid for GRPO")
     if a.sampler != "replacement" and a.stage != "sft":
@@ -112,11 +118,41 @@ def training_settings(a):
     settings = {key: getattr(a, key) for key in (
         "stage", "accumulate", "rank", "scale", "learning_rate", "group_size",
         "temperature", "beta", "max_tokens", "seed", "memory_gb", "korean_wer_weight",
-        "base_reference", "advantage_scale", "sampler", "max_draws", "reference_member")}
+        "base_reference", "advantage_scale", "sampler", "max_draws", "reference_member",
+        "lora_targets")}
     # --steps is only a stop target; the decay endpoint is fixed for the whole run.
     settings["lr_schedule"] = None if a.lr_decay_start is None else {
         "decay_start": a.lr_decay_start, "decay_end": a.lr_decay_end}
     return settings
+
+
+def add_adapters(model, targets, rank, scale):
+    """Wrap decoder projections in zero-delta LoRA; only its A/B tensors become trainable.
+
+    from_base draws from the global RNG, so the attention pass runs first in its
+    original order and keeps the same initialization under either placement.
+    The audio encoder and every base weight stay frozen.
+    """
+    from mlx.utils import tree_unflatten
+    from mlx_lm.tuner.lora import LoRALinear
+    model.freeze()
+    modules = []
+    for name, layer in model.named_modules():
+        if name.startswith("model.layers.") and name.rsplit(".", 1)[-1] in {
+                "q_proj", "k_proj", "v_proj", "o_proj"}:
+            modules.append((name, LoRALinear.from_base(layer, r=rank, scale=scale)))
+    if len(modules) != 112:
+        raise ValueError(f"expected 112 decoder projections, got {len(modules)}")
+    if targets == "attention-mlp":
+        mlp = [(name, LoRALinear.from_base(layer, r=rank, scale=scale))
+               for name, layer in model.named_modules() if DECODER_MLP.fullmatch(name)]
+        if len(mlp) != 84:
+            raise ValueError(f"expected 84 decoder MLP projections, got {len(mlp)}")
+        modules += mlp
+    model.update_modules(tree_unflatten(modules))
+    model.freeze()
+    for _, layer in modules:
+        layer.unfreeze(keys=["lora_a", "lora_b"], recurse=False)
 
 
 def sft_row(pools, order, seed, index):
@@ -216,7 +252,6 @@ def run(a):
     from mlx_audio.stt.utils import load_model
     from mlx_audio.lm.generate import generate_step
     from mlx_lm.sample_utils import make_sampler
-    from mlx_lm.tuner.lora import LoRALinear
 
     train, dev, data_meta = load_manifests(a.data, a.protected_test)
     if a.external:
@@ -280,31 +315,23 @@ def run(a):
     mx.random.seed(a.seed)
     outer = load_model(str(a.model))
     model = getattr(outer, "_model", outer)
-    model.freeze()
-    modules = []
-    for name, layer in model.named_modules():
-        if name.startswith("model.layers.") and name.rsplit(".", 1)[-1] in {
-                "q_proj", "k_proj", "v_proj", "o_proj"}:
-            modules.append((name, LoRALinear.from_base(layer, r=a.rank, scale=a.scale)))
-    if len(modules) != 112:
-        raise ValueError(f"expected 112 decoder projections, got {len(modules)}")
-    model.update_modules(tree_unflatten(modules))
-    model.freeze()
-    for _, layer in modules:
-        layer.unfreeze(keys=["lora_a", "lora_b"], recurse=False)
+    add_adapters(model, a.lora_targets, a.rank, a.scale)
     model.eval()  # dropout-free likelihoods for both training and rollouts
-    adapter_names = {name for name, _ in tree_flatten(model.trainable_parameters())}
-    if not adapter_names or any(not name.endswith(("lora_a", "lora_b")) for name in adapter_names):
+    adapter_shapes = {name: value.shape for name, value in tree_flatten(model.trainable_parameters())}
+    if not adapter_shapes or any(not name.endswith(("lora_a", "lora_b")) for name in adapter_shapes):
         raise ValueError("unexpected trainable base parameters")
     mx.eval(model.parameters())
     initial = {name: mx.array(value) for name, value in tree_flatten(model.trainable_parameters())}
 
     def load_adapter(directory):
         info = json.loads((directory / "checkpoint.json").read_text())
-        if info["model_files"] != model_files or info["rank"] != a.rank or info["scale"] != a.scale:
+        # Checkpoints from before --lora-targets are attention-only.
+        if (info["model_files"] != model_files or info["rank"] != a.rank or info["scale"] != a.scale
+                or info.get("lora_targets", "attention") != a.lora_targets):
             raise ValueError("checkpoint/base or adapter geometry mismatch")
         weights = mx.load(str(directory / "adapters.safetensors"))
-        if set(weights) != adapter_names or sha256(directory / "adapters.safetensors") != info["adapters_sha256"]:
+        if ({name: value.shape for name, value in weights.items()} != adapter_shapes
+                or sha256(directory / "adapters.safetensors") != info["adapters_sha256"]):
             raise ValueError("invalid adapter checkpoint")
         model.load_weights(list(weights.items()), strict=False)
         return info
@@ -442,7 +469,7 @@ def run(a):
         mx.save_safetensors(str(directory / "optimizer.safetensors"), dict(tree_flatten(optimizer.state)))
         change = sum(float(mx.sum(mx.abs(value - initial[name])).item()) for name, value in params.items())
         atomic_json(directory / "checkpoint.json", {
-            "stage": a.stage, "step": step, "rank": a.rank, "scale": a.scale,
+            "stage": a.stage, "step": step, "rank": a.rank, "scale": a.scale, "lora_targets": a.lora_targets,
             "model_files": model_files, "contract": contract,
             "adapters_sha256": sha256(directory / "adapters.safetensors"),
             "optimizer_sha256": sha256(directory / "optimizer.safetensors"),
