@@ -5,6 +5,7 @@ import importlib.util
 import json
 import math
 from pathlib import Path
+import random
 import shutil
 import time
 
@@ -27,6 +28,35 @@ def sha256(path):
 
 def text_key(text):
     return normalize(text).replace(" ", "")
+
+
+def sentence_key(row):
+    """Source sentence of a recording; frozen normalized text when the ID is absent."""
+    sentence = row.get("source_sentence_id")
+    return ("id", sentence) if sentence not in (None, "") else ("text", text_key(row["text"]))
+
+
+def sentence_epoch_order(pools, seed):
+    """Per language, a seeded sentence order with one seeded recording per sentence."""
+    order = {}
+    for lang, rows in pools.items():
+        groups = {}
+        for row in rows:
+            groups.setdefault(sentence_key(row), []).append(row)
+        keys = list(groups)
+        rng = random.Random(f"{seed}:{lang}")
+        rng.shuffle(keys)
+        order[lang] = [rng.choice(groups[key]) for key in keys]
+    return order
+
+
+def sentence_epoch_draw(order, index, schedule):
+    """Microstep row: the next unused sentence of the scheduled language, never a repeat."""
+    lang = schedule[index % len(schedule)]
+    k = (index // len(schedule)) * schedule.count(lang) + schedule[:index % len(schedule)].count(lang)
+    if k >= len(order[lang]):
+        raise ValueError(f"sentence epoch exhausted for {lang} at microstep {index}")
+    return order[lang][k]
 
 
 def read_tsv(path):

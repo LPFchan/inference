@@ -14,8 +14,8 @@ from pathlib import Path
 import wave
 
 from common import (LANGUAGES, advantages, atomic_json, load_manifests, read_jsonl, reward,
-                    recover_uncommitted_updates, sha256, summarize, training_targets,
-                    validate_splits)
+                    recover_uncommitted_updates, sentence_epoch_draw, sentence_epoch_order,
+                    sha256, summarize, training_targets, validate_splits)
 
 MODEL_ID = "mlx-community/Qwen3-ASR-1.7B-8bit"
 MODEL_REVISION = "a8379a2e2f9e313c9292cdf1af4055ab56d50d55"
@@ -54,6 +54,8 @@ def arguments():
     p.add_argument("--advantage-scale", type=float,
                    help="GRPO only: divide group-centered rewards by this fixed value instead of the group std")
     p.add_argument("--korean-wer-weight", type=float, default=0.0)
+    p.add_argument("--sampler", choices=("replacement", "sentence-epoch"), default="replacement",
+                   help="SFT only: draw with replacement, or each source sentence at most once")
     p.add_argument("--max-tokens", type=int, default=256)
     p.add_argument("--save-every", type=int, default=25)
     p.add_argument("--eval-clips", type=int, default=4,
@@ -74,6 +76,8 @@ def arguments():
         p.error("--advantage-scale must be positive and finite, and is only valid for GRPO")
     if a.base_reference and a.stage != "grpo":
         p.error("--base-reference is only valid for GRPO")
+    if a.sampler != "replacement" and a.stage != "sft":
+        p.error("--sampler sentence-epoch is only valid for SFT")
     if a.external and a.stage != "evaluate":
         p.error("--external is only valid for evaluate")
     if a.stage == "grpo" and not (a.init_adapter or a.base_reference):
@@ -88,7 +92,14 @@ def training_settings(a):
     return {key: getattr(a, key) for key in (
         "stage", "accumulate", "rank", "scale", "learning_rate", "group_size",
         "temperature", "beta", "max_tokens", "seed", "memory_gb", "korean_wer_weight",
-        "base_reference", "advantage_scale")}
+        "base_reference", "advantage_scale", "sampler")}
+
+
+def sft_row(pools, order, seed, index):
+    """SFT microstep row: seeded replacement draw, or the sentence-epoch order if given."""
+    if order is not None:
+        return sentence_epoch_draw(order, index, SCHEDULE)
+    return random.Random(seed + index).choice(pools[SCHEDULE[index % len(SCHEDULE)]])
 
 
 def external_plan(manifest, per_cohort, seed):
@@ -192,6 +203,11 @@ def run(a):
     pools = {lang: [r for r in train if r["language"] == lang] for lang in LANGUAGES}
     if any(not pool for pool in pools.values()):
         raise ValueError("all four training languages required")
+    order = None
+    if a.sampler == "sentence-epoch":
+        order = sentence_epoch_order(pools, a.seed)
+        for index in range(a.steps * a.accumulate):  # refuse a repeat before any model load or update
+            sentence_epoch_draw(order, index, SCHEDULE)
     model_files = {str(p.relative_to(a.model)): sha256(p) for p in sorted(a.model.rglob("*"))
                    if p.is_file() and ".cache" not in p.parts and not p.name.startswith(".")}
     if not any(name.endswith(".safetensors") for name in model_files):
@@ -417,9 +433,9 @@ def run(a):
         grads, losses, diagnostics = None, [], {}
         if a.stage == "sft":
             for micro in range(a.accumulate):
-                index = (step - 1) * a.accumulate + micro
-                lang = SCHEDULE[index % len(SCHEDULE)]
-                row = random.Random(a.seed + index).choice(pools[lang])
+                row = sft_row(pools, order, a.seed, (step - 1) * a.accumulate + micro)
+                if order is not None:
+                    diagnostics.setdefault("ids", []).append(row["id"])
                 ctx = context(row)
                 completion = model._tokenizer.encode(row["text"], add_special_tokens=False) + [eos]
                 loss, grad = nn.value_and_grad(model, lambda m: -log_probs(m, *ctx, completion).mean())(model)
