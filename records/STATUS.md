@@ -76,12 +76,27 @@
   sequence hash. Full evidence and final adapter/optimizer are retained under
   its run directory and independently hash-verified on all three hosts.
   Confirmation `sft-a11b015fbeee0082` is running from the identical frozen
-  source/recipe with seed 21775174. Both seeds must also pass their registered
-  separate-cohort KSS veto before adoption; the base remains incumbent.
+  source/recipe with seed 21775174. The first seed also passes its registered
+  KSS veto; confirmation still needs both FLEURS and KSS acceptance before
+  adoption. The base remains incumbent.
   The diagnostic score delta against the rejected 5,000-update SFT is
   -0.1552, CI95 [-0.2512, -0.0551]. Sampling, recording choice, order,
   acoustic coverage and update count change together, so this does not
   establish repetition as the cause of the difference.
+- One-pass SFT first-seed KSS check completed all 512 unique clips with
+  matched frozen contracts/references and no empty or truncated outputs.
+  Both separately reported cohorts pass the unchanged +0.5 pp WER/CER veto:
+
+  | KSS Korean cohort | Clips | Base WER | SFT WER | Base CER | SFT CER |
+  | --- | ---: | ---: | ---: | ---: | ---: |
+  | Digit | 256 | 32.71% | 11.05% | 11.88% | 3.58% |
+  | Other | 256 | 8.08% | 7.20% | 1.24% | 1.35% |
+
+  Other-cohort CER rises by 0.1178 pp, within the veto. This is a
+  single-speaker supplementary Korean probe with oversampled digit clips;
+  there is no pooled accuracy or final-test claim. Full output, cohort
+  metrics, guard and integrity are retained under
+  `parallel/kss-v001-sft-ce33a3d7a476e297` and verified on all three hosts.
 - Written-form direct-base GRPO `bc8f2d8f6f19a369` completed 1,000 updates
   and all 1,295 validation clips. Every unchanged first-seed gate passes:
   CJK score 0.9392, paired delta CI95 [-0.0973, -0.0194]. Korean WER is
@@ -103,10 +118,10 @@
   `qwen-sft-sentence-confirm` → `parallel/sft-a11b015fbeee0082` (frozen
   `code/1412c1f`, base init, rank16, LR3e-5, seed21775174, 944×4 updates,
   each drawn source sentence used at most once). The fourth worker,
-  `qwen-kss-sft-first`, runs the first SFT seed's preregistered 512-clip KSS
-  veto as `parallel/kss-v001-sft-ce33a3d7a476e297`, frozen `code/f119906`.
-  It overlaps FLEURS confirmation validation; both seeds still need both
-  unchanged acceptance checks. Its contract equals the retained KSS base
+  `qwen-kss-rl-first`, runs the first GRPO seed's preregistered 512-clip KSS
+  veto as `parallel/kss-v001-grpo-bc8f2d8f6f19a369`, frozen `code/f119906`.
+  It overlaps FLEURS confirmation validation; adoption requires unchanged
+  FLEURS and KSS acceptance for both seeds. Its contract equals the retained KSS base
   run except for the checkpoint. The three training runs use v005 written-form
   FLEURS train (8,966 clips / 25.14 h),
   supervisor `code/1ae82c5`, a 4.5 GiB MLX guideline and a 5 GB physical
