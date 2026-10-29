@@ -6,9 +6,10 @@ Follow [DEC-20261029-001](decisions/DEC-20261029-001-qwen-asr-autoresearch.md)
 for selection. The operator has since authorized four agents and up to four
 5 GB workers; PR21 carries the amended execution contract.
 
-- Score the same-filter expanded-data trial against base and its filtered-v1
-  control. Preserve the source snapshot and remove the discovered transcript
-  outlier in a new derivative before any unfiltered v2 trial.
+- Score the expanded filtered-v2 and removal-only unfiltered-v006 trials
+  against base and their controls, confirming only provisional winners.
+  Preserve input snapshots; finish the shared Common Voice parser fix before
+  a new intake rebuild that recovers the previously swallowed source records.
 - Audit FLEURS train as a written-form style probe, with frozen exclusions
   and an independent, never-trained KSS check before any adoption claim.
 - Score the live higher-rate direct-base GRPO and filtered-v1 SFT trials,

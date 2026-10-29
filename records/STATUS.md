@@ -29,7 +29,7 @@
   recipe. Full evidence: `batch32-summary.json` under the program root.
 - Operator authorized four research agents and at most four model workers,
   5 GB each / 20 GB total. Candidate launcher PR21 (`code/75def71`) has native
-  admission evidence; three full trials now run through guarded admission in `main` tmux:
+  admission evidence; four full trials now run through guarded admission in `main` tmux:
   `qwen-rl-lr1e5` → `parallel/grpo-b62373c31be7ca27` (LR 1e-5 from base,
   1,000 GRPO updates), and `qwen-sft-filter-v1` →
   `parallel/sft-8db65348fd229db0` (numeral-filtered v1, 5,000 × 4 SFT updates).
@@ -37,15 +37,25 @@
   trains on the same-filter expanded pool (51,079 clips / 78.12 h), source
   `code/655b245`, seed 21774173, LR 3e-5 and 5,000 × 4 updates. Its current
   supervisor is `code/3976a1e`; earlier jobs retain `code/75def71`.
+  A fourth job, `qwen-sft-v006-raw` → `parallel/sft-100c0aa4969e4145`,
+  trains on the removal-only unfiltered-v2 derivative (67,793 clips / 108.57 h),
+  with the same trainer/seed/LR/5,000 × 4 budget and supervisor `code/1ae82c5`.
   This changes speaker/text/source mix and sampling order, including English
-  pool order; it does not isolate data quantity. All three use a 4.5 GiB
+  pool order; it does not isolate data quantity. All four use a 4.5 GiB
   MLX guideline and a 5 GB physical-footprint budget.
   Admission review fixes are pending; immutable actual-run sources stay intact.
   Independent-seed confirmation remains required before adoption.
 - Native microbatch-2 probe PR20 fails acceptance: about 9.02% relative gradient
   difference, 1.029× end-to-end speedup and a brief 5.006 GB physical peak.
   Its timings overlap the batch-32 run. Training stays serial within each
-  worker; four-worker fit and throughput gains have not been established.
+  worker. Four full workers are now admitted and training below their 5 GB
+  budgets with normal pressure; throughput gains remain unmeasured.
+- Minimal memory patch PR20 (`f287b70`) passed native candidate-only acceptance:
+  one accumulate-32 update matches all 224 adapter and 450 optimizer tensors,
+  loss and gradient norm byte-for-byte. Optimizer-step MLX peak falls from
+  4.359 GB to 3.698 GB; whole-run peak is 3.885 GB, sampled lifetime physical
+  peak 4.248 GB. This is single-update compatibility evidence. Existing full
+  trials keep their frozen code; no restart or quality improvement is claimed.
 - Nemotron remains unloaded. Preserve gateway/tunnel, oMLX settings and all
   models/audio/results. No Grimoire operations or automatic model deployment.
 - Root: `~/models/stt/qwen3-asr-hillclimb-20261029`. `parallel-trials.json` and
@@ -54,10 +64,12 @@
   owns a worker. The ten-minute heartbeat prompt is `continue`.
 - Intake: v1 9,852 clips / 16.51 h; v2 67,794 clips / 108.57 h with
   identical development bytes. Raw v2 is held for unfiltered training: one
-  Japanese TRAIN transcript has 82,807 characters for 6.444 s of audio.
-  The active filtered v3 excludes it; all 52,374 train/dev WAV hashes passed
-  its frozen loader. Preserve v2 and make a new cleaned derivative before
-  unfiltered use; evidence is `data-v002-quality-hold.json`.
+  Japanese TRAIN transcript has 82,807 characters for 6.444 s of audio because
+  default CSV quoting merged 290 following source records. Filtered v3 excludes
+  it. The accepted removal-only v006 drops exactly that target; all 69,088
+  train/dev WAV hashes passed the frozen loader, and retained lines stay
+  byte-identical. Lost source records are not recovered. Preserve the raw-v2
+  hold; PR23 shares literal-quote parsing across both intake entry points.
   YODAS remains quarantined for translated captions. The numeral filter is
   imperfect and development-informed. FLEURS train is a proposed written-form
   style probe; no training/adoption claim is established from its catalogue.
