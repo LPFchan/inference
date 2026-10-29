@@ -944,8 +944,8 @@ IMPERFECT = [[2, GRPO_EOS]] * 4
 def test_grpo_reference_member_joins_each_group_as_a_fifth_member(monkeypatch, tmp_path):
     import json
     import math
-    import mlx.core as mx
-    import mlx.nn as nn
+    mx = pytest.importorskip("mlx.core")
+    nn = pytest.importorskip("mlx.nn")
     from mlx.utils import tree_flatten
     from common import grpo_row, informative
     steps = [MIXED, EQUAL, IMPERFECT, TRUNCATED]  # KO, JA, ZH, KO
@@ -1040,7 +1040,7 @@ def test_grpo_default_path_matches_the_pre_reference_member_trainer(monkeypatch,
     import json
     import subprocess
     from types import ModuleType
-    import mlx.core as mx
+    mx = pytest.importorskip("mlx.core")
     base = "4272251005d5b837cd238364a1567fd0870f276a"
     shown = subprocess.run(["git", "-C", str(DIRECTORY), "show", f"{base}:training/qwen_asr/train.py"],
                            capture_output=True, text=True)
