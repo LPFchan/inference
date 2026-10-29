@@ -166,18 +166,23 @@ def test_distinct_training_recordings_may_repeat_a_sentence():
                     [row("3", "다른 문장", "speaker-c", "c")], [])
 
 
-def test_clean_expansion_preserves_holdouts_and_distinct_recordings(tmp_path):
+@pytest.mark.parametrize("free", [100 * (1 << 30) - 1, 100 * (1 << 30)])
+def test_clean_expansion_preserves_holdouts_and_distinct_recordings(tmp_path, monkeypatch, free):
     np = pytest.importorskip("numpy")
     sf = pytest.importorskip("soundfile")
     pa = pytest.importorskip("pyarrow")
+    pytest.importorskip("scipy.signal")
     import pyarrow.parquet as pq
     import io
     import json
     import tarfile
     from types import SimpleNamespace
     from common import atomic_json, load_manifests, sha256
+    import expand_clean
     from expand_clean import build, source_holdout
     from prefetch import SOURCES
+    # The intake's 100 GiB free-space guard, independent of this host's disk.
+    monkeypatch.setattr(expand_clean.shutil, "disk_usage", lambda path: SimpleNamespace(free=free))
 
     root, core, output = (tmp_path / name for name in ("root", "core", "output"))
     for folder in (root, core / "wav", output):
@@ -242,8 +247,13 @@ def test_clean_expansion_preserves_holdouts_and_distinct_recordings(tmp_path):
     cached("aishell/data_aishell/wav/S0002.tar.gz", archive_content([
         "train/S0002/train1.wav", "dev/S0724/dev1.wav", "test/S0901/test1.wav"], "w:gz"))
     atomic_json(root / "prefetch.json", dict(status="complete", completed=completed))
-    build(SimpleNamespace(root=root, core=core, output=output, protected_test=protected,
-                          aishell_hours=40, seed=42))
+    settings = SimpleNamespace(root=root, core=core, output=output, protected_test=protected,
+                               aishell_hours=40, seed=42)
+    if free < 100 * (1 << 30):
+        with pytest.raises(RuntimeError, match="100 GiB free"):
+            build(settings)
+        return
+    build(settings)
     train, dev, metadata = load_manifests(output, protected)
     assert len(train) == 8
     assert sum(r["text"] == "같은 추가 문장" for r in train) == 2
