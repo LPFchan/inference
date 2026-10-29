@@ -290,6 +290,7 @@ def run(a):
                 loss, grad = nn.value_and_grad(model, lambda m: -log_probs(m, *ctx, completion).mean())(model)
                 mx.eval(loss, grad)
                 grads = grad if grads is None else tree_map(lambda x, y: x + y, grads, grad)
+                mx.eval(grads)  # a lazy sum would keep every microstep gradient alive
                 losses.append(float(loss.item()))
             grads = tree_map(lambda g: g / a.accumulate, grads)
         else:
@@ -318,6 +319,7 @@ def run(a):
                 loss, grad = nn.value_and_grad(model, objective)(model)
                 mx.eval(loss, grad)
                 grads = grad if grads is None else tree_map(lambda x, y: x + y, grads, grad)
+                mx.eval(grads)
                 losses.append(float(loss.item()))
             grads = tree_map(lambda g: g / a.group_size, grads)
             diagnostics = {"id": row["id"], "rewards": rewards, "advantages": adv,
