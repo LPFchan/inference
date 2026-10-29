@@ -101,7 +101,7 @@ def system():
 def models():
     """PIDs whose interpreter runs qwen_asr/train.py or batching.py directly (not shells or launchers)."""
     found = set()
-    for line in _run("ps", "-axo", "pid=,args=").splitlines():
+    for line in _run("ps", "-wwaxo", "pid=,args=").splitlines():
         pid, _, args = line.strip().partition(" ")
         if pid.isdigit() and MODEL.match(args.strip()):
             found.add(int(pid))

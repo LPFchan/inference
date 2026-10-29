@@ -341,6 +341,12 @@ def test_model_scan_counts_interpreters_not_launchers_or_shells():
     assert not match("/usr/bin/python3 -u /tmp/stt-qwen-batch32-full-20261029.py")
 
 
+def test_model_census_keeps_long_commands_at_narrow_terminal_width(host, monkeypatch):
+    monkeypatch.setenv("COLUMNS", "80")
+    worker = legacy(host)
+    assert worker.pid in parallel.models()
+
+
 # --- benchmark ---------------------------------------------------------------------
 
 def test_benchmark_audio_mirrors_the_trainer_sampler(tmp_path):
