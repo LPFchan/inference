@@ -26,6 +26,7 @@
   | Original 8-bit anchor | 4.25 | 10.85 | 4.62 | 6.61 | 1.0000 |
   | One-pass SFT selected, seed 21774173 | 3.99 | 10.58 | 4.29 | 4.94 | 0.8839 |
   | One-pass SFT confirmation, seed 21775174 | 4.06 | 10.55 | 4.53 | 5.24 | 0.9158 |
+  | Late-decay SFT, closed | 4.01 | 10.47 | 4.52 | 5.14 | 0.9074 |
   | SFT-parent single-draw GRPO, closed | 3.99 | 10.50 | 4.25 | 5.30 | 0.8965 |
   | Uniform two-seed SFT average, closed | 3.89 | 10.67 | 4.49 | 5.14 | 0.9110 |
   | Base-init GRPO `bc8f2d8f6f19a369`, first seed | 4.15 | 10.41 | 4.63 | 5.65 | 0.9392 |
@@ -64,14 +65,13 @@
   and current incumbent, independently confirm both stages, pass both KSS
   cohorts and recheck the incumbent. First-seed failure closes its cap.
   Packet: `proposals/next-rl-confirmed-20261030/parent-implementation-binding.json`.
-- **Late-decay SFT:** `parallel/sft-5866097875feb182`,
-  `main:qwen-sft-cooldown`, frozen `code/b67c149` (merged PR30), resumes from
-  accepted update 501 toward 944 and full validation. The first 500 updates
-  exactly match all 224 adapter/450 optimizer tensors and TRAIN draws/losses/
-  gradient norms of the retained twin. Update 501 uses the expected float32
-  decay rate, with unchanged inputs/loss/norm and normal pressure. Combined
-  main-plus-feature verification passes 141 focused CPU tests; no accuracy
-  selection has occurred for this trial.
+- **Closed late-decay SFT:** `sft-5866097875feb182` completes 944 updates and
+  all 1,295 validation clips, scoring 0.9074 vs incumbent 0.8839. Japanese and
+  Chinese exceed their regression limits; gain, CJK and confidence gates fail.
+  Paired score-delta CI95 is [+0.0011,+0.0490], with no empty/truncated outputs.
+  Exact prefix/native acceptance and all 3,776 unique preregistered TRAIN draws
+  verify. No confirmation or KSS run, and no start/end/shape/peak-LR/budget/seed
+  variants from this result. Evidence: `parallel/sft-5866097875feb182`.
 - **Longer-clip SFT:** `parallel/sft-f42871766adb064c`, `main:qwen-sft-v008`,
   uses unchanged `code/1412c1f`, seed 21774173 and 944 × 4 sentence-epoch draws.
   v008 contains 10,154 clips/30.7208 h; every WAV, ordered v005 subset,

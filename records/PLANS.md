@@ -11,9 +11,6 @@ and [the four-slot contract](../skills/autoresearch/SKILL.md).
   confirmation; both KSS vetoes and final incumbent recheck remain required.
 - Preserve the registered redraw cap and 1,000-update budget; its first-seed
   failure closes the recipe without cap or learning-setting sweeps.
-- Score the registered one-pass SFT late-linear decay at its fixed endpoint
-  944. Its exact prefix and first decayed update are accepted; keep all gates
-  fixed and independently confirm only a passing first seed.
 - Score the fixed 20-second FLEURS TRAIN extension after its accepted memory
   preflight. Keep incumbent training source/budget unchanged; any KSS veto uses
   a new base run with the same v008 data contract as its candidate.
