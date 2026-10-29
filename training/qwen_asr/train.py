@@ -13,8 +13,8 @@ import time
 from pathlib import Path
 import wave
 
-from common import (LANGUAGES, advantages, atomic_json, grpo_row, informative, load_manifests,
-                    read_jsonl, reward, recover_uncommitted_updates, sentence_epoch_draw,
+from common import (LANGUAGES, advantages, atomic_json, decayed_learning_rate, grpo_row, informative,
+                    load_manifests, read_jsonl, reward, recover_uncommitted_updates, sentence_epoch_draw,
                     sentence_epoch_order, sha256, summarize, training_targets, validate_splits)
 
 MODEL_ID = "mlx-community/Qwen3-ASR-1.7B-8bit"
@@ -48,6 +48,10 @@ def arguments():
     p.add_argument("--rank", type=int, default=16)
     p.add_argument("--scale", type=float, default=1.0, help="LoRA multiplier (alpha/rank)")
     p.add_argument("--learning-rate", type=float)
+    p.add_argument("--lr-decay-start", type=int,
+                   help="SFT only: keep the peak rate through this optimizer update, then decay linearly")
+    p.add_argument("--lr-decay-end", type=int,
+                   help="SFT only: last update of the decay (default --steps); a later --steps is refused")
     p.add_argument("--group-size", type=int, default=4)
     p.add_argument("--temperature", type=float, default=0.7)
     p.add_argument("--beta", type=float, default=0.02)
@@ -89,14 +93,26 @@ def arguments():
     a.learning_rate = a.learning_rate or (1e-4 if a.stage == "sft" else 1e-6)
     if a.learning_rate <= 0:
         p.error("positive learning rate required")
+    if a.lr_decay_end is not None and a.lr_decay_start is None:
+        p.error("--lr-decay-end requires --lr-decay-start")
+    if a.lr_decay_start is not None:
+        if a.stage != "sft":
+            p.error("--lr-decay-start is only valid for SFT")
+        a.lr_decay_end = a.steps if a.lr_decay_end is None else a.lr_decay_end
+        if not 0 <= a.lr_decay_start < a.lr_decay_end or a.steps > a.lr_decay_end:
+            p.error("learning-rate decay needs 0 <= start < end and --steps <= end")
     return a
 
 
 def training_settings(a):
-    return {key: getattr(a, key) for key in (
+    settings = {key: getattr(a, key) for key in (
         "stage", "accumulate", "rank", "scale", "learning_rate", "group_size",
         "temperature", "beta", "max_tokens", "seed", "memory_gb", "korean_wer_weight",
         "base_reference", "advantage_scale", "sampler", "max_draws")}
+    # --steps is only a stop target; the decay endpoint is fixed for the whole run.
+    settings["lr_schedule"] = None if a.lr_decay_start is None else {
+        "decay_start": a.lr_decay_start, "decay_end": a.lr_decay_end}
+    return settings
 
 
 def sft_row(pools, order, seed, index):
@@ -494,8 +510,15 @@ def run(a):
         norm_value = float(norm.item())
         if not all(math.isfinite(x) for x in losses + [norm_value]):
             raise FloatingPointError("nonfinite loss/gradient; checkpoint not advanced")
+        # From the fixed peak and absolute update index, replacing any restored rate;
+        # the constant prefix leaves the optimizer's rate untouched.
+        rate = decayed_learning_rate(a.learning_rate, step, settings["lr_schedule"])
+        if rate is not None:
+            optimizer.learning_rate = rate
         optimizer.update(model, grads)
         mx.eval(model.trainable_parameters(), optimizer.state)
+        if settings["lr_schedule"] is not None:
+            diagnostics["learning_rate"] = float(optimizer.learning_rate.item())
         event = {"step": step, "stage": a.stage, "loss": sum(losses) / len(losses),
                  "gradient_norm": norm_value, "seconds": time.perf_counter() - began,
                  "peak_memory_bytes": mx.get_peak_memory(), **diagnostics}
