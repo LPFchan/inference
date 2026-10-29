@@ -729,3 +729,32 @@ def test_grpo_redraw_updates_once_per_step_on_the_stopping_group(monkeypatch, tm
     changed = env.configure(["--steps", "4", "--max-draws", str(max_draws + 1), "--resume"])
     with pytest.raises(ValueError, match="identical inputs/settings/code"):
         env.trainer.run(changed)
+
+
+def test_grpo_resume_marks_run_active_before_model_load(monkeypatch, tmp_path):
+    import json
+    from common import sha256
+    env = fake_grpo_runtime(monkeypatch, tmp_path, [*EQUAL, *MIXED])
+    with env.cpu():
+        env.trainer.run(env.configure(["--steps", "1"]))
+    before = json.loads((env.output / "run.json").read_text())
+    assert before["status"] == "complete" and "finished" in before and "peak_memory_bytes" in before
+    checkpoint_hash = sha256(env.output / "step-000001/adapters.safetensors")
+    loader = sys.modules["mlx_audio.stt.utils"].load_model
+    seen = []
+
+    def inspect_loading(path):
+        state = json.loads((env.output / "run.json").read_text())
+        seen.append(state)
+        assert state["status"] == "running"
+        assert "finished" not in state and "peak_memory_bytes" not in state
+        assert state["contract"] == before["contract"] and state["started"] == before["started"]
+        return loader(path)
+
+    monkeypatch.setattr(sys.modules["mlx_audio.stt.utils"], "load_model", inspect_loading)
+    with env.cpu():
+        env.trainer.run(env.configure(["--steps", "2", "--resume"]))
+    assert len(seen) == 1
+    assert json.loads((env.output / "run.json").read_text())["status"] == "complete"
+    assert json.loads((env.output / "latest.json").read_text())["step"] == 2
+    assert sha256(env.output / "step-000001/adapters.safetensors") == checkpoint_hash
