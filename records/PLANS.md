@@ -3,12 +3,15 @@
 ## Qwen3-ASR multilingual adaptation
 
 Follow [DEC-20261029-001](decisions/DEC-20261029-001-qwen-asr-autoresearch.md)
-and [the single-worker contract](../skills/autoresearch/SKILL.md).
+for selection. The operator has since authorized four agents and up to four
+5 GB workers; PR21 carries the amended execution contract.
 
 - Compare the verified 108.6-hour mixture against the frozen base, confirming
   only recipes that pass all selection gates.
-- Score the matched-input batch-32 SFT trial against the base; confirm any
-  provisional win with an independent training seed before adopting it.
+- Score the live higher-rate direct-base GRPO and filtered-v1 SFT trials,
+  then independently confirm only provisional winners.
+- Resolve native batching parity and measure concurrency throughput before
+  claiming a speed improvement; preserve the failed probe evidence.
 - Admit YODAS only after audio-language and transcript-alignment checks;
   translated captions cannot be ASR targets.
 - Mine hard training examples and test smaller learning rates/longer windows.

@@ -6,84 +6,53 @@
 
 ## Autoresearch — Qwen3-ASR
 
-- Charter: [DEC-20261029-001](decisions/DEC-20261029-001-qwen-asr-autoresearch.md).
-  Single worker; no Grimoire operations or automatic checkpoint deployment.
-- Nemotron backend is unloaded for ongoing training at the operator's request.
-  Gateway/tunnel and retained weights are preserved. Do not restore it automatically.
-- Selection set: frozen 1,295 FLEURS validation clips, manifest
-  `c75a4b05069eba7d11a6b50efd7bb11d43800fc66e49b761cd08fb86354acf01`.
-  The original 2,624-clip test and nine predictions stay sealed.
-- Incumbent: original MLX 8-bit anchor. All three larger-set calibrations
-  completed; both starter adapters fail the selection gates. EN/KO WER and
-  JA/ZH CER are 4.25/10.85/4.62/6.61% for the anchor,
-  6.10/18.80/6.76/7.86% for SFT-200 and 6.15/18.94/6.76/7.86% for GRPO-50.
-  The small starter sample's gains do not generalize to this development set.
-- Closed trial `sft-1716b8bc1e5c73e3`: 5,000 updates from the base on
-  `data-v001-16h` (9,852 clips / 16.5054 hours), LR 3e-5, seed 21774173.
-  Full validation primary errors are EN 4.69%, KO 19.21%, JA 6.80%, ZH 7.75%;
-  Korean CER also rises from 4.33% to 6.33%, so spacing alone does not explain
-  the regression. Score 1.4724 against base 1.0; paired delta CI95
-  [0.3733, 0.5746]. Rejected. All 5,000 updates are finite; optimization takes
-  84.90 minutes, the complete run 100.62 minutes, peak MLX allocation 4.15 GB.
-- Closed trial `grpo-103d0a8dd807ff06`: 1,000 updates from SFT-200 on the
-  same snapshot, LR 1e-6, Korean WER weight 0.5. Full validation primary errors
-  are EN 6.09%, KO 18.77%, JA 6.59%, ZH 7.87%; score 1.4493 against base 1.0,
-  paired delta CI95 [0.3601, 0.5485]. Rejected. The change from its SFT parent
-  is also unconfirmed: paired score delta CI95 [-0.0309, 0.0076]. All 1,000
-  updates are finite, with 533 variable-reward and 467 equal-reward groups;
-  51.09 optimization minutes, 66.14 total minutes, 4.09 GB peak MLX allocation.
-- Closed trial `sft-b508876066da8567`: 5,000 updates from the base on
-  `data-v001-16h`, LR 1e-5, seed 32125228. Full validation primary errors are
-  EN 4.93%, KO 20.07%, JA 6.59%, ZH 7.91%; CER all is
-  2.89/6.96/6.59/7.91%. Score 1.4915, paired delta CI95 [0.3940, 0.6074].
-  Rejected, including two empty Korean outputs. All updates are finite;
-  84.87 optimization minutes, 100.53 total minutes, 4.15 GB peak MLX allocation.
-  Its sampling seed differs from the 3e-5 run, so these two recipes do not
-  isolate learning rate.
-- Closed trial `grpo-2e5b6950468db2d0`: 1,000 updates directly from the
-  untouched base with that policy as the fixed KL reference, LR 1e-6,
-  seed 21325231, Korean WER weight 0.5 on `data-v001-16h`.
-  Full validation primary errors are EN 4.27%, KO 10.85%, JA 4.70%, ZH 6.67%;
-  CER all is 2.13/4.32/4.70/6.67%. Score 1.0091 against base 1.0;
-  paired delta CI95 [-0.0034, 0.0233]. Rejected: neither the required gain nor
-  a bootstrap interval below zero is achieved. Regression/empty/truncation
-  limits pass; this run does not establish a statistically reliable change.
-  All 1,000 updates are finite, with 423 variable-reward and 577 equal-reward
-  groups; 51.10 optimization minutes, 66.19 total minutes, 4.18 GB peak MLX
-  allocation. All four scored hill-climb trials are rejected; base remains best.
-- Live on Mac `main:qwen-batch32`: `sft-c3422927b2181bc0`, effective
-  batch 32 × 625 updates from the untouched base, on `data-v001-16h`.
-  It uses exactly the same ordered 20,000 example IDs, seed 21774173,
-  LR 3e-5 and frozen training source `code/655b245` as the original batch-4
-  SFT trial. Sequence SHA256 is
-  `1705d82249f480b3a68807122f9784c12dadc37f8960170007a4d97cfa840d7b`.
-  `/tmp/stt-qwen-batch32-full-20261029.log` and `loop-state.json` identify
-  the single driver/worker; wins require independent-seed confirmation.
-  The new worker starts only after the completed GRPO driver releases the lock.
-- PR19 is merged as `dca3bab`. The completed direct-base GRPO keeps its
-  immutable actual-run source `code/3ee30f6`, native acceptance evidence,
-  model/checkpoint hashes and full validation outputs.
-- The original controller was drained after the third rejection. Its next
-  higher-rate SFT-parent GRPO run `grpo-daafe1970256e5e9` is superseded after
-  223 observed updates, with checkpoint 200 retained; it is not a scored trial.
-  The handoff receipt preserves the prior controller state.
-- Pinned intake completed all 157 files without final errors. The next immutable
-  snapshot, `data-v002-clean`, is verified: 67,794 clips / 108.5695 hours,
-  including 48.95 h Korean, 13.12 h Japanese, 45.00 h Mandarin and 1.50 h English.
-  Its train manifest is `180554e0676f47a46ba99f8e5a2b9996ad1288bc5554b2e1492879010116273d`;
-  development bytes remain identical. `next-data-ready.json` retains the queued
-  snapshot; it does not change the active trial's inputs.
-  YODAS remains quarantined pending audio-language/alignment checks because
-  caption inspection found translated lecture material in the Japanese pool.
-- Root: `~/models/stt/qwen3-asr-hillclimb-20261029`. `loop-state.json` and
-  per-trial proposals/verdicts hold runtime evidence. A 10-minute heartbeat
-  wakes this thread with `continue`; its handle is retained in `monitor.json`.
-  Check existing processes/saved files before launching replacements.
-  All four completed trials' final adapters/optimizers, full outputs and
-  verified summaries are mirrored on Dumpling and Mangchi. The latest summary
-  is `base-reference-grpo-summary.json`; its archive receipt covers the actual
-  runner, checkpoint, full outputs and saved verdict. Earlier native preflight
-  and superseded partial-run evidence remain retained.
+- Selection: [DEC-20261029-001](decisions/DEC-20261029-001-qwen-asr-autoresearch.md).
+  Original MLX 8-bit anchor remains incumbent; all five full trials are rejected.
+  Frozen selection set: 1,295 FLEURS validation clips (EN 394, KO 226, JA 266,
+  ZH 409), manifest `c75a4b05069eba7d11a6b50efd7bb11d43800fc66e49b761cd08fb86354acf01`.
+  The original 2,624-clip test and all nine published predictions remain sealed.
+- Full validation primary errors, percent (WER EN/KO, CER JA/ZH):
+
+  | Trial | EN | KO | JA | ZH | CJK ratio score |
+  | --- | ---: | ---: | ---: | ---: | ---: |
+  | Base 8-bit | 4.25 | 10.85 | 4.62 | 6.61 | 1.0000 |
+  | SFT `1716b8bc1e5c73e3`, LR 3e-5 | 4.69 | 19.21 | 6.80 | 7.75 | 1.4724 |
+  | SFT-parent GRPO `103d0a8dd807ff06` | 6.09 | 18.77 | 6.59 | 7.87 | 1.4493 |
+  | SFT `b508876066da8567`, LR 1e-5 | 4.93 | 20.07 | 6.59 | 7.91 | 1.4915 |
+  | Base GRPO `2e5b6950468db2d0`, LR 1e-6 | 4.27 | 10.85 | 4.70 | 6.67 | 1.0091 |
+  | SFT batch-32 `c3422927b2181bc0` | 5.39 | 19.42 | 6.91 | 7.86 | 1.4918 |
+
+- The batch-32 trial completed 625 updates on the same ordered 20,000 draws,
+  seed 21774173, LR 3e-5 and frozen source `code/655b245` as batch-4 × 5,000.
+  Paired score delta CI95 [0.3932, 0.5919]; all language/gain gates fail,
+  empty/truncation gates pass. Larger effective batch does not rescue this
+  recipe. Full evidence: `batch32-summary.json` under the program root.
+- Operator authorized four research agents and at most four model workers,
+  5 GB each / 20 GB total. Candidate launcher PR21 (`code/75def71`) has native
+  admission evidence; two full trials now run through it in `main` tmux:
+  `qwen-rl-lr1e5` → `parallel/grpo-b62373c31be7ca27` (LR 1e-5 from base,
+  1,000 GRPO updates), and `qwen-sft-filter-v1` →
+  `parallel/sft-8db65348fd229db0` (numeral-filtered v1, 5,000 × 4 SFT updates).
+  Both use a 4.5 GiB MLX guideline and a 5 GB physical-footprint budget.
+  Admission review fixes are pending; immutable actual-run sources stay intact.
+  Independent-seed confirmation remains required before adoption.
+- Native microbatch-2 probe PR20 fails acceptance: about 9.02% relative gradient
+  difference, 1.029× end-to-end speedup and a brief 5.006 GB physical peak.
+  Its timings overlap the batch-32 run. Training stays serial within each
+  worker; four-worker fit and throughput gains have not been established.
+- Nemotron remains unloaded. Preserve gateway/tunnel, oMLX settings and all
+  models/audio/results. No Grimoire operations or automatic model deployment.
+- Root: `~/models/stt/qwen3-asr-hillclimb-20261029`. `parallel-trials.json` and
+  per-job admission/memory/process logs identify current runs. The completed
+  legacy driver left `loop-state.json` at `needs-next-hypothesis`; it no longer
+  owns a worker. The ten-minute heartbeat prompt is `continue`.
+- Verified intake: v1 9,852 clips / 16.51 h; v2 67,794 clips / 108.57 h with
+  identical development bytes. YODAS remains quarantined after translated
+  captions were found. Filtered controls and TRAIN-only audits are retained
+  under `proposals/`; the filter is imperfect and development-informed.
+- Completed trials retain source/data/environment, full outputs and final
+  adapters/optimizer states on the Mac, Dumpling and Mangchi. Starter adapters
+  also failed full validation. Superseded partial runs remain unscored.
 
 ## Migration Summary
 
