@@ -27,6 +27,7 @@
   | One-pass SFT selected, seed 21774173 | 3.99 | 10.58 | 4.29 | 4.94 | 0.8839 |
   | One-pass SFT confirmation, seed 21775174 | 4.06 | 10.55 | 4.53 | 5.24 | 0.9158 |
   | Base-init GRPO `bc8f2d8f6f19a369`, first seed | 4.15 | 10.41 | 4.63 | 5.65 | 0.9392 |
+  | Fixed-scale GRPO `c3b0b430fab2ba0c`, closed | 4.21 | 10.73 | 4.52 | 5.66 | 0.9414 |
 
 - SFT score-delta CI95 vs original anchor: first[-0.1740,-0.0511],
   confirmation[-0.1370,-0.0348]. Every gate passes; all outputs end and none
@@ -77,6 +78,15 @@
   alpha0.5 final-step derivation. Eleven rejected trials retain all full
   outputs. Relevant LOG commits: `200795a`, `649b608`, `31c66bc`, `07110bf`,
   `4d7b9f7`, `a396b8e`; complete per-trial metrics remain under the root.
+- Fixed-advantage-scale GRPO `c3b0b430fab2ba0c` completed all 1,000 updates
+  and 1,295 validation clips. It passes the original-anchor screen: score
+  0.9414, delta CI95 [-0.0922,-0.0245], no empty/truncated outputs. Its
+  difference from standard GRPO is +0.0023, CI95 [-0.0190,0.0255], so the
+  proposed improvement over that control is unsupported. Recheck against
+  the confirmed SFT incumbent fails gain, CJK and confidence gates:
+  delta CI95 [-0.0025,0.1106]. It is closed without confirmation or adoption.
+  Frozen outputs, controlled comparison and `incumbent-recheck.json` are
+  preserved under `parallel/grpo-c3b0b430fab2ba0c` on all three hosts.
 - Intake: v001 9,852 clips/16.51h; raw v002 67,794/108.57h is held for a
   merged-quote Japanese target. Merged literal-quote parser PR23(`c8dec2e`)
   fixes rebuilding; v006 removes the one bad row but does not recover lost
