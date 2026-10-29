@@ -26,6 +26,7 @@
   | Original 8-bit anchor | 4.25 | 10.85 | 4.62 | 6.61 | 1.0000 |
   | One-pass SFT selected, seed 21774173 | 3.99 | 10.58 | 4.29 | 4.94 | 0.8839 |
   | One-pass SFT confirmation, seed 21775174 | 4.06 | 10.55 | 4.53 | 5.24 | 0.9158 |
+  | Uniform two-seed SFT average, closed | 3.89 | 10.67 | 4.49 | 5.14 | 0.9110 |
   | Base-init GRPO `bc8f2d8f6f19a369`, first seed | 4.15 | 10.41 | 4.63 | 5.65 | 0.9392 |
   | Fixed-scale GRPO `c3b0b430fab2ba0c`, closed | 4.21 | 10.73 | 4.52 | 5.66 | 0.9414 |
 
@@ -61,15 +62,15 @@
   and current incumbent with unchanged gates, then pass its own both-seed KSS
   veto and incumbent recheck. A first parent-relative failure closes the recipe.
   Packet: `proposals/next-after-first-wins-20261030/parent-review.json`.
-- **Adapter average evaluation:** `main:qwen-sft-soup` →
-  `parallel/soup-6bc17d90adcbb97d` evaluates the uniform mean of the two
-  confirmed SFT adapters, represented exactly by rank-32 concatenation.
-  Frozen evaluator `code/1412c1f`, all 1,295 validation clips, unchanged
-  incumbent/anchor gates. The first failure closes this recipe; a pass
-  requires a second average from two fresh training seeds and both KSS
-  vetoes with a contract-matched rank-32 base. Provenance and the 224-tensor
-  construction check: `proposals/next-sft-confirmed-20261030/parent-review.json`
-  and `parent-validation.json`. No accuracy result is available yet.
+- **Closed adapter average:** `soup-6bc17d90adcbb97d` completed all 1,295
+  validation clips with no empty/truncated outputs. Uniform rank-32
+  concatenation of the two confirmed adapters scores 0.9110 against the
+  incumbent's 0.8839. Japanese and Chinese exceed their regression limits;
+  score-delta CI95 is [+0.0040,+0.0556]. Gain, CJK and confidence gates fail.
+  No confirmation ingredients or rank-32 KSS baseline run. The registered
+  weights/seed-count/checkpoint/rank variants are closed. Full validation,
+  selection, diagnostic and verdict are retained under the trial directory
+  on all three hosts; the original two checkpoints remain unchanged.
 - Root: `~/models/stt/qwen3-asr-hillclimb-20261029`.
   `parallel-trials.json.incumbent` is current authority; adoption evidence is
   `parallel/sft-ce33a3d7a476e297/adoption.json`. The legacy driver's
