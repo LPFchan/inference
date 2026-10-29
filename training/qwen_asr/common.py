@@ -153,6 +153,20 @@ def informative(rewards):
     return max(rewards) > min(rewards)
 
 
+def decayed_learning_rate(peak, step, schedule):
+    """Rate for one-based optimizer update `step`; None keeps the optimizer's constant peak.
+
+    Past `decay_start` the rate falls linearly from the fixed peak and reaches
+    peak / (end - start + 1) at `decay_end`, so no update runs at zero.
+    """
+    if schedule is None or step <= schedule["decay_start"]:
+        return None
+    start, end = schedule["decay_start"], schedule["decay_end"]
+    if step > end:
+        raise ValueError(f"optimizer update {step} is past the learning-rate decay end {end}")
+    return peak * (end - step + 1) / (end - start + 1)
+
+
 def training_targets(prompt, completion):
     """Next-token targets include the first transcript token and terminal EOS."""
     if not prompt or not completion:

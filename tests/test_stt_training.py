@@ -624,13 +624,14 @@ def fake_grpo_runtime(monkeypatch, tmp_path, script):
     monkeypatch.setitem(sys.modules, "mlx_lm.tuner.lora", SimpleNamespace(LoRALinear=LoRALinear))
     monkeypatch.setattr(mx, "set_memory_limit", lambda limit: None)
     monkeypatch.setattr(mx, "set_cache_limit", lambda limit: None)
-    seeds, updates = [], []
+    seeds, updates, rates = [], [], []
     real_seed = mx.random.seed
     monkeypatch.setattr(mx.random, "seed", lambda value: (seeds.append(value), real_seed(value))[1])
 
     class RecordingAdamW(optim.AdamW):
         def update(self, model, gradients):
             updates.append(len(targets))
+            rates.append(float(self.learning_rate.item()))  # the rate this update actually uses
             return super().update(model, gradients)
 
     monkeypatch.setattr(optim, "AdamW", RecordingAdamW)
@@ -668,18 +669,20 @@ def fake_grpo_runtime(monkeypatch, tmp_path, script):
 
     monkeypatch.setattr(trainer, "training_targets", recording_targets)
 
-    def configure(extra):
-        monkeypatch.setattr(sys, "argv", ["train.py", "grpo", "--model", str(model_dir), "--data", str(data),
-                                          "--protected-test", str(protected), "--output", str(tmp_path / "run"),
-                                          "--base-reference", "--skip-initial-eval", "--eval-clips", "1",
+    def configure(extra, stage="grpo", output="run"):
+        (tmp_path / output).mkdir(exist_ok=True)
+        monkeypatch.setattr(sys, "argv", ["train.py", stage, "--model", str(model_dir), "--data", str(data),
+                                          "--protected-test", str(protected), "--output", str(tmp_path / output),
+                                          *(["--base-reference"] if stage == "grpo" else []),
+                                          "--skip-initial-eval", "--eval-clips", "1",
                                           "--max-tokens", "2", "--seed", "11", *extra])
         return trainer.arguments()
 
     (tmp_path / "run").mkdir()
     pools = {lang: [r for r in rows["train"] if r["language"] == lang] for lang in ("ko", "ja", "zh")}
     return SimpleNamespace(trainer=trainer, configure=configure, pools=pools, contexts=contexts,
-                           targets=targets, seeds=seeds, updates=updates, remaining=remaining,
-                           output=tmp_path / "run", cpu=lambda: mx.stream(mx.cpu))
+                           targets=targets, seeds=seeds, updates=updates, rates=rates, remaining=remaining,
+                           output=tmp_path / "run", root=tmp_path, cpu=lambda: mx.stream(mx.cpu))
 
 
 EQUAL, TRUNCATED, MIXED = [[1, GRPO_EOS]] * 4, [[3, 3, 3]] * 4, [[1, GRPO_EOS], [2, GRPO_EOS]] * 2
@@ -758,3 +761,118 @@ def test_grpo_resume_marks_run_active_before_model_load(monkeypatch, tmp_path):
     assert json.loads((env.output / "run.json").read_text())["status"] == "complete"
     assert json.loads((env.output / "latest.json").read_text())["step"] == 2
     assert sha256(env.output / "step-000001/adapters.safetensors") == checkpoint_hash
+
+
+def test_learning_rate_decay_keeps_the_prefix_then_falls_to_a_positive_last_update():
+    from common import decayed_learning_rate
+    schedule, peak = {"decay_start": 500, "decay_end": 944}, 3e-5
+    assert decayed_learning_rate(peak, 500, None) is None
+    assert [decayed_learning_rate(peak, t, schedule) for t in (1, 499, 500)] == [None] * 3
+    assert decayed_learning_rate(peak, 501, schedule) == peak * 444 / 445
+    assert decayed_learning_rate(peak, 944, schedule) == peak / 445
+    tail = [decayed_learning_rate(peak, t, schedule) for t in range(501, 945)]
+    assert len(tail) == 444 and all(a > b > 0 for a, b in zip(tail, tail[1:]))
+    with pytest.raises(ValueError, match="past the learning-rate decay end"):
+        decayed_learning_rate(peak, 945, schedule)
+
+
+@pytest.mark.parametrize("extra,schedule", [
+    ([], None),
+    (["--steps", "944", "--lr-decay-start", "500"], {"decay_start": 500, "decay_end": 944}),
+    (["--steps", "500", "--lr-decay-start", "500", "--lr-decay-end", "944"], {"decay_start": 500, "decay_end": 944}),
+    (["--steps", "100", "--lr-decay-start", "500", "--lr-decay-end", "944"], {"decay_start": 500, "decay_end": 944}),
+    (["--steps", "1", "--lr-decay-start", "0", "--lr-decay-end", "1"], {"decay_start": 0, "decay_end": 1}),
+])
+def test_learning_rate_schedule_is_resolved_and_bound_to_resume_settings(monkeypatch, extra, schedule):
+    trainer, args = parse_training_args(monkeypatch, "sft", extra)
+    assert trainer.training_settings(args)["lr_schedule"] == schedule
+    for stage, reference in (("grpo", ["--base-reference"]), ("evaluate", [])):
+        trainer, args = parse_training_args(monkeypatch, stage, reference)
+        assert trainer.training_settings(args)["lr_schedule"] is None
+
+
+@pytest.mark.parametrize("stage,extra", [
+    ("sft", ["--lr-decay-end", "944"]),
+    ("grpo", ["--base-reference", "--lr-decay-start", "1"]),
+    ("evaluate", ["--lr-decay-start", "1"]),
+    ("sft", ["--steps", "500", "--lr-decay-start", "500"]),
+    ("sft", ["--lr-decay-start", "500", "--lr-decay-end", "500"]),
+    ("sft", ["--lr-decay-start", "-1", "--lr-decay-end", "944"]),
+    ("sft", ["--steps", "945", "--lr-decay-start", "500", "--lr-decay-end", "944"]),
+    ("sft", ["--lr-decay-start", "1.5", "--lr-decay-end", "944"]),
+])
+def test_invalid_learning_rate_schedules_are_rejected(monkeypatch, stage, extra):
+    with pytest.raises(SystemExit) as error:
+        parse_training_args(monkeypatch, stage, extra)
+    assert error.value.code == 2
+
+
+def sft_events(output):
+    import json
+    return [json.loads(line) for line in (output / "metrics.jsonl").read_text().splitlines()]
+
+
+def named_tensors(path):
+    import mlx.core as mx
+    return {name: (value.dtype, value.shape, memoryview(value).tobytes())
+            for name, value in mx.load(str(path)).items()}
+
+
+@pytest.mark.parametrize("pause", [3, 4])  # at the decay start, and inside the decay
+def test_sft_decay_keeps_the_constant_prefix_and_resumes_exactly(monkeypatch, tmp_path, pause):
+    import json
+    env = fake_grpo_runtime(monkeypatch, tmp_path, [])
+    peak, decay = 0.05, ["--lr-decay-start", "3", "--lr-decay-end", "6"]
+    common = ["--learning-rate", str(peak), "--accumulate", "2", "--save-every", "1"]
+    with env.cpu():
+        env.trainer.run(env.configure([*common, "--steps", "3"], "sft", "constant"))
+        constant_rates = list(env.rates)
+        env.rates.clear()
+        env.trainer.run(env.configure([*common, "--steps", "6", *decay], "sft", "scheduled"))
+        scheduled_rates = list(env.rates)
+        env.rates.clear()
+        env.trainer.run(env.configure([*common, "--steps", str(pause), *decay], "sft", "paused"))
+        env.trainer.run(env.configure([*common, "--steps", "6", *decay, "--resume"], "sft", "paused"))
+    constant, scheduled, paused = (env.root / name for name in ("constant", "scheduled", "paused"))
+    import mlx.core as mx
+    f32 = lambda x: float(mx.array(x).item())  # the optimizer holds its rate as float32
+    # The prefix never writes the rate: adapter and optimizer tensors match a run without the flags.
+    for kind in ("adapters", "optimizer"):
+        assert named_tensors(constant / f"step-000003/{kind}.safetensors") == named_tensors(
+            scheduled / f"step-000003/{kind}.safetensors")
+    assert constant_rates == scheduled_rates[:3] == [f32(peak)] * 3
+    assert scheduled_rates[3:] == [f32(peak * 3 / 4), f32(peak * 2 / 4), f32(peak * 1 / 4)]
+    keys = ("step", "loss", "gradient_norm")
+    assert [[e[k] for k in keys] for e in sft_events(constant)] == [
+        [e[k] for k in keys] for e in sft_events(scheduled)][:3]
+    assert all("learning_rate" not in e for e in sft_events(constant))
+    assert [e["learning_rate"] for e in sft_events(scheduled)] == scheduled_rates
+    # A paused run resumed to the same endpoint reproduces uninterrupted scheduled training.
+    keys += ("learning_rate",)
+    assert [[e[k] for k in keys] for e in sft_events(paused)] == [
+        [e[k] for k in keys] for e in sft_events(scheduled)]
+    assert env.rates[pause:] == scheduled_rates[pause:]
+    for kind in ("adapters", "optimizer"):
+        assert named_tensors(paused / f"step-000006/{kind}.safetensors") == named_tensors(
+            scheduled / f"step-000006/{kind}.safetensors")
+    contract = json.loads((paused / "run.json").read_text())["contract"]
+    assert contract == json.loads((scheduled / "run.json").read_text())["contract"]
+    assert contract["settings"]["lr_schedule"] == {"decay_start": 3, "decay_end": 6}
+
+
+def test_changed_decay_endpoint_is_refused_before_model_load(monkeypatch, tmp_path):
+    env = fake_grpo_runtime(monkeypatch, tmp_path, [])
+    common = ["--learning-rate", "0.05", "--accumulate", "1", "--lr-decay-start", "2"]
+    with env.cpu():
+        env.trainer.run(env.configure([*common, "--steps", "2", "--lr-decay-end", "4"], "sft"))
+    loads = []
+    monkeypatch.setattr(sys.modules["mlx_audio.stt.utils"], "load_model", loads.append)
+    for changed in (["--lr-decay-end", "5"], ["--lr-decay-end", "3"]):
+        with pytest.raises(ValueError, match="identical inputs/settings/code"):
+            env.trainer.run(env.configure([*common, "--steps", "3", *changed, "--resume"], "sft"))
+    with pytest.raises(ValueError, match="identical inputs/settings/code"):
+        env.trainer.run(env.configure(["--learning-rate", "0.05", "--accumulate", "1", "--steps", "3",
+                                       "--resume"], "sft"))
+    with pytest.raises(SystemExit):
+        env.configure([*common, "--steps", "5", "--lr-decay-end", "4", "--resume"], "sft")
+    assert not loads

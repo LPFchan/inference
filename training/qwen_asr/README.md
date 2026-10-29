@@ -134,6 +134,22 @@ the run is refused before the model loads; the other pools are not exhausted.
 The sampler is stored in the exact-match resume contract, and each metrics
 event records that update's row `ids`.
 
+The learning rate is constant by default. `--lr-decay-start S` (SFT only, with
+optional `--lr-decay-end E`, default `--steps`) keeps the configured rate for
+one-based optimizer updates 1..S without touching the optimizer, then uses
+`learning_rate × (E − t + 1) / (E − S + 1)` for update t in S+1..E. The rate is
+computed from the configured peak and the absolute update index, replacing any
+rate restored on resume; update E runs at `learning_rate / (E − S + 1)`, never
+zero. S and E are stored in the exact-match resume contract, `0 ≤ S < E` and
+`--steps ≤ E` are required, and each metrics event records the `learning_rate`
+the optimizer used. `--steps` stays a stop target, so a run can pause before
+its first decayed update and resume with the same schedule:
+
+```sh
+... sft ... --steps 500 --lr-decay-start 500 --lr-decay-end 944
+... sft ... --steps 944 --lr-decay-start 500 --lr-decay-end 944 --resume
+```
+
 Each microstep's gradient is added and evaluated immediately. A lazy running
 sum would keep every microstep gradient alive until the update ends: about
 26 MB each at rank 16, or roughly 0.8 GB at `--accumulate 32`.
