@@ -64,12 +64,14 @@
   and current incumbent, independently confirm both stages, pass both KSS
   cohorts and recheck the incumbent. First-seed failure closes its cap.
   Packet: `proposals/next-rl-confirmed-20261030/parent-implementation-binding.json`.
-- **SFT native prefix:** `parallel/sft-5866097875feb182`,
-  `main:qwen-sft-cooldown`, frozen `code/b67c149` (PR30), stops at update 500.
-  All named adapter/optimizer tensors and TRAIN draws/losses/gradient norms
-  must match the retained twin before update 501; the fixed endpoint is 944.
-  Parent verification passes 140 focused CPU tests. Automated review and native
-  acceptance remain pending; the incumbent is unchanged.
+- **Late-decay SFT:** `parallel/sft-5866097875feb182`,
+  `main:qwen-sft-cooldown`, frozen `code/b67c149` (merged PR30), resumes from
+  accepted update 501 toward 944 and full validation. The first 500 updates
+  exactly match all 224 adapter/450 optimizer tensors and TRAIN draws/losses/
+  gradient norms of the retained twin. Update 501 uses the expected float32
+  decay rate, with unchanged inputs/loss/norm and normal pressure. Combined
+  main-plus-feature verification passes 141 focused CPU tests; no accuracy
+  selection has occurred for this trial.
 - **Longer-clip SFT:** `parallel/sft-f42871766adb064c`, `main:qwen-sft-v008`,
   uses unchanged `code/1412c1f`, seed 21774173 and 944 × 4 sentence-epoch draws.
   v008 contains 10,154 clips/30.7208 h; every WAV, ordered v005 subset,
@@ -79,6 +81,17 @@
   source is `code/ed0d1bb` (PR31). Both KSS contracts must use v008, including
   a new matched base run; the v005 base cannot be substituted.
   Evidence: `proposals/next-data-after-confirmed-20261030`.
+- **Reference-member GRPO:** `parallel/grpo-c34dabc489294800`, frozen
+  `code/e49648d`, has accepted default first-update parity and a ten-update
+  feature preflight. All 224 adapter/450 optimizer tensors match the retained
+  control with the flag off. With it on, the first policy group and all ten
+  row IDs match the control; five-member rewards/advantages and checkpoint
+  hashes validate. Measured physical peak is 4.275 GB, with normal pressure.
+  After accepted latest-head review and merged PR32, the trial resumes from
+  ten toward 1,000 updates and full validation. Its optional-MLX test guards are fixed;
+  159 focused tests pass, and both affected tests skip when MLX is blocked.
+  The test-only fix leaves every frozen training/scoring file byte-identical.
+  Evidence: `proposals/next-rl-after-parent-failure-20261030`.
 - **Intake protocol deviation:** the data worker reports displaying one unique
   sealed test reference through two exclusion-related files, without using it.
   The parent did not reopen it. No new test prediction/scoring occurred;

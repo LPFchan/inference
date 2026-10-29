@@ -11,15 +11,15 @@ and [the four-slot contract](../skills/autoresearch/SKILL.md).
   confirmation; both KSS vetoes and final incumbent recheck remain required.
 - Preserve the registered redraw cap and 1,000-update budget; its first-seed
   failure closes the recipe without cap or learning-setting sweeps.
-- Test the registered one-pass SFT late-linear decay, with endpoint 944
-  independent of partial stop targets. Pause at 500 for exact twin-prefix
-  tensor/optimizer verification before applying decay; keep all gates fixed.
+- Score the registered one-pass SFT late-linear decay at its fixed endpoint
+  944. Its exact prefix and first decayed update are accepted; keep all gates
+  fixed and independently confirm only a passing first seed.
 - Score the fixed 20-second FLEURS TRAIN extension after its accepted memory
   preflight. Keep incumbent training source/budget unchanged; any KSS veto uses
   a new base run with the same v008 data contract as its candidate.
-- Implement the registered reference-member GRPO objective: four sampled TRAIN
-  transcripts plus their reference, with redraw off. Require CPU/default-path
-  parity and a ten-step native memory check before the full trial.
+- Score full reference-member GRPO: four sampled TRAIN transcripts plus their
+  reference, with redraw off. Preserve current-incumbent/matching-parent gates,
+  independent confirmation and both KSS vetoes; no setting sweeps after failure.
 - Fill free slots with fresh TRAIN-grounded SFT and RL proposals. Preserve
   sealed evaluation inputs, current incumbent capture and source/data hashes;
   no parameter sweeps selected from validation errors.
