@@ -319,6 +319,21 @@ def test_aggregate_or_critical_overage_evicts_only_the_newest_owned_worker(host,
     assert json.loads((host["root"] / "parallel/old/admission.json").read_text())["status"] == "finished"
 
 
+@pytest.mark.parametrize("critical", [False, True])
+def test_worker_eviction_does_not_also_evict_a_healthy_worker(host, monkeypatch, critical):
+    workers = [launch(host, name, sleep=1.5)[0] for name in ("hog", "healthy-a", "healthy-b", "newest")]
+    hog, *healthy = workers
+    host["now"][hog["child"].pid] = 5_100_000_000
+    host["peaks"][hog["child"].pid] = 5_100_000_000
+    if critical:
+        fake = parallel.system
+        monkeypatch.setattr(parallel, "system", lambda: {
+            **fake(), "pressure_level": 4 if hog["child"].poll() is None else 1})
+    parallel.supervise(host["root"], workers, interval=0.1, strikes=2)
+    assert hog["status"] == "evicted-worker-budget"
+    assert all(w["child"].returncode == 0 and "status" not in w for w in healthy)
+
+
 def test_sampler_failure_stops_owned_workers_and_records_why(host, monkeypatch):
     other = legacy(host)
     worker, _ = launch(host, "a")

@@ -288,8 +288,7 @@ def supervise(root, workers, interval=10.0, strikes=3, aggregate=AGGREGATE_BYTES
                     _terminate(w, "sampler-failed", repr(error))
                 break
             live = sum(max(u["budget_bytes"], u["max_bytes"]) for u in units.values())
-            pressure = pressure + 1 if state["pressure_level"] >= CRITICAL else 0
-            total = total + 1 if live > aggregate else 0
+            budget_evicted = False
             for w in workers:
                 if w["child"].poll() is not None:
                     continue
@@ -307,6 +306,18 @@ def supervise(root, workers, interval=10.0, strikes=3, aggregate=AGGREGATE_BYTES
                     stream.write(json.dumps(sample) + "\n")
                 if w["strikes"] >= strikes:
                     _terminate(w, "evicted-worker-budget")
+                    budget_evicted = True
+            if budget_evicted:
+                # A budget eviction may already have restored the aggregate/pressure limits.
+                try:
+                    state, units = system(), measure(root)
+                except Exception as error:
+                    for w in workers:
+                        _terminate(w, "sampler-failed", repr(error))
+                    break
+                live = sum(max(u["budget_bytes"], u["max_bytes"]) for u in units.values())
+            pressure = pressure + 1 if state["pressure_level"] >= CRITICAL else 0
+            total = total + 1 if live > aggregate else 0
             if stopping or (root / "STOP").exists():
                 for w in workers:
                     _terminate(w, "stopped")
