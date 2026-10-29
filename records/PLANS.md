@@ -10,7 +10,7 @@ and [the single-worker contract](../skills/autoresearch/SKILL.md).
 - Test an effective batch of 32 with 625 SFT updates against batch 4 with 5,000
   updates, holding the 20,000 training examples, sampling seed and LR constant.
 - Test GRPO directly from the untouched ASR base, using that policy as its fixed
-  KL reference. This needs an explicit base-reference path in the trainer.
+  KL reference. Complete its native Mac preflight before the full trial.
 - Admit YODAS only after audio-language and transcript-alignment checks;
   translated captions cannot be ASR targets.
 - Mine hard training examples and test smaller learning rates/longer windows.

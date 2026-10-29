@@ -109,10 +109,28 @@ identical rewards produce zero advantage and are explicitly logged.
 
 Token likelihoods use the same sampling temperature. The clipped policy
 objective (epsilon 0.2) has a nonnegative sampled KL penalty (beta 0.02) toward
-the initial SFT policy, and one update per group at LR 1e-6. Reference and
+the fixed starting policy, and one update per group at LR 1e-6. Reference and
 current policies share frozen weights; only reference adapters are copied.
 There is no critic, external judge, paid API, or independent rollout server.
 Gradients are averaged across group members and globally clipped at 1.0.
+
+Use `--base-reference` to start directly from the untouched ASR base. Zero-delta
+LoRA initialization preserves that base as the starting policy and fixed KL
+reference. This flag is valid for GRPO, is mutually exclusive with
+`--init-adapter`, and is stored in the exact-match resume contract.
+
+```sh
+.venv/bin/python training/qwen_asr/train.py grpo \
+  --model "$HOME/models/stt/qwen-base-8bit" \
+  --data "$HOME/models/stt/qwen-data" \
+  --protected-test "$HOME/models/stt/fleurs-test/manifest.jsonl" \
+  --base-reference --korean-wer-weight 0.5 --skip-initial-eval \
+  --output "$HOME/models/stt/qwen-grpo-base" --steps 1000 --eval-clips 100000
+```
+
+The frozen base evaluation remains the selection anchor. The controller's
+existing profiles continue to choose checkpoint references; select this mode
+explicitly for a new trial in the serialized training slot.
 
 [Prior Qwen ASR adaptation work](https://arxiv.org/abs/2607.08208) motivates
 SFT followed by RL; this implementation is a small experimental recipe, not a
@@ -192,9 +210,9 @@ reports `needs-new-hypothesis` for this harness to supply a genuinely new idea.
 
 GRPO can mix Korean WER into CER with `--korean-wer-weight 0.5`, so Korean spacing
 errors can generate a learning signal. The default remains CER-only for the
-original starter recipe. The fixed starting reference may be an already-adapted
-SFT-derived checkpoint. This is a new experimental recipe, not a claim that the
-longer RL stage improves quality.
+original starter recipe. The fixed starting reference may be an existing
+SFT/GRPO checkpoint or the untouched ASR base. This is a new experimental
+recipe, not a claim that the longer RL stage improves quality.
 
 Freeze a source archive for each running controller; do not edit its code in
 place. `loop-state.json` and each trial's `verdict.json` are runtime evidence.
