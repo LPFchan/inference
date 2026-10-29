@@ -533,6 +533,7 @@ def test_invalid_max_draws_is_rejected(monkeypatch, stage, value):
 
 GRPO_TEXT = {1: "abcd", 2: "abc", 3: "zzzz"}  # rewards 1.0, 0.75 and 0.0 against "abcd"
 GRPO_EOS = 9
+GRPO_REFERENCE = [4, 5]  # encoding of the TRAIN transcript "abcd"; never sampled
 
 
 def fake_grpo_runtime(monkeypatch, tmp_path, script):
@@ -575,11 +576,14 @@ def fake_grpo_runtime(monkeypatch, tmp_path, script):
                 h = h + 0.1 * block.o_proj(block.q_proj(h) + block.k_proj(h) + block.v_proj(h))
             return h
 
+    encoded = []
+
     class Tokenizer:
         eos_token_id = GRPO_EOS
 
-        def encode(self, text, add_special_tokens=False):
-            return [1]
+        def encode(self, text, add_special_tokens=True):
+            encoded.append((text, add_special_tokens))
+            return list(GRPO_REFERENCE) if text == "abcd" else [1]
 
         def decode(self, tokens, skip_special_tokens=True):
             return "".join(GRPO_TEXT[t] for t in tokens)
@@ -682,6 +686,7 @@ def fake_grpo_runtime(monkeypatch, tmp_path, script):
     pools = {lang: [r for r in rows["train"] if r["language"] == lang] for lang in ("ko", "ja", "zh")}
     return SimpleNamespace(trainer=trainer, configure=configure, pools=pools, contexts=contexts,
                            targets=targets, seeds=seeds, updates=updates, rates=rates, remaining=remaining,
+                           encoded=encoded, data=data, protected=protected,
                            output=tmp_path / "run", root=tmp_path, cpu=lambda: mx.stream(mx.cpu))
 
 
@@ -876,3 +881,200 @@ def test_changed_decay_endpoint_is_refused_before_model_load(monkeypatch, tmp_pa
     with pytest.raises(SystemExit):
         env.configure([*common, "--steps", "5", "--lr-decay-end", "4", "--resume"], "sft")
     assert not loads
+
+
+@pytest.mark.parametrize("stage,extra", [("grpo", ["--base-reference"]), ("sft", []), ("evaluate", [])])
+def test_reference_member_defaults_off_and_is_bound_to_resume_settings(monkeypatch, stage, extra):
+    trainer, args = parse_training_args(monkeypatch, stage, extra)
+    assert args.reference_member is False and trainer.training_settings(args)["reference_member"] is False
+    if stage == "grpo":
+        for flags in (["--reference-member"], ["--reference-member", "--max-draws", "1"]):
+            trainer, args = parse_training_args(monkeypatch, stage, [*extra, *flags])
+            assert trainer.training_settings(args)["reference_member"] is True
+
+
+@pytest.mark.parametrize("stage,extra", [
+    ("sft", []), ("evaluate", []), ("evaluate", ["--external", "probe.jsonl"]),
+    ("grpo", ["--base-reference", "--max-draws", "2"]), ("grpo", ["--base-reference", "--max-draws", "8"])])
+def test_reference_member_is_rejected_outside_single_draw_grpo(monkeypatch, stage, extra):
+    with pytest.raises(SystemExit) as error:
+        parse_training_args(monkeypatch, stage, [*extra, "--reference-member"])
+    assert error.value.code == 2
+
+
+@pytest.mark.parametrize("language,text", [
+    ("en", "Two words."), ("ko", "정말 좋은 하루"), ("ja", "日本語の音声"), ("zh", "中文语音")])
+def test_reference_transcript_scores_one_under_the_unchanged_reward(language, text):
+    for weight in (0.0, 0.5):
+        assert reward(text, text, language, weight) == 1.0
+
+
+def test_reference_member_advantages_push_the_label_and_spare_perfect_groups():
+    for sampled in ([0.75] * 4, [-1.0] * 4, [0.0] * 4):  # equal but imperfect: no signal without the reference
+        assert advantages(sampled) == [0] * 4
+        *samples, ref = advantages(sampled + [1.0])
+        assert ref > 0 and all(value < 0 for value in samples)
+    assert advantages([1.0] * 5) == [0] * 5  # all perfect stays zero-advantage
+    for sampled in ([1.0, 0.75, 1.0, 0.75], [1.0, -1.0, 0.5, 0.9], [0.1, 0.2, 0.3, 0.999999]):
+        *samples, ref = advantages(sampled + [1.0])
+        assert ref >= 0 and ref == max(samples + [ref])
+
+
+def test_reference_member_policy_gradient_is_probability_weighted_and_unclipped():
+    mx = pytest.importorskip("mlx.core")
+    spec = importlib.util.spec_from_file_location("qwen_train_reference", DIRECTORY / "train.py")
+    trainer = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(trainer)
+    probs = [0.05, 0.5, 0.79, 0.85, 0.999]  # below, inside and above the 0.8 clip edge
+    lp = mx.log(mx.array(probs))
+    behaviour = mx.zeros_like(lp)  # behaviour probability one
+    for advantage in (0.0, 0.3, 1.7):
+        grad = mx.grad(lambda x: trainer.grpo_loss(x, behaviour, lp, advantage, 0.0))(lp)
+        assert grad.tolist() == pytest.approx([-advantage * p / len(probs) for p in probs], rel=1e-5, abs=1e-12)
+        loss = trainer.grpo_loss(lp, behaviour, lp, advantage, 0.0)
+        assert float(loss.item()) == pytest.approx(-advantage * sum(probs) / len(probs), rel=1e-5, abs=1e-12)
+    # The equivalence needs a nonnegative advantage: a negative one would be clipped below 0.8.
+    grad = mx.grad(lambda x: trainer.grpo_loss(x, behaviour, lp, -1.0, 0.0))(lp)
+    assert grad.tolist()[0] == 0
+
+
+IMPERFECT = [[2, GRPO_EOS]] * 4
+
+
+def test_grpo_reference_member_joins_each_group_as_a_fifth_member(monkeypatch, tmp_path):
+    import json
+    import math
+    import mlx.core as mx
+    import mlx.nn as nn
+    from mlx.utils import tree_flatten
+    from common import grpo_row, informative
+    steps = [MIXED, EQUAL, IMPERFECT, TRUNCATED]  # KO, JA, ZH, KO
+    env = fake_grpo_runtime(monkeypatch, tmp_path, [c for group in steps for c in group])
+    losses, member_grads = [], []
+    real_value_and_grad = nn.value_and_grad
+
+    def recording_value_and_grad(model, fn):
+        def run(*args):
+            loss, grad = real_value_and_grad(model, fn)(*args)
+            mx.eval(loss, grad)
+            losses.append(float(loss.item()))
+            member_grads.append(dict(tree_flatten(grad)))
+            return loss, grad
+        return run
+
+    monkeypatch.setattr(nn, "value_and_grad", recording_value_and_grad)
+    calls = []
+    real_loss = env.trainer.grpo_loss
+
+    def recording_loss(log_probs, old, ref, advantage, beta):
+        calls.append((old.tolist(), ref.tolist(), advantage))
+        return real_loss(log_probs, old, ref, advantage, beta)
+
+    monkeypatch.setattr(env.trainer, "grpo_loss", recording_loss)
+    args = env.configure(["--steps", "4", "--reference-member", "--learning-rate", "0.005"])
+    with env.cpu():
+        env.trainer.run(args)
+    assert not env.remaining
+    assert env.seeds == [11, 12, 13, 14, 15]  # sampling seeds unchanged: load, then once per step
+    assert len(env.updates) == 4 and len(calls) == len(losses) == 20
+    reference = (*GRPO_REFERENCE, GRPO_EOS)
+    # The TRAIN transcript is encoded once per step without special tokens; dev text only at the end.
+    assert env.encoded == [("abcd", False)] * 4 + [(f"dev {lang}", False) for lang in ("en", "ko", "ja", "zh")]
+    events = [json.loads(line) for line in (env.output / "metrics.jsonl").read_text().splitlines()]
+    start = 0
+    for step, (event, group, lang) in enumerate(zip(events, steps, ("ko", "ja", "zh", "ko")), 1):
+        row = grpo_row(env.pools[lang], 11, step, 0)
+        sampled = [reward("abcd", GRPO_TEXT[c[0]] * (2 if c[0] == 3 else 1), lang) if c[-1] == GRPO_EOS
+                   else -1.0 for c in group]
+        assert (event["id"], event["rewards"]) == (row["id"], sampled)  # the four actual samples
+        assert len(event["completions"]) == 4
+        assert event["reference_reward"] == 1.0
+        assert event["advantages"] == advantages(sampled + [1.0])
+        assert (event["draws"], event["skipped"]) == (1, [])
+        assert event["exhausted"] == (not informative(sampled))
+        assert event["zero_advantage"] == (group is EQUAL)
+        if group in (IMPERFECT, TRUNCATED):  # equal but wrong: the reference alone is pushed up
+            assert event["advantages"][-1] > 0 and all(x < 0 for x in event["advantages"][:4])
+        # Old, parent and policy likelihoods: four samples then the transcript, same context.
+        used = env.targets[start:env.updates[step - 1]]
+        members = [tuple(c[:2]) for c in group] + [reference]
+        assert used == [(int(row["audio"][:-4]), c) for c in members] * 3
+        start = env.updates[step - 1]
+        step_calls = calls[5 * (step - 1):5 * step]
+        assert [advantage for _, _, advantage in step_calls] == event["advantages"]
+        assert all(all(x < 0 for x in old) for old, _, _ in step_calls[:4])  # samples keep their old policy
+        old, parent, _ = step_calls[4]
+        assert old == [0.0] * len(reference)  # only the transcript's behaviour log-probability is zero
+        assert all(x < 0 for x in parent) and len(parent) == len(reference)
+        probability = event["reference_mean_probability"]
+        assert 0 < probability < 1  # measured before the behaviour log-probability is replaced
+        parent_probability = sum(math.exp(x) for x in parent) / len(parent)
+        if step == 1:  # the policy still equals the parent: same likelihoods
+            assert probability == pytest.approx(parent_probability, rel=1e-5)
+            assert all(o == pytest.approx(p, rel=1e-6) for o, p, _ in step_calls[:4] for o, p in zip(o, p))
+        else:  # the parent stays fixed while the policy has moved
+            assert probability != pytest.approx(parent_probability, rel=1e-6)
+        # Gradients are averaged over five members before the global norm.
+        grads = member_grads[5 * (step - 1):5 * step]
+        total = sum(float(mx.sum(sum(g[name] for g in grads) ** 2).item()) for name in grads[0])
+        assert event["gradient_norm"] == pytest.approx(math.sqrt(total) / 5, rel=1e-4)
+        assert event["loss"] == pytest.approx(sum(losses[5 * (step - 1):5 * step]) / 5)
+    assert json.loads((env.output / "run.json").read_text())["contract"]["settings"]["reference_member"] is True
+
+
+@pytest.mark.parametrize("first", [False, True])
+def test_reference_member_change_is_refused_on_resume_before_model_load(monkeypatch, tmp_path, first):
+    env = fake_grpo_runtime(monkeypatch, tmp_path, [*MIXED])
+    flag = ["--reference-member"]
+    with env.cpu():
+        env.trainer.run(env.configure(["--steps", "1", *(flag if first else [])]))
+    loads = []
+    monkeypatch.setattr(sys.modules["mlx_audio.stt.utils"], "load_model", loads.append)
+    with pytest.raises(ValueError, match="identical inputs/settings/code"):
+        env.trainer.run(env.configure(["--steps", "2", "--resume", *([] if first else flag)]))
+    assert not loads
+
+
+def test_grpo_default_path_matches_the_pre_reference_member_trainer(monkeypatch, tmp_path):
+    """Flag off, the trainer reproduces the pre-feature trainer's rows, rollouts, metrics and tensors."""
+    import json
+    import subprocess
+    from types import ModuleType
+    import mlx.core as mx
+    base = "4272251005d5b837cd238364a1567fd0870f276a"
+    shown = subprocess.run(["git", "-C", str(DIRECTORY), "show", f"{base}:training/qwen_asr/train.py"],
+                           capture_output=True, text=True)
+    if shown.returncode:
+        pytest.skip(f"pre-feature trainer {base} unavailable")
+    script = [*MIXED, *EQUAL, [2, GRPO_EOS], [1, GRPO_EOS], [3, 3, 3], [2, GRPO_EOS]]
+    env = fake_grpo_runtime(monkeypatch, tmp_path, script)
+    previous = ModuleType("qwen_train_base")
+    previous.__file__ = str(DIRECTORY / "train.py")  # same code/scorer paths
+    exec(compile(shown.stdout, previous.__file__, "exec"), previous.__dict__)
+    previous.training_targets = env.trainer.training_targets  # same likelihood recording
+    observed = {}
+    for name, trainer in (("current", env.trainer), ("base", previous)):
+        env.remaining[:] = script
+        del env.seeds[:], env.targets[:], env.contexts[:]
+        env.configure(["--steps", "3", "--learning-rate", "0.05", "--save-every", "1"])
+        args = trainer.arguments()
+        args.output = tmp_path / name
+        args.output.mkdir()
+        with env.cpu():
+            trainer.run(args)
+        assert not env.remaining
+        events = [json.loads(line) for line in (args.output / "metrics.jsonl").read_text().splitlines()]
+        for event in events:
+            assert "reference_reward" not in event and "reference_mean_probability" not in event
+            del event["seconds"], event["peak_memory_bytes"]
+        tensors = {f"{step}/{kind}": mx.load(str(args.output / f"step-{step:06d}/{kind}.safetensors"))
+                   for step in (1, 2, 3) for kind in ("adapters", "optimizer")}
+        dev = json.loads((args.output / "dev-step-000003.json").read_text())["rows"]
+        observed[name] = (events, tensors, dev, list(env.seeds), list(env.targets), list(env.contexts))
+    (events, tensors, dev, seeds, targets, contexts), base_run = observed["current"], observed["base"]
+    assert events == base_run[0]
+    assert tensors.keys() == base_run[1].keys()
+    for key, arrays in tensors.items():
+        assert arrays.keys() == base_run[1][key].keys()
+        assert all(mx.array_equal(arrays[n], base_run[1][key][n]).item() for n in arrays), key
+    assert (dev, seeds, targets, contexts) == base_run[2:]
