@@ -32,9 +32,29 @@
   is also unconfirmed: paired score delta CI95 [-0.0309, 0.0076]. All 1,000
   updates are finite, with 533 variable-reward and 467 equal-reward groups;
   51.09 optimization minutes, 66.14 total minutes, 4.09 GB peak MLX allocation.
-- Live on Mac `main`: `qwen-cycle` (`/tmp/stt-qwen-cycle.log`) runs
-  `sft-b508876066da8567`, 5,000 updates from the untouched base at LR 1e-5
-  on `data-v001-16h`. The incumbent remains the untouched base.
+- Closed trial `sft-b508876066da8567`: 5,000 updates from the base on
+  `data-v001-16h`, LR 1e-5, seed 32125228. Full validation primary errors are
+  EN 4.93%, KO 20.07%, JA 6.59%, ZH 7.91%; CER all is
+  2.89/6.96/6.59/7.91%. Score 1.4915, paired delta CI95 [0.3940, 0.6074].
+  Rejected, including two empty Korean outputs. All updates are finite;
+  84.87 optimization minutes, 100.53 total minutes, 4.15 GB peak MLX allocation.
+  Its sampling seed differs from the 3e-5 run, so these two recipes do not
+  isolate learning rate. All three completed hill-climb trials are rejected.
+- Live on Mac `main:qwen-base-reference`: `grpo-2e5b6950468db2d0`,
+  1,000 updates directly from the untouched base with that policy as the fixed
+  KL reference, LR 1e-6 and Korean WER weight 0.5 on `data-v001-16h`.
+  `/tmp/stt-qwen-base-reference-full-20261029.log` and `loop-state.json`
+  identify the single owned driver/worker. A provisional winner triggers an
+  independent-seed confirmation before selection. The incumbent remains base.
+- Native base-reference acceptance passed: 29 focused target tests, one real
+  GRPO update and 16 nonempty, completed outputs across all four languages;
+  model/checkpoint hashes match and measured peak MLX allocation is 4.04 GB.
+  This checks runtime behavior, not quality. PR19 is merged as `dca3bab`;
+  the active run retains its immutable reviewed source `code/3ee30f6`.
+- The original controller was drained after the third rejection. Its next
+  higher-rate SFT-parent GRPO run `grpo-daafe1970256e5e9` is superseded after
+  223 observed updates, with checkpoint 200 retained; it is not a scored trial.
+  The handoff receipt preserves the prior controller state.
 - Pinned intake completed all 157 files without final errors. The next immutable
   snapshot, `data-v002-clean`, is verified: 67,794 clips / 108.5695 hours,
   including 48.95 h Korean, 13.12 h Japanese, 45.00 h Mandarin and 1.50 h English.
@@ -47,13 +67,14 @@
   per-trial proposals/verdicts hold runtime evidence. A 10-minute heartbeat
   wakes this thread with `continue`; its handle is retained in `monitor.json`.
   Check existing processes/saved files before launching replacements.
-  Both completed trials' final adapters/optimizers, full outputs and verified
-  `first-long-sft-summary.json` / `first-long-grpo-summary.json` are mirrored on
-  Dumpling and Mangchi.
-- The active controller/trainer is frozen at `code/655b245`. Accepted recovery
-  and selected-verdict fixes are prepared at `code/c72ca21` for a future window.
-  Preserve existing run contracts; verify that any accepted confirmation's
-  persisted verdict identifies the same checkpoint as the incumbent.
+  All three completed trials' final adapters/optimizers, full outputs and
+  verified summaries are mirrored on Dumpling and Mangchi. The third summary
+  is `lower-rate-sft-summary.json`; its archive receipt also covers the native
+  preflight, frozen source and superseded partial run.
+- Next controlled experiment is prepared without starting another GPU worker:
+  effective SFT batch 32 × 625 updates, with the same ordered 20,000 example
+  IDs, seed and LR as the original batch 4 × 5,000 trial. Its proposal and
+  sequence hash are retained in `prepared-batch32.json` and the trial directory.
 
 ## Migration Summary
 

@@ -5,12 +5,12 @@
 Follow [DEC-20261029-001](decisions/DEC-20261029-001-qwen-asr-autoresearch.md)
 and [the single-worker contract](../skills/autoresearch/SKILL.md).
 
-- Compare lower-rate SFT and the verified 108.6-hour mixture against the frozen
-  base, confirming only recipes that pass all selection gates.
+- Compare the verified 108.6-hour mixture against the frozen base, confirming
+  only recipes that pass all selection gates.
 - Test an effective batch of 32 with 625 SFT updates against batch 4 with 5,000
   updates, holding the 20,000 training examples, sampling seed and LR constant.
-- Test GRPO directly from the untouched ASR base, using that policy as its fixed
-  KL reference. Complete its native Mac preflight before the full trial.
+- Confirm any provisional base-reference GRPO win with an independent training
+  seed before adopting a checkpoint.
 - Admit YODAS only after audio-language and transcript-alignment checks;
   translated captions cannot be ASR targets.
 - Mine hard training examples and test smaller learning rates/longer windows.
