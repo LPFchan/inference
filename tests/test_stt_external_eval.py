@@ -261,6 +261,9 @@ def test_resume_keeps_saved_rows_and_extends_the_same_seeded_subset(world):
     with pytest.raises(RuntimeError, match="simulated"):
         world.run("eval-base", "--eval-clips", 3, "--resume")
     out = world.tmp / "eval-base"
+    interrupted = json.loads((out / "run.json").read_text())
+    assert interrupted["status"] == "running"
+    assert "finished" not in interrupted and "peak_memory_bytes" not in interrupted
     assert len(predictions(out)) == 4
     with (out / "predictions.jsonl").open("a") as stream:
         stream.write('{"id": "kss/o')  # torn final write from an evicted worker
@@ -273,6 +276,7 @@ def test_resume_keeps_saved_rows_and_extends_the_same_seeded_subset(world):
     assert rows[:2] == smoke
     assert json.loads((out / "summary-2.json").read_text())["clips"] == 2
     assert json.loads((out / "summary-6.json").read_text())["clips"] == 6
+    assert json.loads((out / "run.json").read_text())["status"] == "complete"
 
     loads = world.spy.loads
     with pytest.raises(FileExistsError, match="already complete"):
