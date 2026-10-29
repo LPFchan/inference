@@ -9,7 +9,8 @@
 - Selection: [DEC-20261029-001](decisions/DEC-20261029-001-qwen-asr-autoresearch.md),
   amended by [DEC-20261029-002](decisions/DEC-20261029-002-four-slot-qwen-asr-autoresearch.md).
   Original MLX 8-bit anchor remains incumbent. Ten completed trials are
-  rejected; one-pass SFT passed its first seed and awaits confirmation/KSS.
+  rejected; one-pass SFT and written-form GRPO passed their first seeds and
+  await confirmation/KSS.
   Frozen selection set: 1,295 FLEURS validation clips (EN 394, KO 226, JA 266,
   ZH 409), manifest `c75a4b05069eba7d11a6b50efd7bb11d43800fc66e49b761cd08fb86354acf01`.
   The original 2,624-clip test and all nine published predictions remain sealed.
@@ -29,6 +30,7 @@
   | SFT unfiltered v006 `100c0aa4969e4145` | 5.67 | 19.63 | 7.12 | 7.88 | 1.5147 |
   | SFT written-form v005 `0812e3d33da50ccb` | 4.30 | 11.24 | 5.94 | 5.25 | 1.0390 |
   | SFT one sentence-epoch `ce33a3d7a476e297`, first seed | 3.99 | 10.58 | 4.29 | 4.94 | 0.8839 |
+  | Base GRPO written-form v005 `bc8f2d8f6f19a369`, first seed | 4.15 | 10.41 | 4.63 | 5.65 | 0.9392 |
 
 - The batch-32 trial completed 625 updates on the same ordered 20,000 draws,
   seed 21774173, LR 3e-5 and frozen source `code/655b245` as batch-4 × 5,000.
@@ -79,11 +81,22 @@
   -0.1552, CI95 [-0.2512, -0.0551]. Sampling, recording choice, order,
   acoustic coverage and update count change together, so this does not
   establish repetition as the cause of the difference.
+- Written-form direct-base GRPO `bc8f2d8f6f19a369` completed 1,000 updates
+  and all 1,295 validation clips. Every unchanged first-seed gate passes:
+  CJK score 0.9392, paired delta CI95 [-0.0973, -0.0194]. Korean WER is
+  10.41% and Chinese CER 5.65%; Japanese CER rises slightly from 4.62%
+  to 4.63%, within its relative regression limit. There are no empty or
+  truncated outputs; 330 transcripts differ from base. Frozen contracts,
+  complete results and the final checkpoint are verified on all three hosts.
+  Independent confirmation `grpo-bc8f2d8f6f19a369-confirm` is running with
+  seed 21326232, unchanged frozen `code/3ee30f6` and 1,000-update recipe.
+  Both FLEURS seeds and both registered per-cohort KSS vetoes, followed by an
+  incumbent recheck, are required before adoption. The base remains incumbent.
 - Operator authorized four research agents and at most four model workers,
-  5 GB each / 20 GB total. Launcher PR21 is merged as `6497a26`. Three full
-  training trials remain active under `main` tmux: `qwen-rl-fleurs` →
-  `parallel/grpo-bc8f2d8f6f19a369` (frozen `code/3ee30f6`, base init and KL
-  reference, rank16, LR1e-5, seed21325231, 1,000 GRPO updates),
+  5 GB each / 20 GB total. Launcher PR21 is merged as `6497a26`. Three training
+  runs remain active under `main` tmux: `qwen-rl-fleurs-confirm` →
+  `parallel/grpo-bc8f2d8f6f19a369-confirm` (frozen `code/3ee30f6`, base init
+  and KL reference, rank16, LR1e-5, seed21326232, 1,000 GRPO updates),
   `qwen-rl-fixed-scale` → `parallel/grpo-c3b0b430fab2ba0c` (frozen
   `code/1a162b0`, same GRPO recipe with fixed advantage divisor 0.03), and
   `qwen-sft-sentence-confirm` → `parallel/sft-a11b015fbeee0082` (frozen
