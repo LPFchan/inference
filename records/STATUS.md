@@ -29,11 +29,17 @@
   recipe. Full evidence: `batch32-summary.json` under the program root.
 - Operator authorized four research agents and at most four model workers,
   5 GB each / 20 GB total. Candidate launcher PR21 (`code/75def71`) has native
-  admission evidence; two full trials now run through it in `main` tmux:
+  admission evidence; three full trials now run through guarded admission in `main` tmux:
   `qwen-rl-lr1e5` → `parallel/grpo-b62373c31be7ca27` (LR 1e-5 from base,
   1,000 GRPO updates), and `qwen-sft-filter-v1` →
   `parallel/sft-8db65348fd229db0` (numeral-filtered v1, 5,000 × 4 SFT updates).
-  Both use a 4.5 GiB MLX guideline and a 5 GB physical-footprint budget.
+  A third job, `qwen-sft-expand-v2` → `parallel/sft-9b8cfb528c942378`,
+  trains on the same-filter expanded pool (51,079 clips / 78.12 h), source
+  `code/655b245`, seed 21774173, LR 3e-5 and 5,000 × 4 updates. Its current
+  supervisor is `code/3976a1e`; earlier jobs retain `code/75def71`.
+  This changes speaker/text/source mix and sampling order, including English
+  pool order; it does not isolate data quantity. All three use a 4.5 GiB
+  MLX guideline and a 5 GB physical-footprint budget.
   Admission review fixes are pending; immutable actual-run sources stay intact.
   Independent-seed confirmation remains required before adoption.
 - Native microbatch-2 probe PR20 fails acceptance: about 9.02% relative gradient
@@ -46,10 +52,15 @@
   per-job admission/memory/process logs identify current runs. The completed
   legacy driver left `loop-state.json` at `needs-next-hypothesis`; it no longer
   owns a worker. The ten-minute heartbeat prompt is `continue`.
-- Verified intake: v1 9,852 clips / 16.51 h; v2 67,794 clips / 108.57 h with
-  identical development bytes. YODAS remains quarantined after translated
-  captions were found. Filtered controls and TRAIN-only audits are retained
-  under `proposals/`; the filter is imperfect and development-informed.
+- Intake: v1 9,852 clips / 16.51 h; v2 67,794 clips / 108.57 h with
+  identical development bytes. Raw v2 is held for unfiltered training: one
+  Japanese TRAIN transcript has 82,807 characters for 6.444 s of audio.
+  The active filtered v3 excludes it; all 52,374 train/dev WAV hashes passed
+  its frozen loader. Preserve v2 and make a new cleaned derivative before
+  unfiltered use; evidence is `data-v002-quality-hold.json`.
+  YODAS remains quarantined for translated captions. The numeral filter is
+  imperfect and development-informed. FLEURS train is a proposed written-form
+  style probe; no training/adoption claim is established from its catalogue.
 - Completed trials retain source/data/environment, full outputs and final
   adapters/optimizer states on the Mac, Dumpling and Mangchi. Starter adapters
   also failed full validation. Superseded partial runs remain unscored.
