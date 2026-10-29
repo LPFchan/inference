@@ -26,6 +26,7 @@
   | Original 8-bit anchor | 4.25 | 10.85 | 4.62 | 6.61 | 1.0000 |
   | One-pass SFT selected, seed 21774173 | 3.99 | 10.58 | 4.29 | 4.94 | 0.8839 |
   | One-pass SFT confirmation, seed 21775174 | 4.06 | 10.55 | 4.53 | 5.24 | 0.9158 |
+  | SFT-parent single-draw GRPO, closed | 3.99 | 10.50 | 4.25 | 5.30 | 0.8965 |
   | Uniform two-seed SFT average, closed | 3.89 | 10.67 | 4.49 | 5.14 | 0.9110 |
   | Base-init GRPO `bc8f2d8f6f19a369`, first seed | 4.15 | 10.41 | 4.63 | 5.65 | 0.9392 |
   | Base-init GRPO confirmation, closed | 4.25 | 10.14 | 4.63 | 5.58 | 0.9270 |
@@ -53,20 +54,24 @@
   each contract matches retained `parallel/kss-v001-base` except adapter SHA.
   Its resume-status reporting bug is frozen: monitor actual admission,
   prediction count and full summary. No baseline predictions are repeated.
-- **Active model jobs:** `main:qwen-rl-sft-parent` →
-  `parallel/grpo-76cf17e6620b34fb` uses one group per update, frozen
-  `code/3ee30f6`. `main:qwen-rl-redraw` → `parallel/grpo-ae448ecc75d8e01f`
-  uses the registered cap of eight same-language draws, frozen `code/eff20cb`,
-  accepted in PR28 (`fbdfd86`). Both start/reference the selected SFT adapter,
-  reset Adam initially, use LR 1e-5/seed 21325231 and target 1,000 updates.
-  The redraw run resumes its exact optimizer at step 10 after native
-  acceptance: all 224 adapter/450 optimizer tensors match the old default;
-  its ten-step probe used 18 groups, four redraw steps and 4.263 GB physical
-  peak with normal pressure. Each recipe must beat the matching SFT parent
-  and current incumbent, then independently confirm both stages and pass both
-  KSS cohort vetoes plus incumbent recheck. First-seed failure closes each
-  registered recipe. Packets: `proposals/next-after-first-wins-20261030`
-  and `proposals/next-rl-confirmed-20261030/parent-implementation-binding.json`.
+- **Active model job:** `main:qwen-rl-redraw` →
+  `parallel/grpo-ae448ecc75d8e01f` uses the registered cap of eight
+  same-language draws, frozen `code/eff20cb`, accepted in PR28 (`fbdfd86`).
+  It starts/references the selected SFT adapter, uses LR 1e-5/seed 21325231
+  and targets 1,000 updates. It resumed optimizer step 10 after native
+  acceptance: exact default tensors; 18 probe groups/four redraw steps;
+  4.263 GB physical peak with normal pressure. It must beat matching parent
+  and current incumbent, independently confirm both stages, pass both KSS
+  cohorts and recheck the incumbent. First-seed failure closes its cap.
+  Packet: `proposals/next-rl-confirmed-20261030/parent-implementation-binding.json`.
+- **Closed single-draw SFT-parent GRPO:** `grpo-76cf17e6620b34fb` completes
+  1,000 updates and all 1,295 validation clips, score 0.8965 vs parent/current
+  incumbent 0.8839. KO/JA errors fall, while ZH rises to 5.2957%, exceeding
+  its limit. Gain, CJK and confidence gates fail; delta CI95
+  [-0.0327,+0.0555], no empty/truncated outputs. No confirmation/KSS run
+  or LR/beta/budget variants. The independently preregistered cap-eight run
+  launched before this result and continues. Full frozen evidence is retained
+  under `parallel/grpo-76cf17e6620b34fb`.
 - **Closed adapter average:** `soup-6bc17d90adcbb97d` completed all 1,295
   validation clips with no empty/truncated outputs. Uniform rank-32
   concatenation of the two confirmed adapters scores 0.9110 against the
