@@ -99,10 +99,14 @@
   No full-data candidate, confirmation, KSS or accuracy result is produced.
   PR33 closes unmerged; no budget/rank/target-subset/LR/length retuning.
   Evidence: `proposals/next-sft-after-two-losses-20261030/native-verdict.json`.
+- **RL audit:** token-length reweighting has weak support in the closed TRAIN
+  rollouts; no token-sum trial is admitted. Modal-output and re-tokenized-length
+  proxies leave actual sampling headroom unmeasured. Evidence and the reported
+  short CPU-memory overrun: `proposals/next-rl-after-redraw-20261030`.
 - **Data scout:** sampled WorldSpeech TRAIN labels have unspaced Korean,
   edited Japanese minutes and Traditional Chinese; no trial is admitted.
-  AliMeeting label conventions remain unaudited beyond the scout's small
-  download cap. Evidence: `proposals/next-data-after-v008-loss-20261030`.
+  AliMeeting label conventions remain under audit; no corpus is admitted.
+  Evidence: `proposals/next-data-after-v008-loss-20261030`.
 - **Intake protocol deviation:** the data worker reports displaying one unique
   sealed test reference through two exclusion-related files, without using it.
   The parent did not reopen it. No new test prediction/scoring occurred;

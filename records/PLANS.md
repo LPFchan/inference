@@ -9,6 +9,11 @@ and [the four-slot contract](../skills/autoresearch/SKILL.md).
 - Score full reference-member GRPO: four sampled TRAIN transcripts plus their
   reference, with redraw off. Preserve current-incumbent/matching-parent gates,
   independent confirmation and both KSS vetoes; no setting sweeps after failure.
+- Implement a resumable TRAIN-only sampling diagnostic on 200 unique sentences
+  per language: one greedy plus eight sampled completions from the incumbent.
+  Freeze inputs/seeds, retain actual tokens, and extend a limited smoke without
+  repeating predictions. Report oracle headroom as a TRAIN diagnostic; preserve
+  all learning/selection gates and admit no new RL trial from proxy estimates.
 - Fill free slots with fresh TRAIN-grounded SFT and RL proposals. Preserve
   sealed evaluation inputs, current incumbent capture and source/data hashes;
   no parameter sweeps selected from validation errors.
