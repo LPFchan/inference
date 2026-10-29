@@ -29,8 +29,8 @@
   empty/truncation gates pass. Larger effective batch does not rescue this
   recipe. Full evidence: `batch32-summary.json` under the program root.
 - Operator authorized four research agents and at most four model workers,
-  5 GB each / 20 GB total. Candidate launcher PR21 (`code/75def71`) has native
-  admission evidence; four full trials now run through guarded admission in `main` tmux:
+  5 GB each / 20 GB total. Launcher PR21 is merged as `6497a26`; native
+  admission evidence is retained. Four full trials run in `main` tmux:
   `qwen-rl-lr1e5` → `parallel/grpo-b62373c31be7ca27` (LR 1e-5 from base,
   1,000 GRPO updates), and `qwen-sft-filter-v1` →
   `parallel/sft-8db65348fd229db0` (numeral-filtered v1, 5,000 × 4 SFT updates).
@@ -44,14 +44,14 @@
   This changes speaker/text/source mix and sampling order, including English
   pool order; it does not isolate data quantity. All four use a 4.5 GiB
   MLX guideline and a 5 GB physical-footprint budget.
-  Admission review fixes are pending; immutable actual-run sources stay intact.
+  Actual-run supervisor and trainer snapshots stay immutable.
   Independent-seed confirmation remains required before adoption.
 - Native microbatch-2 probe PR20 fails acceptance: about 9.02% relative gradient
   difference, 1.029× end-to-end speedup and a brief 5.006 GB physical peak.
   Its timings overlap the batch-32 run. Training stays serial within each
   worker. Four full workers are now admitted and training below their 5 GB
   budgets with normal pressure; throughput gains remain unmeasured.
-- Minimal memory patch PR20 (`f287b70`) passed native candidate-only acceptance:
+- PR20 is merged as `ba92ec1`; frozen `f287b70` passed native acceptance:
   one accumulate-32 update matches all 224 adapter and 450 optimizer tensors,
   loss and gradient norm byte-for-byte. Optimizer-step MLX peak falls from
   4.359 GB to 3.698 GB; whole-run peak is 3.885 GB, sampled lifetime physical
@@ -70,7 +70,7 @@
   it. The accepted removal-only v006 drops exactly that target; all 69,088
   train/dev WAV hashes passed the frozen loader, and retained lines stay
   byte-identical. Lost source records are not recovered. Preserve the raw-v2
-  hold; PR23 shares literal-quote parsing across both intake entry points.
+  hold; merged PR23 (`c8dec2e`) shares literal-quote parsing across both entry points.
   YODAS remains quarantined for translated captions. The numeral filter is
   imperfect and development-informed. FLEURS train is a proposed written-form
   style probe; no training/adoption claim is established from its catalogue.
