@@ -141,6 +141,18 @@ def advantages(rewards, scale=None):
     return [(value - mean) / (math.sqrt(variance) + 1e-6) for value in rewards]
 
 
+def grpo_row(pool, seed, step, attempt):
+    """GRPO draw: attempt 0 is the legacy Random(seed + step) choice; redraws use a separate seeded stream."""
+    if attempt == 0:
+        return random.Random(seed + step).choice(pool)
+    return random.Random(f"grpo-redraw:{seed}:{step}:{attempt}").choice(pool)
+
+
+def informative(rewards):
+    """True when a group's rewards differ, so group-relative advantages are nonzero."""
+    return max(rewards) > min(rewards)
+
+
 def training_targets(prompt, completion):
     """Next-token targets include the first transcript token and terminal EOS."""
     if not prompt or not completion:

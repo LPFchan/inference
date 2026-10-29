@@ -171,6 +171,20 @@ Omitted, the default `(reward - mean) / (std + 1e-6)` is unchanged. The value
 is stored in the exact-match resume contract and is unrelated to the LoRA
 `--scale`.
 
+`--max-draws N` (GRPO only, default 1) redraws a group whose rewards are all
+equal, since it carries no policy advantage. Each step keeps its scheduled
+language and its single MLX seed. The first draw is the default row; redraws
+pick another row of that language with replacement, from a per-attempt seeded
+generator. The step stops at the first group whose rewards differ, or at the
+Nth group, which is then kept even if its rewards are equal (`exhausted`).
+Either way the step makes exactly one normal update, on that stopping group
+only. Metrics add `draws`, `exhausted`, and `skipped` (ID and rewards of each
+discarded group; no completions). Each redraw costs another full rollout, and
+redraws change which clips provide policy gradients, so this is an
+experimental recipe with no accuracy claim. The value is stored in the
+exact-match resume contract; the default reproduces the previous rows,
+rollouts and updates.
+
 Use `--base-reference` to start directly from the untouched ASR base. Zero-delta
 LoRA initialization preserves that base as the starting policy and fixed KL
 reference. This flag is valid for GRPO, is mutually exclusive with

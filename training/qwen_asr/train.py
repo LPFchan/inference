@@ -13,9 +13,9 @@ import time
 from pathlib import Path
 import wave
 
-from common import (LANGUAGES, advantages, atomic_json, load_manifests, read_jsonl, reward,
-                    recover_uncommitted_updates, sentence_epoch_draw, sentence_epoch_order,
-                    sha256, summarize, training_targets, validate_splits)
+from common import (LANGUAGES, advantages, atomic_json, grpo_row, informative, load_manifests,
+                    read_jsonl, reward, recover_uncommitted_updates, sentence_epoch_draw,
+                    sentence_epoch_order, sha256, summarize, training_targets, validate_splits)
 
 MODEL_ID = "mlx-community/Qwen3-ASR-1.7B-8bit"
 MODEL_REVISION = "a8379a2e2f9e313c9292cdf1af4055ab56d50d55"
@@ -53,6 +53,8 @@ def arguments():
     p.add_argument("--beta", type=float, default=0.02)
     p.add_argument("--advantage-scale", type=float,
                    help="GRPO only: divide group-centered rewards by this fixed value instead of the group std")
+    p.add_argument("--max-draws", type=int, default=1,
+                   help="GRPO only: groups tried per update while all rewards are equal")
     p.add_argument("--korean-wer-weight", type=float, default=0.0)
     p.add_argument("--sampler", choices=("replacement", "sentence-epoch"), default="replacement",
                    help="SFT only: draw with replacement, or each source sentence at most once")
@@ -65,8 +67,10 @@ def arguments():
     p.add_argument("--memory-gb", type=float, default=18.0)
     p.add_argument("--seed", type=int, default=20261029)
     a = p.parse_args()
-    if min(a.steps, a.accumulate, a.rank, a.save_every, a.eval_clips, a.max_tokens) < 1:
+    if min(a.steps, a.accumulate, a.rank, a.save_every, a.eval_clips, a.max_tokens, a.max_draws) < 1:
         p.error("counts must be positive")
+    if a.max_draws != 1 and a.stage != "grpo":
+        p.error("--max-draws is only valid for GRPO")
     if not 0 <= a.korean_wer_weight <= 1:
         p.error("Korean WER weight must be between zero and one")
     if a.group_size < 2 or a.temperature <= 0 or a.beta < 0 or a.memory_gb <= 0:
@@ -92,7 +96,7 @@ def training_settings(a):
     return {key: getattr(a, key) for key in (
         "stage", "accumulate", "rank", "scale", "learning_rate", "group_size",
         "temperature", "beta", "max_tokens", "seed", "memory_gb", "korean_wer_weight",
-        "base_reference", "advantage_scale", "sampler")}
+        "base_reference", "advantage_scale", "sampler", "max_draws")}
 
 
 def sft_row(pools, order, seed, index):
@@ -446,11 +450,18 @@ def run(a):
             grads = tree_map(lambda g: g / a.accumulate, grads)
         else:
             lang = SCHEDULE[(step - 1) % len(SCHEDULE)]
-            row = random.Random(a.seed + step).choice(pools[lang])
-            ctx = context(row)
-            group = [sample(row, ctx, a.temperature) for _ in range(a.group_size)]
-            rewards = [reward(row["text"], text, lang, a.korean_wer_weight) if ended else -1.0
-                       for tokens, text, ended in group]
+            skipped = []
+            # Redraw a same-language row while all rewards are equal; only the
+            # stopping group updates. The last allowed group is kept regardless.
+            for attempt in range(a.max_draws):
+                row = grpo_row(pools[lang], a.seed, step, attempt)
+                ctx = context(row)
+                group = [sample(row, ctx, a.temperature) for _ in range(a.group_size)]
+                rewards = [reward(row["text"], text, lang, a.korean_wer_weight) if ended else -1.0
+                           for tokens, text, ended in group]
+                if informative(rewards) or attempt + 1 == a.max_draws:
+                    break
+                skipped.append({"id": row["id"], "rewards": rewards})
             adv = advantages(rewards, a.advantage_scale)
             current = dict(tree_flatten(model.trainable_parameters()))
             old_probs = [mx.stop_gradient(log_probs(model, *ctx, tokens, a.temperature))
@@ -475,7 +486,9 @@ def run(a):
             grads = tree_map(lambda g: g / a.group_size, grads)
             diagnostics = {"id": row["id"], "rewards": rewards, "advantages": adv,
                            "zero_advantage": all(abs(x) < 1e-8 for x in adv),
-                           "completions": [text for _, text, _ in group]}
+                           "completions": [text for _, text, _ in group],
+                           "draws": attempt + 1, "exhausted": not informative(rewards),
+                           "skipped": skipped}
         grads, norm = optim.clip_grad_norm(grads, max_norm=1.0)
         mx.eval(grads, norm)
         norm_value = float(norm.item())
