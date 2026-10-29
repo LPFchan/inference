@@ -12,14 +12,14 @@ and [the four-slot contract](../skills/autoresearch/SKILL.md).
 
 - Score the expanded filtered-v2 and removal-only unfiltered-v006 trials
   against base and their controls, confirming only provisional winners.
-  Preserve input snapshots; finish the shared Common Voice parser fix before
-  a new intake rebuild that recovers the previously swallowed source records.
-- Audit FLEURS train as a written-form style probe, with frozen exclusions
-  and an independent, never-trained KSS check before any adoption claim.
+  Preserve input snapshots; use the merged literal-quote Common Voice parser
+  when rebuilding intake to recover previously swallowed source records.
+- Run the prepared FLEURS written-form trial after native KSS evaluator
+  acceptance and a free training slot. Apply unchanged FLEURS selection and
+  independent-seed confirmation, plus the preregistered separate-cohort KSS
+  veto before adoption. Keep speaker/pretraining uncertainty explicit.
 - Score the live higher-rate direct-base GRPO and filtered-v1 SFT trials,
   then independently confirm only provisional winners.
-- Resolve native batching parity and measure concurrency throughput before
-  claiming a speed improvement; preserve the failed probe evidence.
 - Admit YODAS only after audio-language and transcript-alignment checks;
   translated captions cannot be ASR targets.
 - Mine hard training examples and test smaller learning rates/longer windows.

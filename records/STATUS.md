@@ -72,8 +72,17 @@
   byte-identical. Lost source records are not recovered. Preserve the raw-v2
   hold; merged PR23 (`c8dec2e`) shares literal-quote parsing across both entry points.
   YODAS remains quarantined for translated captions. The numeral filter is
-  imperfect and development-informed. FLEURS train is a proposed written-form
-  style probe; no training/adoption claim is established from its catalogue.
+  imperfect and development-informed.
+- Written-form intake PR25 is merged as `f691da6`. Prepared v005 has 8,966
+  FLEURS training clips / 25.14 h, identical frozen development bytes and zero
+  held-out sentence-ID/text/audio overlap. Train/dev speaker separation is
+  unestablished. The evaluation-only KSS probe has 256 digit and 256 other
+  clips; report the cohorts separately. External evaluator PR24 passed review
+  on `f119906`; its four-clip native smoke is queued through shared admission
+  and waits for a free slot. The written-form trial remains unlaunched; no
+  accuracy gain or adoption is established. Commands and frozen evidence are
+  in `prepared-kss-eval.json`, `prepared-fleurs-style.json` and their proposal
+  packets under the program root.
 - Completed trials retain source/data/environment, full outputs and final
   adapters/optimizer states on the Mac, Dumpling and Mangchi. Starter adapters
   also failed full validation. Superseded partial runs remain unscored.
