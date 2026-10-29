@@ -2,35 +2,23 @@
 
 ## Qwen3-ASR multilingual adaptation
 
-Follow [DEC-20261029-001](decisions/DEC-20261029-001-qwen-asr-autoresearch.md),
-[DEC-20261029-002](decisions/DEC-20261029-002-four-slot-qwen-asr-autoresearch.md)
+Follow [DEC-001](decisions/DEC-20261029-001-qwen-asr-autoresearch.md),
+[DEC-002](decisions/DEC-20261029-002-four-slot-qwen-asr-autoresearch.md)
 and [the four-slot contract](../skills/autoresearch/SKILL.md).
 
-- Preserve native admission evidence and supervise the admitted trials within
-  measured reservations. Benchmark 1/2/4-worker throughput on an idle Mac;
-  brief fit evidence does not establish sustained speed gains.
-
-- Preserve the rejected expanded-data snapshots. Use the merged literal-quote
-  Common Voice parser when rebuilding intake to recover swallowed records.
-- Complete independent confirmations of one-sentence-epoch SFT and
-  written-form direct-base GRPO. Apply each registered separate-cohort KSS
-  veto to both seeds and recheck the incumbent before adoption; independent
-  evaluation work may overlap confirmation.
-  Keep speaker/pretraining uncertainty explicit.
-- After one-pass SFT confirmation passes full FLEURS gates, test conditional
-  continuation `grpo-76cf17e6620b34fb`: unchanged frozen `code/3ee30f6`,
-  1,000 updates, fresh optimizer, and the first SFT adapter as both start and
-  fixed KL reference. Require unchanged gates against the current incumbent
-  and matching SFT parent on both independently seeded stages, then its own
-  KSS veto. No variants after a parent-relative first-seed failure. Accepted
-  scope, provenance and guard binding: program-root
-  `proposals/next-after-first-wins-20261030/parent-review.json`.
-- Score the live fixed-advantage-scale GRPO trial with unchanged FLEURS
-  selection, independent confirmation and KSS veto.
-- Admit YODAS only after audio-language and transcript-alignment checks;
-  translated captions cannot be ASR targets.
-- Mine hard training examples and test smaller learning rates/longer windows.
-- Expand adapter capacity or layers only after simpler adaptations plateau.
+- Score the live SFT-parent GRPO recipe against the current incumbent and
+  matching parent. Only a passing first seed enters independent two-stage
+  confirmation; both KSS vetoes and final incumbent recheck remain required.
+- Retain the running base-init GRPO confirmation as the registered comparison
+  control. A win against the original anchor alone cannot advance the trunk.
+- Fill free slots with fresh TRAIN-grounded SFT and RL proposals. Preserve
+  sealed evaluation inputs, current incumbent capture and source/data hashes;
+  no parameter sweeps selected from validation errors.
+- Preserve rejected snapshots. Rebuild Common Voice with the merged literal-
+  quote parser; admit YODAS only after audio-language/transcript alignment checks.
+- Benchmark 1/2/4-worker throughput on an idle Mac; fit evidence alone does not
+  establish a sustained speed gain. Expand capacity only after simpler gains
+  plateau. Keep all existing models/data/results and serving paused.
 
 ## Steady-State Architecture
 

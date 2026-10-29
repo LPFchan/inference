@@ -6,211 +6,92 @@
 
 ## Autoresearch — Qwen3-ASR
 
-- Selection: [DEC-20261029-001](decisions/DEC-20261029-001-qwen-asr-autoresearch.md),
-  amended by [DEC-20261029-002](decisions/DEC-20261029-002-four-slot-qwen-asr-autoresearch.md).
-  Original MLX 8-bit anchor remains incumbent. Eleven completed trials are
-  rejected; one-pass SFT and written-form GRPO passed their first seeds and
-  await confirmation/KSS.
-  Frozen selection set: 1,295 FLEURS validation clips (EN 394, KO 226, JA 266,
-  ZH 409), manifest `c75a4b05069eba7d11a6b50efd7bb11d43800fc66e49b761cd08fb86354acf01`.
-  The original 2,624-clip test and all nine published predictions remain sealed.
-- Full validation primary errors, percent (WER EN/KO, CER JA/ZH):
+- **Training incumbent:** one-pass SFT `sft-ce33a3d7a476e297/step-000944`,
+  adapter `ad63fb38…6e22`. Both independent seeds pass all 1,295 FLEURS gates
+  and both separate-cohort KSS vetoes. The lower-score first checkpoint is
+  selected under the charter. No trained model is deployed; Nemotron stays
+  unloaded. Original MLX 8-bit remains the fixed normalization anchor.
+- [Confirmed findings](research/RSH-20261030-001-confirmed-qwen-asr-one-pass-sft.md).
+  Selection authority: [DEC-001](decisions/DEC-20261029-001-qwen-asr-autoresearch.md),
+  [DEC-002](decisions/DEC-20261029-002-four-slot-qwen-asr-autoresearch.md)
+  and [four-slot contract](../skills/autoresearch/SKILL.md).
+  Frozen primary set: 1,295 validation clips (EN 394,KO 226,JA 266,ZH 409),
+  manifest `c75a4b05069eba7d11a6b50efd7bb11d43800fc66e49b761cd08fb86354acf01`.
+  Original 2,624-clip test, nine published predictions and artifacts stay sealed.
+- Full validation primary errors, percent (WER EN/KO; CER JA/ZH). Scores use
+  the original anchor; passing its screen alone cannot replace the incumbent.
 
-  | Trial | EN | KO | JA | ZH | CJK ratio score |
+  | Trial | EN | KO | JA | ZH | CJK score |
   | --- | ---: | ---: | ---: | ---: | ---: |
-  | Base 8-bit | 4.25 | 10.85 | 4.62 | 6.61 | 1.0000 |
-  | SFT `1716b8bc1e5c73e3`, LR 3e-5 | 4.69 | 19.21 | 6.80 | 7.75 | 1.4724 |
-  | SFT-parent GRPO `103d0a8dd807ff06` | 6.09 | 18.77 | 6.59 | 7.87 | 1.4493 |
-  | SFT `b508876066da8567`, LR 1e-5 | 4.93 | 20.07 | 6.59 | 7.91 | 1.4915 |
-  | Base GRPO `2e5b6950468db2d0`, LR 1e-6 | 4.27 | 10.85 | 4.70 | 6.67 | 1.0091 |
-  | SFT batch-32 `c3422927b2181bc0` | 5.39 | 19.42 | 6.91 | 7.86 | 1.4918 |
-  | Base GRPO `b62373c31be7ca27`, LR 1e-5 | 5.18 | 13.96 | 6.13 | 7.98 | 1.2741 |
-  | SFT filtered v1 `8db65348fd229db0` | 4.57 | 16.01 | 5.94 | 7.69 | 1.3084 |
-  | SFT filtered expanded v2 `9b8cfb528c942378` | 4.53 | 15.98 | 5.22 | 7.53 | 1.2475 |
-  | SFT unfiltered v006 `100c0aa4969e4145` | 5.67 | 19.63 | 7.12 | 7.88 | 1.5147 |
-  | SFT written-form v005 `0812e3d33da50ccb` | 4.30 | 11.24 | 5.94 | 5.25 | 1.0390 |
-  | SFT one sentence-epoch `ce33a3d7a476e297`, first seed | 3.99 | 10.58 | 4.29 | 4.94 | 0.8839 |
-  | Base GRPO written-form v005 `bc8f2d8f6f19a369`, first seed | 4.15 | 10.41 | 4.63 | 5.65 | 0.9392 |
-  | Half-strength final SFT `wa05-bce1c6b780deb965` | 3.99 | 10.52 | 4.77 | 5.34 | 0.9370 |
+  | Original 8-bit anchor | 4.25 | 10.85 | 4.62 | 6.61 | 1.0000 |
+  | One-pass SFT selected, seed 21774173 | 3.99 | 10.58 | 4.29 | 4.94 | 0.8839 |
+  | One-pass SFT confirmation, seed 21775174 | 4.06 | 10.55 | 4.53 | 5.24 | 0.9158 |
+  | Base-init GRPO `bc8f2d8f6f19a369`, first seed | 4.15 | 10.41 | 4.63 | 5.65 | 0.9392 |
 
-- The batch-32 trial completed 625 updates on the same ordered 20,000 draws,
-  seed 21774173, LR 3e-5 and frozen source `code/655b245` as batch-4 × 5,000.
-  Paired score delta CI95 [0.3932, 0.5919]; all language/gain gates fail,
-  empty/truncation gates pass. Larger effective batch does not rescue this
-  recipe. Full evidence: `batch32-summary.json` under the program root.
-- Direct-base GRPO `b62373c31be7ca27` completed 1,000 updates and all 1,295
-  validation clips. Its CJK score is 1.2741, paired delta CI95 [0.2112, 0.3461];
-  all four primary errors regress. 328 outputs differ from base. Gain, language
-  and confidence gates fail; empty/truncation gates pass. It is rejected with
-  no confirmation or adoption. Full integrity, selection and metrics are retained
-  under `parallel/grpo-b62373c31be7ca27`.
-- Numeral-filtered v1 SFT `8db65348fd229db0` completed 5,000 × 4 updates and
-  full validation: score 1.3084, delta CI95 [0.2382, 0.3820]. CJK/gain/confidence
-  gates fail; English/empty/truncation gates pass. The imperfect,
-  development-informed filter does not rescue this recipe. It is rejected;
-  both completed trials retain their final checkpoints and exact predictions.
-- Filtered expanded-v2 SFT `9b8cfb528c942378` completed full validation:
-  score 1.2475, paired delta CI95 [0.1739, 0.3309] against base. It fails
-  CJK/gain/confidence gates and is rejected. The diagnostic delta against
-  the rejected filtered-v1 control is -0.0609, CI95 [-0.1201, 0.0018]; that
-  interval includes zero. Source mix, speakers and draw order also change,
-  so this does not isolate data quantity. No confirmation or adoption.
-- Unfiltered expanded-v006 SFT `100c0aa4969e4145` also completed full validation:
-  score 1.5147, delta CI95 [0.4256, 0.6203] against base. Gain, all language
-  and confidence gates fail; empty/truncation pass. Its diagnostic delta
-  against the rejected expanded filtered run is 0.2672, CI95 [0.1992, 0.3449].
-  It is rejected with no confirmation or adoption.
-- Written-form v005 SFT `0812e3d33da50ccb` completed 5,000 × 4 updates
-  and all 1,295 validation clips: score 1.0390, paired delta CI95
-  [-0.0467, 0.1377]. Chinese CER improves to 5.25% from 6.61%, while Korean
-  WER and Japanese CER rise to 11.24% and 5.94%. Gain, CJK regression and
-  confidence gates fail; English, empty and truncation gates pass. It is
-  rejected with no confirmation or adoption. The final checkpoint, frozen
-  contracts, complete predictions, metrics and integrity report are retained
-  under `parallel/sft-0812e3d33da50ccb` and verified on all three hosts.
-- One-sentence-epoch SFT `ce33a3d7a476e297` completed 944 × 4 updates and
-  all 1,295 validation clips. It passes every unchanged first-seed gate:
-  CJK score 0.8839, paired delta CI95 [-0.1740, -0.0511], with all four
-  primary errors below base and no empty or truncated outputs. All 3,776
-  actual TRAIN draws are unique source sentences and match the preregistered
-  sequence hash. Full evidence and final adapter/optimizer are retained under
-  its run directory and independently hash-verified on all three hosts.
-  Confirmation `sft-a11b015fbeee0082` is running from the identical frozen
-  source/recipe with seed 21775174. The first seed also passes its registered
-  KSS veto; confirmation still needs both FLEURS and KSS acceptance before
-  adoption. The base remains incumbent.
-  The diagnostic score delta against the rejected 5,000-update SFT is
-  -0.1552, CI95 [-0.2512, -0.0551]. Sampling, recording choice, order,
-  acoustic coverage and update count change together, so this does not
-  establish repetition as the cause of the difference.
-- Written-form direct-base GRPO `bc8f2d8f6f19a369` completed 1,000 updates
-  and all 1,295 validation clips. Every unchanged first-seed gate passes:
-  CJK score 0.9392, paired delta CI95 [-0.0973, -0.0194]. Korean WER is
-  10.41% and Chinese CER 5.65%; Japanese CER rises slightly from 4.62%
-  to 4.63%, within its relative regression limit. There are no empty or
-  truncated outputs; 330 transcripts differ from base. Frozen contracts,
-  complete results and the final checkpoint are verified on all three hosts.
-  Independent confirmation `grpo-bc8f2d8f6f19a369-confirm` is running with
-  seed 21326232, unchanged frozen `code/3ee30f6` and 1,000-update recipe.
-  Its first-seed KSS veto also passes. Full FLEURS and KSS confirmation,
-  followed by an incumbent recheck, remain required before adoption.
-  The base remains incumbent.
-- Both first-seed Korean KSS checks completed all 512 unique clips with
-  matched frozen contracts/references and no empty or truncated outputs.
-  Both models pass the unchanged +0.5 pp WER/CER veto on each cohort:
+- SFT score-delta CI95 vs original anchor: first[-0.1740,-0.0511],
+  confirmation[-0.1370,-0.0348]. Every gate passes; all outputs end and none
+  are empty. Both 944 × 4 TRAIN sequences match preregistered hashes, each with
+  3,776 unique language/source-sentence draws. Sampling, recording choice,
+  order, coverage and update count change together versus the rejected
+  5,000-update SFT. No isolated repetition/capacity claim.
+- KSS Korean guard: 256 digit and 256 other clips, reported separately;
+  one voice, oversampled digits, no pooled accuracy. Each row is WER/CER:
 
-  | KSS Korean cohort | Clips per model | Model | WER | CER |
-  | --- | ---: | --- | ---: | ---: |
-  | Digit | 256 | Base | 32.71% | 11.88% |
-  | Digit | 256 | One-pass SFT | 11.05% | 3.58% |
-  | Digit | 256 | Base-init GRPO | 14.42% | 4.38% |
-  | Other | 256 | Base | 8.08% | 1.24% |
-  | Other | 256 | One-pass SFT | 7.20% | 1.35% |
-  | Other | 256 | Base-init GRPO | 7.92% | 1.41% |
+  | Model | Digit | Other |
+  | --- | ---: | ---: |
+  | Original anchor | 32.71% / 11.88% | 8.08% / 1.24% |
+  | Selected SFT | 11.05% / 3.58% | 7.20% / 1.35% |
+  | SFT confirmation | 12.84% / 4.16% | 7.04% / 1.24% |
+  | Base-init GRPO first seed | 14.42% / 4.38% | 7.92% / 1.41% |
 
-  Other-cohort CER rises by 0.1178 pp for SFT and 0.1766 pp for GRPO,
-  within the veto. This single-speaker supplementary probe oversamples
-  digit clips; there is no pooled accuracy or final-test claim. Full
-  predictions, cohort metrics, guards and integrity are retained under
-  `parallel/kss-v001-sft-ce33a3d7a476e297` and
-  `parallel/kss-v001-grpo-bc8f2d8f6f19a369`, verified on all three hosts.
-- Operator authorized four research agents and at most four model workers,
-  5 GB each / 20 GB total. Launcher PR21 is merged as `6497a26`. Three training
-  runs remain active under `main` tmux: `qwen-rl-fleurs-confirm` →
-  `parallel/grpo-bc8f2d8f6f19a369-confirm` (frozen `code/3ee30f6`, base init
-  and KL reference, rank16, LR1e-5, seed21326232, 1,000 GRPO updates),
-  `qwen-rl-fixed-scale` → `parallel/grpo-c3b0b430fab2ba0c` (frozen
-  `code/1a162b0`, same GRPO recipe with fixed advantage divisor 0.03), and
-  `qwen-sft-sentence-confirm` → `parallel/sft-a11b015fbeee0082` (frozen
-  `code/1412c1f`, base init, rank16, LR3e-5, seed21775174, 944×4 updates,
-  each drawn source sentence used at most once). The fourth worker,
-  `qwen-kss-sft-confirm`, runs the second SFT seed's preregistered 512-clip
-  KSS veto as `parallel/kss-v001-sft-a11b015fbeee0082`, frozen `code/f119906`.
-  It overlaps FLEURS confirmation validation; adoption requires unchanged
-  FLEURS and KSS acceptance for both seeds. Its contract equals the retained KSS base
-  run except for the checkpoint. The three training runs use v005 written-form
-  FLEURS train (8,966 clips / 25.14 h),
-  supervisor `code/1ae82c5`, a 4.5 GiB MLX guideline and a 5 GB physical
-  footprint budget. The first GRPO trial changes only TRAIN data relative
-  to closed `b62373c31be7ca27`; domain, acoustics, speakers, target conventions
-  and draw order move together. Actual-run code and inputs stay immutable.
-  The remaining hypotheses require unchanged full1,295 FLEURS gates,
-  independent-seed confirmation and their preregistered per-cohort KSS veto
-  before adoption. The original base remains incumbent.
-- Fixed-scale tooling PR26 is merged as `ff86b09`: 84 focused tests pass,
-  automated review has no findings, and no benchmark CI is configured.
-  Its native one-update preflight matches the control's TRAIN clip, rewards
-  and completion strings exactly. The measured gradient norm differs from
-  its expected scaled value by 0.0678%, within the preregistered 0.1% tolerance;
-  physical peak is 4.035 GB and MLX peak is 3.911 GB. Full accuracy is pending.
-  The target-gloss removal proposal is held as a diagnostic: duration regression
-  does not establish which individual spans are spoken, and it claims no
-  primary-score improvement. Prepared v007 and its TRAIN evidence are preserved.
-- Sentence-epoch tooling PR27 is merged as `160f433`. All 105 focused tests
-  pass after installing missing `filelock` in the repo-local test environment;
-  the native training environment is unchanged. Automated review has no
-  findings; no benchmark CI is configured. Native replacement-mode first loss
-  and gradient norm exactly match the control. The opt-in preflight uses the
-  four pinned actual clip IDs and peaks at 4.246 GB physical / 3.886 GB MLX.
-  Both complete TRAIN sequence hashes match before launch. This trial changes
-  sampling, recording choice, order, acoustic coverage and training length
-  together; it does not isolate the effect of repetition. The first seed
-  passes full validation; confirmation and KSS acceptance remain pending.
-- Half-strength final SFT `wa05-bce1c6b780deb965` completed all 1,295
-  validation clips using the preregistered alpha0.5 final-step derivation.
-  CJK score is 0.9370, paired delta CI95 [-0.1060, -0.0220]. Gain,
-  confidence, English, empty and truncation gates pass, but Japanese CER
-  rises from 4.62% to 4.77%: +3.21% relative exceeds its frozen 2% limit.
-  It is rejected with no confirmation or adoption. No other coefficient or
-  intermediate checkpoint was scored. The coefficient and all 112 exactly
-  halved LoRA B tensors were frozen before source validation was read.
-  Source/derived hashes, complete predictions, metrics, integrity and
-  diagnostic comparison with raw SFT are retained and verified on all three
-  hosts. Packet: `proposals/next-score-candidate-20261029`; run:
-  `parallel/wa05-bce1c6b780deb965`. The original base remains incumbent.
-- Native microbatch-2 probe PR20 fails acceptance: about 9.02% relative gradient
-  difference, 1.029× end-to-end speedup and a brief 5.006 GB physical peak.
-  Its timings overlap the batch-32 run. Training stays serial within each
-  worker. Native four-worker admission has stayed within measured budgets
-  with normal pressure; throughput gains remain unmeasured.
-- PR20 is merged as `ba92ec1`; frozen `f287b70` passed native acceptance:
-  one accumulate-32 update matches all 224 adapter and 450 optimizer tensors,
-  loss and gradient norm byte-for-byte. Optimizer-step MLX peak falls from
-  4.359 GB to 3.698 GB; whole-run peak is 3.885 GB, sampled lifetime physical
-  peak 4.248 GB. This is single-update compatibility evidence. Existing full
-  trials keep their frozen code; no restart or quality improvement is claimed.
-- Nemotron remains unloaded. Preserve gateway/tunnel, oMLX settings and all
-  models/audio/results. No Grimoire operations or automatic model deployment.
-- Root: `~/models/stt/qwen3-asr-hillclimb-20261029`. `parallel-trials.json` and
-  per-job admission/memory/process logs identify current runs. The completed
-  legacy driver left `loop-state.json` at `needs-next-hypothesis`; it no longer
-  owns a worker. The ten-minute heartbeat prompt is `continue`.
-- Intake: v1 9,852 clips / 16.51 h; v2 67,794 clips / 108.57 h with
-  identical development bytes. Raw v2 is held for unfiltered training: one
-  Japanese TRAIN transcript has 82,807 characters for 6.444 s of audio because
-  default CSV quoting merged 290 following source records. Filtered v3 excludes
-  it. The accepted removal-only v006 drops exactly that target; all 69,088
-  train/dev WAV hashes passed the frozen loader, and retained lines stay
-  byte-identical. Lost source records are not recovered. Preserve the raw-v2
-  hold; merged PR23 (`c8dec2e`) shares literal-quote parsing across both entry points.
-  YODAS remains quarantined for translated captions. The numeral filter is
-  imperfect and development-informed.
-- Written-form intake PR25 is merged as `f691da6`. Prepared v005 has 8,966
-  FLEURS training clips / 25.14 h, identical frozen development bytes and zero
-  held-out sentence-ID/text/audio overlap. Train/dev speaker separation is
-  unestablished. The evaluation-only KSS probe has 256 digit and 256 other
-  clips; report the cohorts separately. External evaluator PR24 is merged as
-  `6cb2975`, including the resume-status reporting fix. Its numerical evidence
-  remains pinned to `f119906`: native smoke extended to all 512 base clips,
-  preserving the four saved rows. The merged head passed 75 focused CPU tests
-  and automated review with no findings; no benchmark CI is configured.
-  The written-form trials are running; their adoption also requires the unchanged
-  FLEURS gates, independent confirmation and the preregistered separate-cohort
-  KSS veto. No accuracy gain is established. Commands and frozen evidence are
-  in the prepared files and proposal packets under the program root.
-- Completed trials retain source/data/environment, full outputs and final
-  adapters/optimizer states on the Mac, Dumpling and Mangchi. Starter adapters
-  also failed full validation. Superseded partial runs remain unscored.
+  All listed candidate cohorts pass the registered +0.5 pp WER/CER veto,
+  with no additional empty/truncated outputs. Other-cohort CER rises 0.1178 pp
+  for selected SFT and 0.1766 pp for GRPO. Numerical source stays `code/f119906`;
+  each contract matches retained `parallel/kss-v001-base` except adapter SHA.
+  Its resume-status reporting bug is frozen: monitor actual admission,
+  prediction count and full summary. No baseline predictions are repeated.
+- **Active model jobs:** `main:qwen-rl-fleurs-confirm` →
+  `parallel/grpo-bc8f2d8f6f19a369-confirm` (frozen `code/3ee30f6`, base
+  start/reference, LR 1e-5, seed 21326232,1,000 updates) continues as the
+  registered comparison control. `main:qwen-rl-sft-parent` →
+  `parallel/grpo-76cf17e6620b34fb` runs the same GRPO recipe from the
+  selected SFT adapter, which is also its fixed KL reference; optimizer resets.
+  Both stages re-seed for confirmation. It must beat both matching SFT parent
+  and current incumbent with unchanged gates, then pass its own both-seed KSS
+  veto and incumbent recheck. A first parent-relative failure closes the recipe.
+  Packet: `proposals/next-after-first-wins-20261030/parent-review.json`.
+- Root: `~/models/stt/qwen3-asr-hillclimb-20261029`.
+  `parallel-trials.json.incumbent` is current authority; adoption evidence is
+  `parallel/sft-ce33a3d7a476e297/adoption.json`. The legacy driver's
+  `loop-state.json` is historical and unchanged. Runtime:
+  `~/inference-qwen-training/.venv/bin/python`; pins/source/data/results and
+  final adapters/optimizers are retained on Mac, local mirror and Mangchi.
+- Operator authorized at most four research/model workers, 5e9 physical bytes
+  each/20e9 total reservations. Model launches use frozen supervisor
+  `code/1ae82c5` in existing `main` tmux and `--memory-gb 4.5` or less.
+  Two model slots are available for fresh TRAIN-grounded proposals. The
+  ten-minute completion heartbeat is exactly `continue`.
+- Closed earlier areas: v001 SFT LR 3e-5/1e-5, starter-SFT-parent GRPO,
+  base GRPO LR1e-6/1e-5, matched 20k-draw batch 32, numeral-filtered v1,
+  expanded filtered/raw v006, 5,000-update written-form SFT and single
+  alpha0.5 final-step derivation. Eleven rejected trials retain all full
+  outputs. Relevant LOG commits: `200795a`, `649b608`, `31c66bc`, `07110bf`,
+  `4d7b9f7`, `a396b8e`; complete per-trial metrics remain under the root.
+- Intake: v001 9,852 clips/16.51h; raw v002 67,794/108.57h is held for a
+  merged-quote Japanese target. Merged literal-quote parser PR23(`c8dec2e`)
+  fixes rebuilding; v006 removes the one bad row but does not recover lost
+  records. Numeral filtering is imperfect and development-informed. YODAS is
+  quarantined for translated captions. v005 written-form FLEURS TRAIN has
+  8,966 clips/25.14h and zero held-out sentence-ID/text/audio overlap;
+  speaker separation/pretraining exposure remain unestablished.
+- Workers stay serial within each process. Native microbatch 2 failed acceptance
+  (~9% gradient difference, 1.03× speedup, 5.006 GB peak). Eager-gradient-sum
+  PR20(`ba92ec1`) passed exact first-update tensor parity with lower memory;
+  existing trials retain their frozen code. Four-slot admission PR21 is
+  merged as `6497a26`; numerical external evaluator stays `f119906` although
+  main includes its reporting fix. No benchmark CI is configured.
+- Preserve all models/audio/results, gateway/tunnel and disabled oMLX settings.
+  No Grimoire operations, automatic serving restore or global fleet edits.
 
 ## Migration Summary
 
