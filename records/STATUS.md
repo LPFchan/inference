@@ -80,6 +80,15 @@
   The target-gloss removal proposal is held as a diagnostic: duration regression
   does not establish which individual spans are spoken, and it claims no
   primary-score improvement. Prepared v007 and its TRAIN evidence are preserved.
+- A single half-strength variant of the written-form SFT is preregistered:
+  scale only the final step-5,000 adapter's LoRA B tensors by 0.5, then evaluate
+  all 1,295 clips with frozen `code/655b245`, regardless of the raw endpoint's
+  score. No coefficient sweep or intermediate checkpoint is included.
+  CPU byte checks and corruption controls pass; the source checkpoint is not
+  ready, so no predictions have run. The independent SFT confirmation seed
+  21775174 can be shared with its source recipe. Primary and per-cohort KSS
+  gates remain unchanged. Packet: `proposals/next-score-candidate-20261029`;
+  `parallel-trials.json` records its pending derivation.
 - Native microbatch-2 probe PR20 fails acceptance: about 9.02% relative gradient
   difference, 1.029× end-to-end speedup and a brief 5.006 GB physical peak.
   Its timings overlap the batch-32 run. Training stays serial within each
