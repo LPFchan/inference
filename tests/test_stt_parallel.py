@@ -308,7 +308,7 @@ def test_aggregate_or_critical_overage_evicts_only_the_newest_owned_worker(host,
     older, _ = launch(host, "old", sleep=1.5)
     newer, _ = launch(host, "new")
     if overload == "aggregate":  # the legacy job grows; only stopping the newest owned job restores 20 GB
-        host["now"][other.pid] = 11 * GB
+        host["peaks"][other.pid] = 11 * GB  # current footprint already fell; its reservation keeps the peak
     else:
         fake = parallel.system
         monkeypatch.setattr(parallel, "system",
@@ -370,3 +370,22 @@ def test_benchmark_runs_identical_phases_and_reports_combined_rates(host):
     assert two["steady_speedup_vs_first"] == pytest.approx(2.0)
     assert {p["mlx_bytes"] for p in two["peaks"]} == {4_000_000_000}
     assert not parallel.records(root)  # every bench slot was released and recorded finished
+
+
+def test_benchmark_records_a_pre_admission_validation_denial(host):
+    root = host["root"]
+    data = root / "data"
+    data.mkdir()
+    (data / "train.jsonl").write_text("\n".join(
+        json.dumps({"id": lang, "language": lang, "seconds": 2.0})
+        for lang in ("ko", "ja", "zh", "en")))
+    result = parallel.main(["bench", str(root), "--runtime", sys.executable,
+                            "--source", str(root / "code/x"), "--model", "m",
+                            "--data", str(data), "--protected-test", "t",
+                            "--workers", "1", "--steps", "3", "--memory-gb", "5"])
+    assert result == parallel.DENIED
+    [path] = (root / "parallel").glob("bench-*/bench.json")
+    summary = json.loads(path.read_text())
+    assert summary["phases"] == [] and summary["aborted"]["workers"] == 1
+    assert "--memory-gb" in summary["aborted"]["denied"][0]
+    assert not parallel.records(root)

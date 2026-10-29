@@ -287,7 +287,7 @@ def supervise(root, workers, interval=10.0, strikes=3, aggregate=AGGREGATE_BYTES
                 for w in workers:
                     _terminate(w, "sampler-failed", repr(error))
                 break
-            live = sum(max(u["budget_bytes"], u["bytes"]) for u in units.values())
+            live = sum(max(u["budget_bytes"], u["max_bytes"]) for u in units.values())
             pressure = pressure + 1 if state["pressure_level"] >= CRITICAL else 0
             total = total + 1 if live > aggregate else 0
             for w in workers:
@@ -388,6 +388,7 @@ def sampled_audio_seconds(data, seed, examples):
 def bench(a):
     root, source = a.root.resolve(), a.source.resolve()
     folder = root / "parallel" / f"bench-{time.strftime('%Y%m%d-%H%M%S')}"
+    folder.mkdir(parents=True, exist_ok=True)
     examples = a.steps * a.accumulate
     audio = sampled_audio_seconds(a.data, a.seed, examples)
     summary = {"settings": {k: str(v) for k, v in vars(a).items() if k != "func"}, "examples_per_worker": examples,
