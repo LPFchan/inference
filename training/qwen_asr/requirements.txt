@@ -4,3 +4,4 @@ mlx-lm==0.31.3
 soundfile==0.13.1
 jiwer==4.0.0
 pyarrow>=18,<24
+scipy==1.18.1
