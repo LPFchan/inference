@@ -216,6 +216,9 @@ limits may increase, while data/model/code/hyperparameters must match. A changed
 recipe starts a new run. Sampling and utterance selection use per-step seeds.
 The lock refuses duplicate jobs writing the same run directory.
 
+An accepted resume marks `run.json` as running before model startup and clears
+its previous finish time and process peak. The checkpoint contract stays fixed.
+
 On resume, `latest.json` selects the published checkpoint. A run interrupted
 before its first checkpoint restarts from the same seeded initialization.
 Unpublished checkpoint directories and metrics beyond the saved step are

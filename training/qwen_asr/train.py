@@ -248,12 +248,12 @@ def run(a):
         if summary.exists():
             raise FileExistsError(f"external evaluation already complete: {summary}")
         saved = saved_predictions(predictions, probe, contract_sha256)
-        if a.resume:
-            result = json.loads(run_file.read_text())
-            result.update(status="running")
-            result.pop("finished", None)
-            result.pop("peak_memory_bytes", None)
-            atomic_json(run_file, result)
+    if a.resume:
+        result = json.loads(run_file.read_text())
+        result.update(status="running")
+        result.pop("finished", None)
+        result.pop("peak_memory_bytes", None)
+        atomic_json(run_file, result)
 
     mx.set_memory_limit(int(a.memory_gb * (1 << 30)))
     mx.set_cache_limit(128 << 20)
