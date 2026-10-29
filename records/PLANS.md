@@ -7,10 +7,8 @@ and [the single-worker contract](../skills/autoresearch/SKILL.md).
 
 - Compare the verified 108.6-hour mixture against the frozen base, confirming
   only recipes that pass all selection gates.
-- Test an effective batch of 32 with 625 SFT updates against batch 4 with 5,000
-  updates, holding the 20,000 training examples, sampling seed and LR constant.
-- Confirm any provisional base-reference GRPO win with an independent training
-  seed before adopting a checkpoint.
+- Score the matched-input batch-32 SFT trial against the base; confirm any
+  provisional win with an independent training seed before adopting it.
 - Admit YODAS only after audio-language and transcript-alignment checks;
   translated captions cannot be ASR targets.
 - Mine hard training examples and test smaller learning rates/longer windows.

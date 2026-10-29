@@ -39,18 +39,30 @@
   Rejected, including two empty Korean outputs. All updates are finite;
   84.87 optimization minutes, 100.53 total minutes, 4.15 GB peak MLX allocation.
   Its sampling seed differs from the 3e-5 run, so these two recipes do not
-  isolate learning rate. All three completed hill-climb trials are rejected.
-- Live on Mac `main:qwen-base-reference`: `grpo-2e5b6950468db2d0`,
-  1,000 updates directly from the untouched base with that policy as the fixed
-  KL reference, LR 1e-6 and Korean WER weight 0.5 on `data-v001-16h`.
-  `/tmp/stt-qwen-base-reference-full-20261029.log` and `loop-state.json`
-  identify the single owned driver/worker. A provisional winner triggers an
-  independent-seed confirmation before selection. The incumbent remains base.
-- Native base-reference acceptance passed: 29 focused target tests, one real
-  GRPO update and 16 nonempty, completed outputs across all four languages;
-  model/checkpoint hashes match and measured peak MLX allocation is 4.04 GB.
-  This checks runtime behavior, not quality. PR19 is merged as `dca3bab`;
-  the active run retains its immutable reviewed source `code/3ee30f6`.
+  isolate learning rate.
+- Closed trial `grpo-2e5b6950468db2d0`: 1,000 updates directly from the
+  untouched base with that policy as the fixed KL reference, LR 1e-6,
+  seed 21325231, Korean WER weight 0.5 on `data-v001-16h`.
+  Full validation primary errors are EN 4.27%, KO 10.85%, JA 4.70%, ZH 6.67%;
+  CER all is 2.13/4.32/4.70/6.67%. Score 1.0091 against base 1.0;
+  paired delta CI95 [-0.0034, 0.0233]. Rejected: neither the required gain nor
+  a bootstrap interval below zero is achieved. Regression/empty/truncation
+  limits pass; this run does not establish a statistically reliable change.
+  All 1,000 updates are finite, with 423 variable-reward and 577 equal-reward
+  groups; 51.10 optimization minutes, 66.19 total minutes, 4.18 GB peak MLX
+  allocation. All four scored hill-climb trials are rejected; base remains best.
+- Live on Mac `main:qwen-batch32`: `sft-c3422927b2181bc0`, effective
+  batch 32 × 625 updates from the untouched base, on `data-v001-16h`.
+  It uses exactly the same ordered 20,000 example IDs, seed 21774173,
+  LR 3e-5 and frozen training source `code/655b245` as the original batch-4
+  SFT trial. Sequence SHA256 is
+  `1705d82249f480b3a68807122f9784c12dadc37f8960170007a4d97cfa840d7b`.
+  `/tmp/stt-qwen-batch32-full-20261029.log` and `loop-state.json` identify
+  the single driver/worker; wins require independent-seed confirmation.
+  The new worker starts only after the completed GRPO driver releases the lock.
+- PR19 is merged as `dca3bab`. The completed direct-base GRPO keeps its
+  immutable actual-run source `code/3ee30f6`, native acceptance evidence,
+  model/checkpoint hashes and full validation outputs.
 - The original controller was drained after the third rejection. Its next
   higher-rate SFT-parent GRPO run `grpo-daafe1970256e5e9` is superseded after
   223 observed updates, with checkpoint 200 retained; it is not a scored trial.
@@ -67,14 +79,11 @@
   per-trial proposals/verdicts hold runtime evidence. A 10-minute heartbeat
   wakes this thread with `continue`; its handle is retained in `monitor.json`.
   Check existing processes/saved files before launching replacements.
-  All three completed trials' final adapters/optimizers, full outputs and
-  verified summaries are mirrored on Dumpling and Mangchi. The third summary
-  is `lower-rate-sft-summary.json`; its archive receipt also covers the native
-  preflight, frozen source and superseded partial run.
-- Next controlled experiment is prepared without starting another GPU worker:
-  effective SFT batch 32 × 625 updates, with the same ordered 20,000 example
-  IDs, seed and LR as the original batch 4 × 5,000 trial. Its proposal and
-  sequence hash are retained in `prepared-batch32.json` and the trial directory.
+  All four completed trials' final adapters/optimizers, full outputs and
+  verified summaries are mirrored on Dumpling and Mangchi. The latest summary
+  is `base-reference-grpo-summary.json`; its archive receipt covers the actual
+  runner, checkpoint, full outputs and saved verdict. Earlier native preflight
+  and superseded partial-run evidence remain retained.
 
 ## Migration Summary
 
