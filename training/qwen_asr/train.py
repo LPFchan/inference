@@ -35,6 +35,7 @@ def arguments():
     p.add_argument("--output", type=Path, required=True)
     p.add_argument("--init-adapter", type=Path)
     p.add_argument("--resume", action="store_true")
+    p.add_argument("--skip-initial-eval", action="store_true")
     p.add_argument("--steps", type=int, default=200, help="absolute optimizer-step target")
     p.add_argument("--accumulate", type=int, default=4)
     p.add_argument("--rank", type=int, default=16)
@@ -43,6 +44,7 @@ def arguments():
     p.add_argument("--group-size", type=int, default=4)
     p.add_argument("--temperature", type=float, default=0.7)
     p.add_argument("--beta", type=float, default=0.02)
+    p.add_argument("--korean-wer-weight", type=float, default=0.0)
     p.add_argument("--max-tokens", type=int, default=256)
     p.add_argument("--save-every", type=int, default=25)
     p.add_argument("--eval-clips", type=int, default=4, help="per language on development only")
@@ -51,6 +53,8 @@ def arguments():
     a = p.parse_args()
     if min(a.steps, a.accumulate, a.rank, a.save_every, a.eval_clips, a.max_tokens) < 1:
         p.error("counts must be positive")
+    if not 0 <= a.korean_wer_weight <= 1:
+        p.error("Korean WER weight must be between zero and one")
     if a.group_size < 2 or a.temperature <= 0 or a.beta < 0 or a.memory_gb <= 0:
         p.error("invalid GRPO/memory settings")
     if a.stage == "grpo" and not a.init_adapter:
@@ -101,7 +105,7 @@ def run(a):
     init = a.init_adapter.resolve() if a.init_adapter else None
     settings = {key: getattr(a, key) for key in (
         "stage", "accumulate", "rank", "scale", "learning_rate", "group_size",
-        "temperature", "beta", "max_tokens", "seed", "memory_gb")}
+        "temperature", "beta", "max_tokens", "seed", "memory_gb", "korean_wer_weight")}
     contract = {"settings": settings, "model_files": model_files,
                 "data": {k: data_meta[k] for k in (
                     "train_sha256", "dev_sha256", "protected_manifest_sha256")},
@@ -154,8 +158,8 @@ def run(a):
 
     if init:
         info = load_adapter(init)
-        if a.stage == "grpo" and (info["stage"] != "sft" or info["step"] < 1):
-            raise ValueError("RL reference must be a trained SFT checkpoint")
+        if a.stage == "grpo" and (info["stage"] not in ("sft", "grpo") or info["step"] < 1):
+            raise ValueError("RL reference must be a trained SFT-derived checkpoint")
     # Fixed SFT reference uses only an adapter copy, sharing frozen base weights.
     reference = {name: mx.array(value) for name, value in tree_flatten(model.trainable_parameters())}
     optimizer = optim.AdamW(learning_rate=a.learning_rate, weight_decay=0.0)
@@ -227,14 +231,21 @@ def run(a):
                             "hypothesis": text, "loss": loss, "ended": ended,
                             "reward": reward(row["text"], text, language)})
             counts[language] += 1
+            if len(results) % 20 == 0:
+                print(json.dumps({"phase": "evaluation", "tag": tag, "clips": len(results)}), flush=True)
             mx.clear_cache()
         atomic_json(a.output / f"dev-{tag}.json", {"rows": results,
                     "seconds": time.perf_counter() - started,
                     "peak_memory_bytes": mx.get_peak_memory()})
 
-    if start == 0 and not (a.output / "dev-initial.json").exists():
+    if start == 0 and not a.skip_initial_eval and not (a.output / "dev-initial.json").exists():
         evaluate("initial")
     if a.stage == "evaluate":
+        if a.skip_initial_eval:
+            evaluate("initial")
+        result = json.loads(run_file.read_text())
+        result.update(status="complete", finished=time.time(), peak_memory_bytes=mx.get_peak_memory())
+        atomic_json(run_file, result)
         return
 
     def checkpoint(step):
@@ -275,7 +286,7 @@ def run(a):
             row = random.Random(a.seed + step).choice(pools[lang])
             ctx = context(row)
             group = [sample(row, ctx, a.temperature) for _ in range(a.group_size)]
-            rewards = [reward(row["text"], text, lang) if ended else -1.0
+            rewards = [reward(row["text"], text, lang, a.korean_wer_weight) if ended else -1.0
                        for tokens, text, ended in group]
             adv = advantages(rewards)
             current = dict(tree_flatten(model.trainable_parameters()))

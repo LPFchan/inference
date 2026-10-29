@@ -4,6 +4,50 @@
 **Posture:** The Grimoire gateway serves local llama.cpp models and admits remote vLLM models through Mangchi's residency agent. The local engine remains TheTom's turboquant fork with turbo4 KV. Mangchi model artifacts are managed separately from the gateway.
 **Focus:** Serve Qwen3.8 Flash-Next and the grugthink 27B as Mangchi's registered remote models (one resident at a time) and continue Flash-Next's its decode, prefix-cache, and CUDA-graph optimization program.
 
+## Autoresearch — Qwen3-ASR
+
+- Charter: [DEC-20261029-001](decisions/DEC-20261029-001-qwen-asr-autoresearch.md).
+  Single worker; no Grimoire operations or automatic checkpoint deployment.
+- Nemotron backend is unloaded for ongoing training at the operator's request.
+  Gateway/tunnel and retained weights are preserved. Do not restore it automatically.
+- Selection set: frozen 1,295 FLEURS validation clips, manifest
+  `c75a4b05069eba7d11a6b50efd7bb11d43800fc66e49b761cd08fb86354acf01`.
+  The original 2,624-clip test and nine predictions stay sealed.
+- Incumbent: original MLX 8-bit anchor. All three larger-set calibrations
+  completed; both starter adapters fail the selection gates. EN/KO WER and
+  JA/ZH CER are 4.25/10.85/4.62/6.61% for the anchor,
+  6.10/18.80/6.76/7.86% for SFT-200 and 6.15/18.94/6.76/7.86% for GRPO-50.
+  The small starter sample's gains do not generalize to this development set.
+- Closed trial `sft-1716b8bc1e5c73e3`: 5,000 updates from the base on
+  `data-v001-16h` (9,852 clips / 16.5054 hours), LR 3e-5, seed 21774173.
+  Full validation primary errors are EN 4.69%, KO 19.21%, JA 6.80%, ZH 7.75%;
+  Korean CER also rises from 4.33% to 6.33%, so spacing alone does not explain
+  the regression. Score 1.4724 against base 1.0; paired delta CI95
+  [0.3733, 0.5746]. Rejected. All 5,000 updates are finite; optimization takes
+  84.90 minutes, the complete run 100.62 minutes, peak MLX allocation 4.15 GB.
+- Live on Mac `main`: `qwen-cycle` (`/tmp/stt-qwen-cycle.log`) runs
+  `grpo-103d0a8dd807ff06`, 1,000 spacing-aware GRPO updates on the same snapshot
+  at LR 1e-6, Korean WER weight 0.5. Its fixed reference is starter SFT-200;
+  the incumbent remains the untouched base. No RL verdict yet.
+- Pinned intake completed all 157 files without final errors. The next immutable
+  snapshot, `data-v002-clean`, is verified: 67,794 clips / 108.5695 hours,
+  including 48.95 h Korean, 13.12 h Japanese, 45.00 h Mandarin and 1.50 h English.
+  Its train manifest is `180554e0676f47a46ba99f8e5a2b9996ad1288bc5554b2e1492879010116273d`;
+  development bytes remain identical. `next-data-ready.json` retains the queued
+  snapshot; it does not change the active trial's inputs.
+  YODAS remains quarantined pending audio-language/alignment checks because
+  caption inspection found translated lecture material in the Japanese pool.
+- Root: `~/models/stt/qwen3-asr-hillclimb-20261029`. `loop-state.json` and
+  per-trial proposals/verdicts hold runtime evidence. A 10-minute heartbeat
+  wakes this thread with `continue`; its handle is retained in `monitor.json`.
+  Check existing processes/saved files before launching replacements.
+  The completed trial's final adapter/optimizer, full outputs and verified
+  `first-long-sft-summary.json` are mirrored on Dumpling and Mangchi.
+- The active controller/trainer is frozen at `code/655b245`. Reviewed recovery
+  and selected-verdict fixes are prepared at `code/dc60e3f` for future runs.
+  Preserve existing run contracts; verify that any accepted confirmation's
+  persisted verdict identifies the same checkpoint as the incumbent.
+
 ## Migration Summary
 
 Bee (`Anbeeld/beellama.cpp`) is the canonical engine. Single binary serves DFlash (`--spec-type dflash`), PFlash (via `pflash_daemon`), and normal traffic. Content-hash KV caching provides cross-conversation sysprompt reuse (1.93x verified). Legacy `backend:dflash` daemon, Lucebox code, and `/opt/dflash` fully retired. For completed phase details see git history (Phases 1-7, commits `f40874c` through `ef4fcb1`).
@@ -29,8 +73,8 @@ Patch chain in `patches/atomic-llama-cpp/`, applied in order by `Dockerfile`:
   audio-conditioned GRPO. Actual starter runs complete 200 SFT and 50 GRPO
   updates on the 24 GB M4 Pro, peaking at 4.02 GB MLX allocation. On 105 small
   development clips, SFT improves primary errors; this GRPO run trails SFT.
-  No adapted Qwen checkpoint is deployed. Nemotron HTTPS transcription is
-  restored and verified after the training slots. Procedure:
+  No adapted Qwen checkpoint is deployed. Nemotron stays unloaded for the
+  ongoing training program. Procedure:
   [`training/qwen_asr`](../training/qwen_asr/README.md); measured evidence:
   [`RSH-20261029-002`](research/RSH-20261029-002-qwen-asr-sft-rl.md).
 

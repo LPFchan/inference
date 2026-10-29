@@ -2,13 +2,16 @@
 
 ## Qwen3-ASR multilingual adaptation
 
-Expand Korean, Japanese and Mandarin training/development speech for Qwen3-ASR,
-using balanced supervised LoRA and English replay. Compare GRPO refinement on
-independent development data before selecting a final candidate for the frozen
-FLEURS test. Architecture expansion remains conditional on a demonstrated
-capacity constraint. Training must not deploy checkpoints automatically or
-change Grimoire. The repeatable procedure lives in
-[`training/qwen_asr`](../training/qwen_asr/README.md).
+Follow [DEC-20261029-001](decisions/DEC-20261029-001-qwen-asr-autoresearch.md)
+and [the single-worker contract](../skills/autoresearch/SKILL.md).
+
+- Compare lower-rate SFT and the verified 108.6-hour mixture against the frozen
+  base, confirming only recipes that pass all selection gates.
+- Finish mixed CER/WER Korean GRPO and measure full validation before adoption.
+- Admit YODAS only after audio-language and transcript-alignment checks;
+  translated captions cannot be ASR targets.
+- Mine hard training examples and test smaller learning rates/longer windows.
+- Expand adapter capacity or layers only after simpler adaptations plateau.
 
 ## Steady-State Architecture
 
