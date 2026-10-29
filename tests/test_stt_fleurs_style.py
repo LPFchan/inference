@@ -85,6 +85,21 @@ def test_fleurs_intake_excludes_heldout_ids_text_audio_and_probe(tmp_path):
         "fleurs-dev-ko-00000.wav", "fleurs-train-ja-00000.wav", "fleurs-train-ko-00000.wav"]
 
 
+def test_fleurs_intake_cap_keeps_v005_rows_and_adds_only_longer_clips(tmp_path):
+    dev_dir, protected, _ = frozen_split(tmp_path)
+    audio = lambda hz, s: {"bytes": tone(hz, s), "path": None}
+    ko = write_parquet(tmp_path / "ko.parquet", {
+        "id": [1, 2, 3], "audio": [audio(440, 16.0), audio(450, 2.0), audio(460, 21.0)],
+        "raw_transcription": ["긴 문장입니다.", "짧은 문장.", "아주 긴 문장."],
+        "transcription": ["긴 문장입니다", "짧은 문장", "아주 긴 문장"]})
+    default, _, meta = prep.build_train(tmp_path / "v15", {"ko": ko}, set(), dev_dir, protected, [], {})
+    longer, _, meta20 = prep.build_train(tmp_path / "v20", {"ko": ko}, set(), dev_dir, protected, [], {}, 20)
+    assert [r["id"] for r in default] == ["fleurs-train/ko/1"] and meta["selection"]["seconds"] == [1, 15]
+    assert [r["id"] for r in longer] == ["fleurs-train/ko/0", "fleurs-train/ko/1"]
+    assert meta20["selection"]["seconds"] == [1, 20] and meta20["rejected"] == {"ko/duration_or_nonfinite": 1}
+    assert longer[1] == default[0]  # shared rows are identical, audio hash included
+
+
 def kss_files(tmp_path):
     texts = ["사과 3개를 샀다.", "책을 읽었다.", "같은 문장.", "같은 문장.", "학습 문장.",
              "버스는 10시에 온다.", "비가 온다.", "눈이 온다.", "검증 문장입니다", "바람이 분다."]

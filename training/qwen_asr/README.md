@@ -71,6 +71,9 @@ are cached for retry. Models/audio/checkpoints stay outside Git.
 It excludes held-out sentence IDs across all four languages, normalized text,
 audio hashes and any supplied probe. Unknown FLEURS speakers remain unknown;
 speaker separation and the base model's pretraining exposure are unestablished.
+Training clips default to 1–15 seconds. `train --max-seconds 20` includes clips
+up to 20 seconds in a new snapshot and records the cap in `data.json`; it does
+not change the KSS probe's 15-second cap.
 
 Prepare the evaluation-only KSS probe first, excluding every adaptation pool:
 

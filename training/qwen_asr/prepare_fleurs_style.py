@@ -91,7 +91,7 @@ def rows(path, columns, output):
         del table
 
 
-def write_wav(path, data):
+def write_wav(path, data, max_seconds=15):
     """Decode encoded audio to mono 16 kHz PCM16; return (seconds, sha256) or None."""
     import io
     from math import gcd
@@ -105,7 +105,7 @@ def write_wav(path, data):
         factor = gcd(rate, 16000)
         audio = resample_poly(audio, 16000 // factor, rate // factor)
     seconds = len(audio) / 16000
-    if not 1 <= seconds <= 15 or not np.isfinite(audio).all():
+    if not 1 <= seconds <= max_seconds or not np.isfinite(audio).all():
         return None
     sf.write(path, audio, 16000, subtype="PCM_16")
     return seconds, sha256(path)
@@ -121,7 +121,7 @@ def heldout(dev_dir, protected_test):
     return dev, protected, text - {""}, {r["sha256"] for r in dev + protected}
 
 
-def build_train(output, sources, blocked_ids, dev_dir, protected_test, exclude, downloads):
+def build_train(output, sources, blocked_ids, dev_dir, protected_test, exclude, downloads, max_seconds=15):
     """FLEURS train with raw_transcription targets, excluding held-out ids/text/audio."""
     dev, protected, held_text, held_audio = heldout(dev_dir, protected_test)
     probe = [r for path in exclude for r in read_jsonl(path)]
@@ -139,7 +139,7 @@ def build_train(output, sources, blocked_ids, dev_dir, protected_test, exclude, 
             flags = {"heldout_source_sentence_id": item["id"] in blocked_ids,
                      "heldout_text": bool(keys & held_text), "probe_text": bool(keys & probe_text)}
             wav = output / "wav" / f"fleurs-train-{lang}-{index:05d}.wav"
-            audio = write_wav(wav, item["audio"]["bytes"])
+            audio = write_wav(wav, item["audio"]["bytes"], max_seconds)
             if audio:
                 flags |= {"heldout_audio": audio[1] in held_audio, "probe_audio": audio[1] in probe_audio,
                           "train_audio_duplicate": audio[1] in seen}
@@ -181,7 +181,7 @@ def build_train(output, sources, blocked_ids, dev_dir, protected_test, exclude, 
         "train_sha256": sha256(output / "train.jsonl"), "dev_sha256": sha256(output / "dev.jsonl"),
         "protected_manifest_sha256": sha256(protected_test), "dev_source_data_sha256": sha256(dev_dir / "data.json"),
         "selection": {"recipe": "fleurs-train-written-v1", "target_field": "raw_transcription",
-                      "seconds": [1, 15], "order": "language ko, ja, zh, en; source row order"},
+                      "seconds": [1, max_seconds], "order": "language ko, ja, zh, en; source row order"},
         "train_clips": len(kept), "dev_clips": len(dev), "train_hours": sum(seconds.values()) / 3600,
         "clips_by_language": dict(Counter(r["language"] for r in kept)),
         "hours_by_language": {k: v / 3600 for k, v in seconds.items()},
@@ -300,6 +300,7 @@ def main():
     p.add_argument("--seed", type=int, default=20261029)
     p.add_argument("--per-cohort", type=int, default=256)
     p.add_argument("--reserve", type=int, default=64)
+    p.add_argument("--max-seconds", type=float, default=15, help="train: longest kept clip (v005 used 15)")
     a = p.parse_args()
     a.output.mkdir(parents=True, exist_ok=True)
     with (a.output / ".prepare.lock").open("w") as lock:
@@ -316,7 +317,7 @@ def main():
             blocked = {i for v in ids.values() for i in v} | {int(r["id"]) for r in read_jsonl(a.protected_test)}
             downloads["validation_id_counts"] = {k: len(v) for k, v in ids.items()}
             build_train(a.output, {lang: downloads[name]["path"] for lang, name in names.items()}, blocked,
-                        a.dev, a.protected_test, a.exclude, downloads)
+                        a.dev, a.protected_test, a.exclude, downloads, a.max_seconds)
         else:
             if (a.output / "probe.json").exists():
                 verify_probe(a.output)
