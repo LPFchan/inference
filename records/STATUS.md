@@ -97,11 +97,14 @@
   scale only the final step-5,000 adapter's LoRA B tensors by 0.5, then evaluate
   all 1,295 clips with frozen `code/655b245`, regardless of the raw endpoint's
   score. No coefficient sweep or intermediate checkpoint is included.
-  CPU byte checks and corruption controls pass; the source checkpoint is not
-  ready, so no predictions have run. The independent SFT confirmation seed
+  The source finished 5,000 updates and is validating. Derived candidate
+  `wa05-bce1c6b780deb965` is ready: all 112 LoRA B tensors are exactly halved,
+  with unchanged A tensors/header and verified source/derived hashes. Its
+  predictions await a free worker; all four slots remain occupied. No source
+  validation score was read to choose it. Independent SFT confirmation seed
   21775174 can be shared with its source recipe. Primary and per-cohort KSS
   gates remain unchanged. Packet: `proposals/next-score-candidate-20261029`;
-  `parallel-trials.json` records its pending derivation.
+  `parallel-trials.json` records its ready command and artifact binding.
 - Native microbatch-2 probe PR20 fails acceptance: about 9.02% relative gradient
   difference, 1.029× end-to-end speedup and a brief 5.006 GB physical peak.
   Its timings overlap the batch-32 run. Training stays serial within each

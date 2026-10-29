@@ -17,8 +17,8 @@ and [the four-slot contract](../skills/autoresearch/SKILL.md).
   scaling, with unchanged FLEURS selection,
   independent-seed confirmation and the preregistered separate-cohort KSS
   veto before adoption. Keep speaker/pretraining uncertainty explicit.
-- Evaluate the preregistered half-strength final SFT adapter when its source
-  checkpoint is published, independently of the raw endpoint's score; share
+- Evaluate ready half-strength candidate `wa05-bce1c6b780deb965` in the next
+  free worker slot, independently of the raw endpoint's score; share
   an identical confirmation training run rather than launching it twice.
 - Admit YODAS only after audio-language and transcript-alignment checks;
   translated captions cannot be ASR targets.
