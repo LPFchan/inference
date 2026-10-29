@@ -360,3 +360,116 @@ def test_controller_verdict_identifies_the_selected_confirmation(tmp_path, monke
     assert "-confirm/" in accepted["checkpoint"]
     assert accepted["checkpoint"] == state["incumbent"]["checkpoint"]
     assert accepted["evaluation"] == state["incumbent"]["evaluation"]
+
+
+def sentence_pools():
+    """Two recordings of every source sentence per language, plus one ID-less sentence read twice."""
+    pools = {}
+    for lang in ("en", "ko", "ja", "zh"):
+        rows = [dict(id=f"{lang}/{s}-{r}", language=lang, text=f"{lang} sentence {s}",
+                     source_sentence_id=s) for s in range(12) for r in range(2)]
+        rows += [dict(id=f"{lang}/plain-{r}", language=lang, text=text)
+                 for r, text in enumerate([f"{lang} Plain words.", f"{lang} plain  WORDS"])]
+        pools[lang] = rows
+    return pools
+
+
+def test_sentence_epoch_draws_one_seeded_recording_per_sentence():
+    from common import sentence_epoch_order, sentence_key
+    pools = sentence_pools()
+    order = sentence_epoch_order(pools, 7)
+    for lang, rows in order.items():
+        keys = [sentence_key(row) for row in rows]
+        assert len(keys) == len(set(keys)) == 13  # ID 0 is a sentence; the two plain readings are one
+        assert ("id", 0) in keys and sum(key[0] == "text" for key in keys) == 1
+        assert all(row in pools[lang] for row in rows)
+    assert sentence_epoch_order(sentence_pools(), 7) == order
+    other = sentence_epoch_order(pools, 8)
+    assert [r["id"] for r in other["ko"]] != [r["id"] for r in order["ko"]]
+    shuffled = {lang: [r["id"] for r in rows] for lang, rows in order.items()}
+    assert len(set(map(tuple, shuffled.values()))) == 4  # each language draws from its own generator
+
+
+def test_sentence_epoch_draw_keeps_schedule_and_refuses_exhaustion():
+    from common import sentence_epoch_draw, sentence_epoch_order, sentence_key
+    trainer = importlib.util.module_from_spec(
+        spec := importlib.util.spec_from_file_location("qwen_train_schedule", DIRECTORY / "train.py"))
+    spec.loader.exec_module(trainer)
+    schedule = trainer.SCHEDULE
+    order = sentence_epoch_order(sentence_pools(), 7)
+    # 13 sentences per language; KO's 14th draw (microstep 43) would repeat one.
+    drawn = [sentence_epoch_draw(order, index, schedule) for index in range(43)]
+    assert [row["language"] for row in drawn] == [schedule[i % 10] for i in range(43)]
+    for lang in ("ko", "ja", "zh", "en"):
+        assert [row for row in drawn if row["language"] == lang] == order[lang][:len(
+            [row for row in drawn if row["language"] == lang])]
+    assert len({(r["language"], sentence_key(r)) for r in drawn}) == 43
+    with pytest.raises(ValueError, match="exhausted for ko at microstep 43"):
+        sentence_epoch_draw(order, 43, schedule)
+    resumed = sentence_epoch_order(sentence_pools(), 7)  # a resumed process rebuilds the order
+    assert [sentence_epoch_draw(resumed, i, schedule) for i in range(24, 43)] == drawn[24:]
+
+
+def test_default_sft_draws_are_unchanged_and_sentence_epoch_is_opt_in(monkeypatch):
+    import random
+    from common import sentence_epoch_draw, sentence_epoch_order
+    trainer, args = parse_training_args(monkeypatch, "sft", [])
+    assert args.sampler == "replacement" and trainer.training_settings(args)["sampler"] == "replacement"
+    pools, schedule = sentence_pools(), trainer.SCHEDULE
+    assert [trainer.sft_row(pools, None, 11, i) for i in range(40)] == [
+        random.Random(11 + i).choice(pools[schedule[i % 10]]) for i in range(40)]
+    order = sentence_epoch_order(pools, 11)
+    assert [trainer.sft_row(pools, order, 11, i) for i in range(40)] == [
+        sentence_epoch_draw(order, i, schedule) for i in range(40)]
+    trainer, args = parse_training_args(monkeypatch, "sft", ["--sampler", "sentence-epoch"])
+    assert trainer.training_settings(args)["sampler"] == "sentence-epoch"
+
+
+@pytest.mark.parametrize("stage,extra", [
+    ("grpo", ["--base-reference"]), ("evaluate", []), ("evaluate", ["--external", "probe.jsonl"])])
+def test_sentence_epoch_is_rejected_outside_sft(monkeypatch, stage, extra):
+    with pytest.raises(SystemExit) as error:
+        parse_training_args(monkeypatch, stage, [*extra, "--sampler", "sentence-epoch"])
+    assert error.value.code == 2
+
+
+@pytest.mark.parametrize("steps,refused", [(3, False), (4, True)])
+def test_sentence_epoch_budget_is_refused_before_model_load(tmp_path, monkeypatch, steps, refused):
+    import json
+    from types import ModuleType, SimpleNamespace
+    from common import atomic_json, sha256
+    data = tmp_path / "data"
+    data.mkdir()
+    rows = {"train": [], "dev": []}
+    for split in rows:
+        for lang in ("en", "ko", "ja", "zh"):
+            audio = data / f"{split}-{lang}.wav"
+            audio.write_bytes(f"{split} {lang}".encode())
+            rows[split].append(dict(id=f"{split}/{lang}", language=lang, text=f"{split} {lang} words",
+                                    speaker=f"{split}-{lang}", audio=audio.name, sha256=sha256(audio),
+                                    source_sentence_id=0))
+        (data / f"{split}.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows[split]))
+    protected = tmp_path / "test.jsonl"
+    protected.write_text("")
+    atomic_json(data / "data.json", {"train_sha256": sha256(data / "train.jsonl"),
+                                     "dev_sha256": sha256(data / "dev.jsonl"),
+                                     "protected_manifest_sha256": sha256(protected)})
+    loads = []
+    for name in ("mlx", "mlx.core", "mlx.nn", "mlx.optimizers", "mlx.utils", "mlx_audio", "mlx_audio.stt",
+                 "mlx_audio.lm", "mlx_audio.lm.generate", "mlx_lm", "mlx_lm.sample_utils",
+                 "mlx_lm.tuner", "mlx_lm.tuner.lora"):
+        module = ModuleType(name)
+        module.__dict__.update(tree_flatten=None, tree_map=None, tree_unflatten=None, generate_step=None,
+                               make_sampler=None, LoRALinear=None)
+        monkeypatch.setitem(sys.modules, name, module)
+    monkeypatch.setitem(sys.modules, "mlx_audio.stt.utils", SimpleNamespace(load_model=loads.append))
+    trainer, args = parse_training_args(monkeypatch, "sft", ["--sampler", "sentence-epoch",
+                                                             "--steps", str(steps), "--accumulate", "1"])
+    args.data, args.protected_test, args.output = data, protected, tmp_path / "run"
+    args.model = tmp_path / "missing-model"
+    args.output.mkdir()
+    # One sentence per language: KO, JA and ZH fill the first three microsteps; the fourth repeats KO.
+    with pytest.raises(ValueError, match="missing model weights" if not refused else
+                       "sentence epoch exhausted for ko at microstep 3"):
+        trainer.run(args)
+    assert not loads and not (args.output / "run.json").exists()

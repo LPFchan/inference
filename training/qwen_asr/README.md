@@ -122,6 +122,18 @@ microsteps. It is independent of corpus size. Cache is capped at 128 MiB and
 MLX allocation at 18 GiB by default. These limits do not measure total process
 RSS or all other Mac applications. Actual memory/time must be measured.
 
+By default each microstep draws a training row with replacement from its
+language pool, seeded by the microstep index. `--sampler sentence-epoch` (SFT
+only) instead exposes each source sentence at most once within a run: each
+language's recordings are grouped by `source_sentence_id` (normalized text when
+absent), the sentences are shuffled with a per-language seeded generator, and
+one seeded recording is kept per sentence. Microsteps keep the same language
+schedule and consume each language's order in turn. The requested
+`--steps × --accumulate` must fit the shortest language under that schedule, or
+the run is refused before the model loads; the other pools are not exhausted.
+The sampler is stored in the exact-match resume contract, and each metrics
+event records that update's row `ids`.
+
 Each microstep's gradient is added and evaluated immediately. A lazy running
 sum would keep every microstep gradient alive until the update ends: about
 26 MB each at rank 16, or roughly 0.8 GB at `--accumulate 32`.
