@@ -14,6 +14,13 @@ and [the four-slot contract](../skills/autoresearch/SKILL.md).
 - Score full reference-member GRPO: four sampled TRAIN transcripts plus their
   reference, with redraw off. Preserve current-incumbent/matching-parent gates,
   independent confirmation and both KSS vetoes; no setting sweeps after failure.
+- Implement rank-16 attention-plus-MLP LoRA as one placement trial, preserving
+  attention initialization and all incumbent learning settings. Admit training
+  only after default numerical parity, a ten-update longest-TRAIN preflight at
+  most 4.75 GB physical footprint with normal pressure, and matched first-update
+  loss/draws. A failed fit closes the packet. Both passing validation seeds need
+  a new geometry-matched KSS base and candidate evaluations with unchanged vetoes.
+  Packet: `proposals/next-sft-after-two-losses-20261030/parent-review.json`.
 - Fill free slots with fresh TRAIN-grounded SFT and RL proposals. Preserve
   sealed evaluation inputs, current incumbent capture and source/data hashes;
   no parameter sweeps selected from validation errors.
