@@ -8,7 +8,7 @@
 
 - Selection: [DEC-20261029-001](decisions/DEC-20261029-001-qwen-asr-autoresearch.md),
   amended by [DEC-20261029-002](decisions/DEC-20261029-002-four-slot-qwen-asr-autoresearch.md).
-  Original MLX 8-bit anchor remains incumbent; all six full trials are rejected.
+  Original MLX 8-bit anchor remains incumbent; all seven full trials are rejected.
   Frozen selection set: 1,295 FLEURS validation clips (EN 394, KO 226, JA 266,
   ZH 409), manifest `c75a4b05069eba7d11a6b50efd7bb11d43800fc66e49b761cd08fb86354acf01`.
   The original 2,624-clip test and all nine published predictions remain sealed.
@@ -23,6 +23,7 @@
   | Base GRPO `2e5b6950468db2d0`, LR 1e-6 | 4.27 | 10.85 | 4.70 | 6.67 | 1.0091 |
   | SFT batch-32 `c3422927b2181bc0` | 5.39 | 19.42 | 6.91 | 7.86 | 1.4918 |
   | Base GRPO `b62373c31be7ca27`, LR 1e-5 | 5.18 | 13.96 | 6.13 | 7.98 | 1.2741 |
+  | SFT filtered v1 `8db65348fd229db0` | 4.57 | 16.01 | 5.94 | 7.69 | 1.3084 |
 
 - The batch-32 trial completed 625 updates on the same ordered 20,000 draws,
   seed 21774173, LR 3e-5 and frozen source `code/655b245` as batch-4 × 5,000.
@@ -35,29 +36,30 @@
   and confidence gates fail; empty/truncation gates pass. It is rejected with
   no confirmation or adoption. Full integrity, selection and metrics are retained
   under `parallel/grpo-b62373c31be7ca27`.
+- Numeral-filtered v1 SFT `8db65348fd229db0` completed 5,000 × 4 updates and
+  full validation: score 1.3084, delta CI95 [0.2382, 0.3820]. CJK/gain/confidence
+  gates fail; English/empty/truncation gates pass. The imperfect,
+  development-informed filter does not rescue this recipe. It is rejected;
+  both completed trials retain their final checkpoints and exact predictions.
 - Operator authorized four research agents and at most four model workers,
-  5 GB each / 20 GB total. Launcher PR21 is merged as `6497a26`; native
-  admission evidence is retained. Four full trials run in `main` tmux:
-  `qwen-rl-lr1e5` → `parallel/grpo-b62373c31be7ca27` (LR 1e-5 from base,
-  1,000 GRPO updates), and `qwen-sft-filter-v1` →
-  `parallel/sft-8db65348fd229db0` (numeral-filtered v1, 5,000 × 4 SFT updates).
-  A third job, `qwen-sft-expand-v2` → `parallel/sft-9b8cfb528c942378`,
-  trains on the same-filter expanded pool (51,079 clips / 78.12 h), source
-  `code/655b245`, seed 21774173, LR 3e-5 and 5,000 × 4 updates. Its current
-  supervisor is `code/3976a1e`; earlier jobs retain `code/75def71`.
-  A fourth job, `qwen-sft-v006-raw` → `parallel/sft-100c0aa4969e4145`,
-  trains on the removal-only unfiltered-v2 derivative (67,793 clips / 108.57 h),
-  with the same trainer/seed/LR/5,000 × 4 budget and supervisor `code/1ae82c5`.
-  This changes speaker/text/source mix and sampling order, including English
-  pool order; it does not isolate data quantity. All four use a 4.5 GiB
-  MLX guideline and a 5 GB physical-footprint budget.
-  Actual-run supervisor and trainer snapshots stay immutable.
-  Independent-seed confirmation remains required before adoption.
+  5 GB each / 20 GB total. Launcher PR21 is merged as `6497a26`. Three full
+  trials remain active under `main` tmux:
+  `qwen-sft-expand-v2` → `parallel/sft-9b8cfb528c942378` (same-filter expanded
+  pool, 51,079 clips / 78.12 h, supervisor `code/3976a1e`);
+  `qwen-sft-v006-raw` → `parallel/sft-100c0aa4969e4145` (removal-only
+  unfiltered v2, 67,793 clips / 108.57 h); and `qwen-sft-fleurs-style` →
+  `parallel/sft-0812e3d33da50ccb` (written-form v005, 8,966 clips / 25.14 h).
+  The latter two supervisors are `code/1ae82c5`. All use frozen trainer
+  `code/655b245`, base init, rank16, LR3e-5, seed21774173, 5,000 × 4 updates,
+  a 4.5 GiB MLX guideline and a 5 GB physical-footprint budget. Data changes
+  corpus/speaker/text/source mix and draw order; quantity is not isolated.
+  Actual-run code and inputs stay immutable. Confirm provisional winners with
+  an independent seed before adoption.
 - Native microbatch-2 probe PR20 fails acceptance: about 9.02% relative gradient
   difference, 1.029× end-to-end speedup and a brief 5.006 GB physical peak.
   Its timings overlap the batch-32 run. Training stays serial within each
-  worker. Four full workers are now admitted and training below their 5 GB
-  budgets with normal pressure; throughput gains remain unmeasured.
+  worker. Native four-worker admission has stayed within measured budgets
+  with normal pressure; throughput gains remain unmeasured.
 - PR20 is merged as `ba92ec1`; frozen `f287b70` passed native acceptance:
   one accumulate-32 update matches all 224 adapter and 450 optimizer tensors,
   loss and gradient norm byte-for-byte. Optimizer-step MLX peak falls from
@@ -84,12 +86,13 @@
   FLEURS training clips / 25.14 h, identical frozen development bytes and zero
   held-out sentence-ID/text/audio overlap. Train/dev speaker separation is
   unestablished. The evaluation-only KSS probe has 256 digit and 256 other
-  clips; report the cohorts separately. External evaluator PR24 passed review
-  on `f119906`; its four-clip native smoke is queued through shared admission
-  and waits for a free slot. The written-form trial remains unlaunched; no
-  accuracy gain or adoption is established. Commands and frozen evidence are
-  in `prepared-kss-eval.json`, `prepared-fleurs-style.json` and their proposal
-  packets under the program root.
+  clips; report the cohorts separately. External evaluator PR24 passed native
+  smoke and a complete 512-clip base extension on frozen `f119906`, preserving
+  the four saved smoke rows. A resume-status reporting fix awaits fresh review.
+  The written-form trial is running; its adoption also requires the unchanged
+  FLEURS gates, independent confirmation and the preregistered separate-cohort
+  KSS veto. No accuracy gain is established. Commands and frozen evidence are
+  in the prepared files and proposal packets under the program root.
 - Completed trials retain source/data/environment, full outputs and final
   adapters/optimizer states on the Mac, Dumpling and Mangchi. Starter adapters
   also failed full validation. Superseded partial runs remain unscored.
