@@ -8,7 +8,7 @@
 
 - Selection: [DEC-20261029-001](decisions/DEC-20261029-001-qwen-asr-autoresearch.md),
   amended by [DEC-20261029-002](decisions/DEC-20261029-002-four-slot-qwen-asr-autoresearch.md).
-  Original MLX 8-bit anchor remains incumbent; all nine full trials are rejected.
+  Original MLX 8-bit anchor remains incumbent; all ten full trials are rejected.
   Frozen selection set: 1,295 FLEURS validation clips (EN 394, KO 226, JA 266,
   ZH 409), manifest `c75a4b05069eba7d11a6b50efd7bb11d43800fc66e49b761cd08fb86354acf01`.
   The original 2,624-clip test and all nine published predictions remain sealed.
@@ -26,6 +26,7 @@
   | SFT filtered v1 `8db65348fd229db0` | 4.57 | 16.01 | 5.94 | 7.69 | 1.3084 |
   | SFT filtered expanded v2 `9b8cfb528c942378` | 4.53 | 15.98 | 5.22 | 7.53 | 1.2475 |
   | SFT unfiltered v006 `100c0aa4969e4145` | 5.67 | 19.63 | 7.12 | 7.88 | 1.5147 |
+  | SFT written-form v005 `0812e3d33da50ccb` | 4.30 | 11.24 | 5.94 | 5.25 | 1.0390 |
 
 - The batch-32 trial completed 625 updates on the same ordered 20,000 draws,
   seed 21774173, LR 3e-5 and frozen source `code/655b245` as batch-4 × 5,000.
@@ -54,26 +55,34 @@
   and confidence gates fail; empty/truncation pass. Its diagnostic delta
   against the rejected expanded filtered run is 0.2672, CI95 [0.1992, 0.3449].
   It is rejected with no confirmation or adoption.
+- Written-form v005 SFT `0812e3d33da50ccb` completed 5,000 × 4 updates
+  and all 1,295 validation clips: score 1.0390, paired delta CI95
+  [-0.0467, 0.1377]. Chinese CER improves to 5.25% from 6.61%, while Korean
+  WER and Japanese CER rise to 11.24% and 5.94%. Gain, CJK regression and
+  confidence gates fail; English, empty and truncation gates pass. It is
+  rejected with no confirmation or adoption. The final checkpoint, frozen
+  contracts, complete predictions, metrics and integrity report are retained
+  under `parallel/sft-0812e3d33da50ccb` and verified on all three hosts.
 - Operator authorized four research agents and at most four model workers,
-  5 GB each / 20 GB total. Launcher PR21 is merged as `6497a26`. Four full
-  trials remain active under `main` tmux: `qwen-sft-fleurs-style` →
-  `parallel/sft-0812e3d33da50ccb` (frozen `code/655b245`, base init, rank16,
-  LR3e-5, seed21774173,5,000×4 SFT updates), `qwen-rl-fleurs` →
+  5 GB each / 20 GB total. Launcher PR21 is merged as `6497a26`. Three full
+  training trials remain active under `main` tmux: `qwen-rl-fleurs` →
   `parallel/grpo-bc8f2d8f6f19a369` (frozen `code/3ee30f6`, base init and KL
-  reference, rank16, LR1e-5, seed21325231,1,000 GRPO updates), and
+  reference, rank16, LR1e-5, seed21325231, 1,000 GRPO updates),
   `qwen-rl-fixed-scale` → `parallel/grpo-c3b0b430fab2ba0c` (frozen
   `code/1a162b0`, same GRPO recipe with fixed advantage divisor 0.03), and
   `qwen-sft-sentence-epoch` → `parallel/sft-ce33a3d7a476e297` (frozen
   `code/1412c1f`, base init, rank16, LR3e-5, seed21774173, 944×4 updates,
-  each drawn source sentence used at most once).
-  All four use v005
-  written-form FLEURS train (8,966 clips / 25.14 h), supervisor `code/1ae82c5`,
-  a 4.5 GiB MLX guideline and a 5 GB physical-footprint budget. The first GRPO trial
-  changes only TRAIN data relative to closed `b62373c31be7ca27`; domain,
-  acoustics, speakers, target conventions and draw order move together.
-  Actual-run code and inputs stay immutable. All four hypotheses require unchanged
-  full1,295 FLEURS gates, independent-seed confirmation and their preregistered
-  per-cohort KSS veto before adoption. The original base remains incumbent.
+  each drawn source sentence used at most once). The fourth worker,
+  `qwen-wa05`, evaluates `parallel/wa05-bce1c6b780deb965` with frozen
+  `code/655b245` and the registered half-strength final SFT adapter.
+  All four use v005 written-form FLEURS train (8,966 clips / 25.14 h),
+  supervisor `code/1ae82c5`, a 4.5 GiB MLX guideline and a 5 GB physical
+  footprint budget. The first GRPO trial changes only TRAIN data relative
+  to closed `b62373c31be7ca27`; domain, acoustics, speakers, target conventions
+  and draw order move together. Actual-run code and inputs stay immutable.
+  All four hypotheses require unchanged full1,295 FLEURS gates,
+  independent-seed confirmation and their preregistered per-cohort KSS veto
+  before adoption. The original base remains incumbent.
 - Fixed-scale tooling PR26 is merged as `ff86b09`: 84 focused tests pass,
   automated review has no findings, and no benchmark CI is configured.
   Its native one-update preflight matches the control's TRAIN clip, rewards
@@ -97,14 +106,15 @@
   scale only the final step-5,000 adapter's LoRA B tensors by 0.5, then evaluate
   all 1,295 clips with frozen `code/655b245`, regardless of the raw endpoint's
   score. No coefficient sweep or intermediate checkpoint is included.
-  The source finished 5,000 updates and is validating. Derived candidate
-  `wa05-bce1c6b780deb965` is ready: all 112 LoRA B tensors are exactly halved,
-  with unchanged A tensors/header and verified source/derived hashes. Its
-  predictions await a free worker; all four slots remain occupied. No source
-  validation score was read to choose it. Independent SFT confirmation seed
-  21775174 can be shared with its source recipe. Primary and per-cohort KSS
+  The source finished 5,000 updates and failed full validation. Derived
+  candidate `wa05-bce1c6b780deb965` has started full evaluation: all 112
+  LoRA B tensors are exactly halved, with unchanged A tensors/header and
+  verified source/derived hashes. Admission passed with normal pressure.
+  Its coefficient and artifact were frozen before source validation was read.
+  Independent confirmation uses the source SFT recipe at seed 21775174; train
+  it once and derive the same final-step coefficient. Primary and per-cohort KSS
   gates remain unchanged. Packet: `proposals/next-score-candidate-20261029`;
-  `parallel-trials.json` records its ready command and artifact binding.
+  `parallel-trials.json` records its active command and artifact binding.
 - Native microbatch-2 probe PR20 fails acceptance: about 9.02% relative gradient
   difference, 1.029× end-to-end speedup and a brief 5.006 GB physical peak.
   Its timings overlap the batch-32 run. Training stays serial within each

@@ -12,13 +12,12 @@ and [the four-slot contract](../skills/autoresearch/SKILL.md).
 
 - Preserve the rejected expanded-data snapshots. Use the merged literal-quote
   Common Voice parser when rebuilding intake to recover swallowed records.
-- Score the live FLEURS written-form SFT recipes (5,000 updates and one
-  sentence-epoch) and both direct-base GRPO trials, including fixed advantage
-  scaling, with unchanged FLEURS selection,
+- Score the live FLEURS one-sentence-epoch SFT and both direct-base GRPO
+  trials, including fixed advantage scaling, with unchanged FLEURS selection,
   independent-seed confirmation and the preregistered separate-cohort KSS
   veto before adoption. Keep speaker/pretraining uncertainty explicit.
-- Evaluate ready half-strength candidate `wa05-bce1c6b780deb965` in the next
-  free worker slot, independently of the raw endpoint's score; share
+- Score the live half-strength candidate `wa05-bce1c6b780deb965`,
+  independently of the rejected raw endpoint's score; share
   an identical confirmation training run rather than launching it twice.
 - Admit YODAS only after audio-language and transcript-alignment checks;
   translated captions cannot be ASR targets.
