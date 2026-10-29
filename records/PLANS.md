@@ -6,14 +6,11 @@ Follow [DEC-001](decisions/DEC-20261029-001-qwen-asr-autoresearch.md),
 [DEC-002](decisions/DEC-20261029-002-four-slot-qwen-asr-autoresearch.md)
 and [the four-slot contract](../skills/autoresearch/SKILL.md).
 
-- Score the live SFT-parent GRPO recipe against the current incumbent and
-  matching parent. Only a passing first seed enters independent two-stage
+- Score both live SFT-parent GRPO recipes (one group and bounded redraw)
+  against the current incumbent and matching parent. Only a passing first seed enters independent two-stage
   confirmation; both KSS vetoes and final incumbent recheck remain required.
-- Retain the running base-init GRPO confirmation as the registered comparison
-  control. A win against the original anchor alone cannot advance the trunk.
-- Test the registered bounded equal-reward redraw recipe after default-path
-  tensor parity, native memory acceptance and source review. Keep exactly
-  1,000 optimizer updates; a first-seed failure closes the registered cap.
+- Preserve the registered redraw cap and 1,000-update budget; its first-seed
+  failure closes the recipe without cap or learning-setting sweeps.
 - Fill free slots with fresh TRAIN-grounded SFT and RL proposals. Preserve
   sealed evaluation inputs, current incumbent capture and source/data hashes;
   no parameter sweeps selected from validation errors.

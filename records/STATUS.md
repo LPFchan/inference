@@ -28,6 +28,7 @@
   | One-pass SFT confirmation, seed 21775174 | 4.06 | 10.55 | 4.53 | 5.24 | 0.9158 |
   | Uniform two-seed SFT average, closed | 3.89 | 10.67 | 4.49 | 5.14 | 0.9110 |
   | Base-init GRPO `bc8f2d8f6f19a369`, first seed | 4.15 | 10.41 | 4.63 | 5.65 | 0.9392 |
+  | Base-init GRPO confirmation, closed | 4.25 | 10.14 | 4.63 | 5.58 | 0.9270 |
   | Fixed-scale GRPO `c3b0b430fab2ba0c`, closed | 4.21 | 10.73 | 4.52 | 5.66 | 0.9414 |
 
 - SFT score-delta CI95 vs original anchor: first[-0.1740,-0.0511],
@@ -52,16 +53,20 @@
   each contract matches retained `parallel/kss-v001-base` except adapter SHA.
   Its resume-status reporting bug is frozen: monitor actual admission,
   prediction count and full summary. No baseline predictions are repeated.
-- **Active model jobs:** `main:qwen-rl-fleurs-confirm` →
-  `parallel/grpo-bc8f2d8f6f19a369-confirm` (frozen `code/3ee30f6`, base
-  start/reference, LR 1e-5, seed 21326232,1,000 updates) continues as the
-  registered comparison control. `main:qwen-rl-sft-parent` →
-  `parallel/grpo-76cf17e6620b34fb` runs the same GRPO recipe from the
-  selected SFT adapter, which is also its fixed KL reference; optimizer resets.
-  Both stages re-seed for confirmation. It must beat both matching SFT parent
-  and current incumbent with unchanged gates, then pass its own both-seed KSS
-  veto and incumbent recheck. A first parent-relative failure closes the recipe.
-  Packet: `proposals/next-after-first-wins-20261030/parent-review.json`.
+- **Active model jobs:** `main:qwen-rl-sft-parent` →
+  `parallel/grpo-76cf17e6620b34fb` uses one group per update, frozen
+  `code/3ee30f6`. `main:qwen-rl-redraw` → `parallel/grpo-ae448ecc75d8e01f`
+  uses the registered cap of eight same-language draws, frozen `code/eff20cb`,
+  accepted in PR28 (`fbdfd86`). Both start/reference the selected SFT adapter,
+  reset Adam initially, use LR 1e-5/seed 21325231 and target 1,000 updates.
+  The redraw run resumes its exact optimizer at step 10 after native
+  acceptance: all 224 adapter/450 optimizer tensors match the old default;
+  its ten-step probe used 18 groups, four redraw steps and 4.263 GB physical
+  peak with normal pressure. Each recipe must beat the matching SFT parent
+  and current incumbent, then independently confirm both stages and pass both
+  KSS cohort vetoes plus incumbent recheck. First-seed failure closes each
+  registered recipe. Packets: `proposals/next-after-first-wins-20261030`
+  and `proposals/next-rl-confirmed-20261030/parent-implementation-binding.json`.
 - **Closed adapter average:** `soup-6bc17d90adcbb97d` completed all 1,295
   validation clips with no empty/truncated outputs. Uniform rank-32
   concatenation of the two confirmed adapters scores 0.9110 against the
@@ -97,6 +102,13 @@
   delta CI95 [-0.0025,0.1106]. It is closed without confirmation or adoption.
   Frozen outputs, controlled comparison and `incumbent-recheck.json` are
   preserved under `parallel/grpo-c3b0b430fab2ba0c` on all three hosts.
+- Base-init v005 GRPO first/confirmation scores are 0.9392/0.9270; both
+  pass the original-anchor screen, and both fail the current SFT incumbent
+  recheck. Confirmation errors: EN 4.25%, KO 10.14%, JA 4.63%, ZH 5.58%;
+  no empty/truncated outputs. Its current-incumbent delta CI95 is
+  [-0.0127,+0.0948]; gain, CJK and confidence gates fail. The control pair is
+  closed, with its first-seed historical KSS retained and no extra KSS run.
+  Full confirmation evidence: `parallel/grpo-bc8f2d8f6f19a369-confirm`.
 - Intake: v001 9,852 clips/16.51h; raw v002 67,794/108.57h is held for a
   merged-quote Japanese target. Merged literal-quote parser PR23(`c8dec2e`)
   fixes rebuilding; v006 removes the one bad row but does not recover lost
