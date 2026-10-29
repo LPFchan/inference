@@ -62,6 +62,43 @@ def test_disjoint_inputs_pass():
     validate_splits([row("1", "가", "s1", "a")], [row("2", "나", "s2", "b")], [])
 
 
+def parse_training_args(monkeypatch, stage, extra):
+    spec = importlib.util.spec_from_file_location("qwen_train_args", DIRECTORY / "train.py")
+    trainer = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(trainer)
+    monkeypatch.setattr(sys, "argv", ["train.py", stage, "--model", "model", "--data", "data",
+                                     "--protected-test", "test.jsonl", "--output", "run", *extra])
+    return trainer, trainer.arguments()
+
+
+@pytest.mark.parametrize("stage,extra,base_reference", [
+    ("grpo", ["--base-reference"], True),
+    ("grpo", ["--init-adapter", "sft-checkpoint"], False),
+    ("sft", [], False),
+    ("evaluate", ["--init-adapter", "sft-checkpoint"], False),
+])
+def test_reference_modes_are_explicit_and_bound_to_resume_settings(monkeypatch, stage, extra, base_reference):
+    trainer, args = parse_training_args(monkeypatch, stage, extra)
+    assert args.base_reference == base_reference
+    assert trainer.training_settings(args)["base_reference"] == base_reference
+    if base_reference:
+        assert args.init_adapter is None
+    if "--init-adapter" in extra:
+        assert args.init_adapter == Path("sft-checkpoint")
+
+
+@pytest.mark.parametrize("stage,extra", [
+    ("grpo", []),
+    ("grpo", ["--base-reference", "--init-adapter", "sft-checkpoint"]),
+    ("sft", ["--base-reference"]),
+    ("evaluate", ["--base-reference"]),
+])
+def test_missing_or_conflicting_reference_modes_are_rejected(monkeypatch, stage, extra):
+    with pytest.raises(SystemExit) as error:
+        parse_training_args(monkeypatch, stage, extra)
+    assert error.value.code == 2
+
+
 def test_grpo_gradient_increases_rewarded_token_probability():
     mx = pytest.importorskip("mlx.core")
     spec = importlib.util.spec_from_file_location("qwen_train", DIRECTORY / "train.py")

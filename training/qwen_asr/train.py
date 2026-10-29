@@ -33,7 +33,10 @@ def arguments():
     p.add_argument("--data", type=Path, required=True)
     p.add_argument("--protected-test", type=Path, required=True)
     p.add_argument("--output", type=Path, required=True)
-    p.add_argument("--init-adapter", type=Path)
+    reference = p.add_mutually_exclusive_group()
+    reference.add_argument("--init-adapter", type=Path)
+    reference.add_argument("--base-reference", action="store_true",
+                           help="start GRPO from the untouched ASR base and anchor KL to it")
     p.add_argument("--resume", action="store_true")
     p.add_argument("--skip-initial-eval", action="store_true")
     p.add_argument("--steps", type=int, default=200, help="absolute optimizer-step target")
@@ -57,12 +60,21 @@ def arguments():
         p.error("Korean WER weight must be between zero and one")
     if a.group_size < 2 or a.temperature <= 0 or a.beta < 0 or a.memory_gb <= 0:
         p.error("invalid GRPO/memory settings")
-    if a.stage == "grpo" and not a.init_adapter:
-        p.error("GRPO requires an SFT checkpoint via --init-adapter")
+    if a.base_reference and a.stage != "grpo":
+        p.error("--base-reference is only valid for GRPO")
+    if a.stage == "grpo" and not (a.init_adapter or a.base_reference):
+        p.error("GRPO requires --init-adapter or --base-reference")
     a.learning_rate = a.learning_rate or (1e-4 if a.stage == "sft" else 1e-6)
     if a.learning_rate <= 0:
         p.error("positive learning rate required")
     return a
+
+
+def training_settings(a):
+    return {key: getattr(a, key) for key in (
+        "stage", "accumulate", "rank", "scale", "learning_rate", "group_size",
+        "temperature", "beta", "max_tokens", "seed", "memory_gb", "korean_wer_weight",
+        "base_reference")}
 
 
 def main():
@@ -103,9 +115,7 @@ def run(a):
     if source != {"id": MODEL_ID, "revision": MODEL_REVISION}:
         raise ValueError("unexpected base model source")
     init = a.init_adapter.resolve() if a.init_adapter else None
-    settings = {key: getattr(a, key) for key in (
-        "stage", "accumulate", "rank", "scale", "learning_rate", "group_size",
-        "temperature", "beta", "max_tokens", "seed", "memory_gb", "korean_wer_weight")}
+    settings = training_settings(a)
     contract = {"settings": settings, "model_files": model_files,
                 "data": {k: data_meta[k] for k in (
                     "train_sha256", "dev_sha256", "protected_manifest_sha256")},
@@ -159,8 +169,9 @@ def run(a):
     if init:
         info = load_adapter(init)
         if a.stage == "grpo" and (info["stage"] not in ("sft", "grpo") or info["step"] < 1):
-            raise ValueError("RL reference must be a trained SFT-derived checkpoint")
-    # Fixed SFT reference uses only an adapter copy, sharing frozen base weights.
+            raise ValueError("RL reference must be a trained SFT or GRPO checkpoint")
+    # Zero-delta initialization preserves the base policy in base-reference
+    # mode. The fixed starting reference shares the frozen model weights.
     reference = {name: mx.array(value) for name, value in tree_flatten(model.trainable_parameters())}
     optimizer = optim.AdamW(learning_rate=a.learning_rate, weight_decay=0.0)
     start = 0
