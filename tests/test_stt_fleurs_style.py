@@ -19,8 +19,9 @@ from common import sha256  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
-def no_disk_floor(monkeypatch):
+def stable_resources(monkeypatch):
     monkeypatch.setattr(prep, "MIN_FREE", 0)
+    monkeypatch.setattr(prep, "memory_pressure_normal", lambda: True)
 
 
 def tone(hz, seconds=2.0, rate=16000):
