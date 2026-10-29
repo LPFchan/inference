@@ -2,9 +2,13 @@
 
 ## Qwen3-ASR multilingual adaptation
 
-Follow [DEC-20261029-001](decisions/DEC-20261029-001-qwen-asr-autoresearch.md)
-for selection. The operator has since authorized four agents and up to four
-5 GB workers; PR21 carries the amended execution contract.
+Follow [DEC-20261029-001](decisions/DEC-20261029-001-qwen-asr-autoresearch.md),
+[DEC-20261029-002](decisions/DEC-20261029-002-four-slot-qwen-asr-autoresearch.md)
+and [the four-slot contract](../skills/autoresearch/SKILL.md).
+
+- Preserve native admission evidence and supervise the admitted trials within
+  measured reservations. Benchmark 1/2/4-worker throughput on an idle Mac;
+  brief fit evidence does not establish sustained speed gains.
 
 - Score the expanded filtered-v2 and removal-only unfiltered-v006 trials
   against base and their controls, confirming only provisional winners.
