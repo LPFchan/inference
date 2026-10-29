@@ -93,6 +93,13 @@
   159 focused tests pass, and both affected tests skip when MLX is blocked.
   The test-only fix leaves every frozen training/scoring file byte-identical.
   Evidence: `proposals/next-rl-after-parent-failure-20261030`.
+- **Closed MLP-LoRA fit trial:** frozen `code/41b7216` passes 169 focused
+  tests and exact native default parity (224 adapter/450 optimizer tensors).
+  Its ten-update, 40-longest-TRAIN preflight peaks at 4.99139 GB physical,
+  exceeding the preregistered 4.75 GB limit; all pressure samples are normal.
+  No full-data candidate, confirmation, KSS or accuracy result is produced.
+  PR33 closes unmerged; no budget/rank/target-subset/LR/length retuning.
+  Evidence: `proposals/next-sft-after-two-losses-20261030/native-verdict.json`.
 - **Data scout:** sampled WorldSpeech TRAIN labels have unspaced Korean,
   edited Japanese minutes and Traditional Chinese; no trial is admitted.
   AliMeeting label conventions remain unaudited beyond the scout's small
