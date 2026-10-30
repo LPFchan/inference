@@ -6,9 +6,6 @@ Follow [DEC-001](decisions/DEC-20261029-001-qwen-asr-autoresearch.md),
 [DEC-002](decisions/DEC-20261029-002-four-slot-qwen-asr-autoresearch.md)
 and [the four-slot contract](../skills/autoresearch/SKILL.md).
 
-- Complete the four looped-decoder levels of DEC-20261030-001 under the
-  unchanged gates. A passing level repeats with seed 21775174 and KSS before
-  adoption; each level's first failure closes it.
 - Fill free slots with fresh TRAIN-grounded SFT and RL proposals. Preserve
   sealed evaluation inputs, current incumbent capture and source/data hashes;
   no parameter sweeps selected from validation errors.
