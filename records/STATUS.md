@@ -120,13 +120,22 @@
   trial against the incumbent; the confirmation seed's CI95 against the anchor,
   [-0.149,+0.019], now crosses zero. Seed spread is 0.047. Evidence verified on
   Mac/local/Mangchi.
-- **Live trials** (`proposals/after-gloss-rescore-20261030`, admitted
-  18:35 KST): `grpo-76cf17e6620b34fb-confirm` is single-draw GRPO's
+- **Live trials:** `grpo-76cf17e6620b34fb-confirm` (admitted 18:35 KST,
+  `proposals/after-gloss-rescore-20261030`) is single-draw GRPO's
   pre-registered second seed (parent `sft-a11b015fbeee0082`, seed 21326232,
   `code/3ee30f6`); it adopts nothing alone while the operator decides whether
-  two seeds may pool errors for the CI gate. `sft-lr-1e-4` reruns the
-  incumbent recipe at learning rate 1e-4 (`code/a4559db`); a loss closes it
-  without other learning rates.
+  two seeds may pool errors for the CI gate. `sft-gloss-free` (admitted
+  19:42 KST, `proposals/gloss-free-train-20261030`) reruns the incumbent
+  recipe on v005 with translator glosses removed from TRAIN targets (ZH 286,
+  KO 91, JA 25 rows) by the frozen `glosses.py` rule; train manifest
+  `11c97042…17a6`.
+- **Closed learning-rate 1e-4 SFT:** `sft-lr-1e-4` reruns the incumbent recipe
+  at 1e-4 (`code/a4559db`). Score 0.9783 vs 0.8841; EN improves (3.70%) but ZH
+  reaches 3.38%. Gain, CJK and confidence gates fail; delta CI95
+  [+0.0055,+0.1838]. Most of the ZH loss is invented bracketed English names,
+  which the v005 TRAIN targets teach. Clips with an invented gloss where the
+  reference has none: incumbent 7, this trial 7, single-draw GRPO and anchor
+  0. No other learning rates. Evidence verified on Mac/local/Mangchi.
 - **TRAIN sampling diagnostic (complete):** `train-probe-ce33-20261030`
   finishes all 7,200 incumbent decodes (200 TRAIN sentences per language,
   greedy plus eight samples at 0.7), with no empty/truncated outputs. Greedy
