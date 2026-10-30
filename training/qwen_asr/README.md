@@ -324,6 +324,12 @@ set for selection, then run the untouched 2,624-clip FLEURS test once for each
 accepted final candidate with the shared scorer. Keep English regressions
 visible. Do not merge/quantize/deploy adapters on the strength of training loss.
 
+`selection.py CANDIDATE INCUMBENT ANCHOR` gates one evaluation against another.
+`--glosses` scores FLEURS translator glosses as optional spans.
+`--second-seeds CANDIDATE2 INCUMBENT2` compares two recipes instead: each
+recipe's two seeds pool their errors per clip, and every gate, including the
+paired bootstrap, runs on the pooled errors.
+
 ### External probe
 
 `evaluate --external PROBE.jsonl` transcribes a frozen external manifest instead
