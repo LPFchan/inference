@@ -96,10 +96,10 @@
   No full-data candidate, confirmation, KSS or accuracy result is produced.
   PR33 closes unmerged; no budget/rank/target-subset/LR/length retuning.
   Evidence: `proposals/next-sft-after-two-losses-20261030/native-verdict.json`.
-- **Throughput measurement:** the idle Mac is running the planned 1/2/4-worker
-  comparison, 60 × 4 microsteps per worker, frozen `code/e49648d` and supervisor
-  `code/1ae82c5` on v005. This measures short-run fit and training throughput;
-  startup/JIT and final four-clip smokes are retained, without accuracy selection.
+- **Four-worker throughput:** all 1/2/4-worker phases completed (60 × 4
+  microsteps each). Combined training rates: 2.855 / 3.130 / 3.359 clips/s;
+  four workers add 17.65%. Pressure stayed normal, with no new swap-outs.
+  This is a short workload-specific measurement. [Evidence and limits](research/RSH-20261030-002-qwen-asr-four-worker-throughput.md).
 - **RL audit:** token-length reweighting has weak support in the closed TRAIN
   rollouts; no token-sum trial is admitted. Modal-output and re-tokenized-length
   proxies leave actual sampling headroom unmeasured. Evidence and the reported

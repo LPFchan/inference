@@ -20,9 +20,9 @@ and [the four-slot contract](../skills/autoresearch/SKILL.md).
   rewritten targets nor a training run until the proposal survives review.
 - Preserve rejected snapshots. Rebuild Common Voice with the merged literal-
   quote parser; admit YODAS only after audio-language/transcript alignment checks.
-- Benchmark 1/2/4-worker throughput on an idle Mac; fit evidence alone does not
-  establish a sustained speed gain. Expand capacity only after simpler gains
-  plateau. Keep all existing models/data/results and serving paused.
+- Admit at most four independently checked workers under the shared memory
+  budget. Expand capacity only after simpler gains plateau. Keep existing
+  models/data/results and serving paused.
 
 ## Steady-State Architecture
 
