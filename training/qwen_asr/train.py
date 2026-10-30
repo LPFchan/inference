@@ -9,6 +9,7 @@ import math
 import os
 import platform
 import random
+import re
 import socket
 import sys
 import time
@@ -99,6 +100,8 @@ def arguments():
     p.add_argument("--loop", type=loop_spec, metavar="START:END:PASSES",
                    help="run decoder layers START..END-1 PASSES times in a row; repeats share the frozen "
                         "base weights and get their own LoRA")
+    p.add_argument("--mlp", action="store_true",
+                   help="also put LoRA on each decoder layer's MLP gate/up/down projections")
     a = p.parse_args()
     if a.stage == "probe" or a.train_nll_probe:
         # The probe's counts, seed, temperature and reward are fixed in sampling_probe;
@@ -309,9 +312,13 @@ def run(a):
             settings["sft_token_weight"] = token_binding
     if a.loop:
         settings["loop"] = dict(zip(("start", "end", "passes"), a.loop))
-    if init and json.loads((init / "checkpoint.json").read_text())["contract"].get(
-            "settings", {}).get("loop") != settings.get("loop"):
-        raise ValueError("checkpoint/base or adapter geometry mismatch: --loop differs from the adapter's")
+    if a.mlp:
+        settings["mlp"] = True
+    if init:
+        adapter_settings = json.loads((init / "checkpoint.json").read_text())["contract"].get("settings", {})
+        for key in ("loop", "mlp"):
+            if adapter_settings.get(key) != settings.get(key):
+                raise ValueError(f"checkpoint/base or adapter geometry mismatch: --{key} differs from the adapter's")
     contract = {"settings": settings, "model_files": model_files,
                 "data": {k: data_meta[k] for k in (
                     "train_sha256", "dev_sha256", "protected_manifest_sha256")},
@@ -389,6 +396,12 @@ def run(a):
             modules.append((name, LoRALinear.from_base(layer, r=a.rank, scale=a.scale)))
     if len(modules) != 4 * len(model.model.layers):
         raise ValueError(f"expected {4 * len(model.model.layers)} decoder projections, got {len(modules)}")
+    if a.mlp:  # after attention, so attention LoRA draws the same initial values as without --mlp
+        mlp = [(name, LoRALinear.from_base(layer, r=a.rank, scale=a.scale)) for name, layer in model.named_modules()
+               if re.fullmatch(r"model\.layers\.\d+\.mlp\.(gate|up|down)_proj", name)]
+        if len(mlp) != 3 * len(model.model.layers):
+            raise ValueError(f"expected {3 * len(model.model.layers)} decoder MLP projections, got {len(mlp)}")
+        modules += mlp
     model.update_modules(tree_unflatten(modules))
     model.freeze()
     for _, layer in modules:

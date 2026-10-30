@@ -212,6 +212,16 @@ need the same flag). Without the flag the model, contract and metrics are
 unchanged. Activations and decoding time grow with the added layers, so run
 the longest-clip memory preflight for each loop before a full trial.
 
+### Decoder MLP LoRA
+
+`--mlp` also puts a rank-`--rank` LoRA on each decoder layer's MLP
+`gate_proj`, `up_proj` and `down_proj`, next to the q/k/v/o adapters. Attention
+adapters are created first, so they start from the same values as without the
+flag. The base weights stay frozen. Like `--loop`, the flag is part of the
+resume contract, and an adapter loads only with the same setting. Without it
+the model, contract and metrics are unchanged. It needs more memory than
+attention-only LoRA, so run the longest-clip memory preflight first.
+
 ## GRPO
 
 ```sh
