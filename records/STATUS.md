@@ -109,6 +109,9 @@
   conservative segmentation yields 31,029 candidates/25.07 h. Energy checks
   support timing alignment, with word-level accuracy unverified. Raw labels
   have number/filler conventions unlike v005; no data trial is admitted.
+  The number-format audit estimates only 4.55% of eligible rows change;
+  no format-only trial is proposed. Acoustic/source-diversity benefits remain
+  unmeasured. Evidence: `proposals/alimeeting-format-hypothesis-20261030`.
   The 24.53 GB archive stays on Mac; 705 metadata files/TextGrids are verified
   on Mac/local/Mangchi. Evidence: `proposals/alimeeting-label-audit-20261030`.
 - **Intake protocol deviation:** the data worker reports displaying one unique

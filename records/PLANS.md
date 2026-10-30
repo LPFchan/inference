@@ -11,13 +11,14 @@ and [the four-slot contract](../skills/autoresearch/SKILL.md).
   Freeze inputs/seeds, retain actual tokens, and extend a limited smoke without
   repeating predictions. Report oracle headroom as a TRAIN diagnostic; preserve
   all learning/selection gates and admit no new RL trial from proxy estimates.
+- Implement one default-off language-mean SFT token-weighting trial on v005,
+  preserving the sampler and all adoption gates. Bind denominators to the full
+  reference TRAIN snapshot even in the longest-clip preflight; use paired,
+  unused-per-language TRAIN NLL only as a mechanism diagnostic. Native fit and
+  default-path parity precede training; first failure closes the registered variants.
 - Fill free slots with fresh TRAIN-grounded SFT and RL proposals. Preserve
   sealed evaluation inputs, current incumbent capture and source/data hashes;
   no parameter sweeps selected from validation errors.
-- Assess one audited deterministic number-format proposal for AliMeeting's
-  human TRAIN labels, including ambiguity handling and a fixed source mixture.
-  Preserve raw labels/audio and the closed numeral-filter area. Admit neither
-  rewritten targets nor a training run until the proposal survives review.
 - Preserve rejected snapshots. Rebuild Common Voice with the merged literal-
   quote parser; admit YODAS only after audio-language/transcript alignment checks.
 - Admit at most four independently checked workers under the shared memory
