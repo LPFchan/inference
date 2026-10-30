@@ -9,11 +9,10 @@ and [the four-slot contract](../skills/autoresearch/SKILL.md).
 - Complete the fixed TRAIN-only sampling diagnostic and use its measured
   greedy-versus-sampled headroom to assess further RL hypotheses. Preserve
   all learning/selection gates; oracle results remain a TRAIN diagnostic.
-- Implement one default-off language-mean SFT token-weighting trial on v005,
-  preserving the sampler and all adoption gates. Bind denominators to the full
-  reference TRAIN snapshot even in the longest-clip preflight; use paired,
-  unused-per-language TRAIN NLL only as a mechanism diagnostic. Native fit and
-  default-path parity precede training; first failure closes the registered variants.
+- Complete the registered language-mean SFT trial and its paired,
+  unused-per-language TRAIN NLL diagnostic. Preserve all adoption gates;
+  proceed to independent confirmation and KSS only after a first-seed pass.
+  First failure closes the registered variants.
 - Fill free slots with fresh TRAIN-grounded SFT and RL proposals. Preserve
   sealed evaluation inputs, current incumbent capture and source/data hashes;
   no parameter sweeps selected from validation errors.

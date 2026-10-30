@@ -115,6 +115,18 @@
   verified on Mac/local/Mangchi. No new training or held-out decoding occurs;
   oracle headroom is a TRAIN diagnostic. Evidence:
   `proposals/train-sampling-probe-20261030/parent-acceptance.json`.
+- **Live language-mean SFT:** `sft-8f41bf5402204a8f` resumes its saved first
+  update toward the registered 944-update v005 recipe and full 1,295-clip
+  validation. PR35 merges as `03752d9`; actual runs retain frozen
+  `code/c21efbf`. All 254 focused tests pass. Native default parity matches
+  224 adapter/450 optimizer tensors and ten updates of loss, gradient norm and
+  draw IDs. The weighted longest-clip preflight passes at 4.40153 GB physical
+  with normal pressure; full-reference token means and the full-data first
+  raw loss match the preregistration. Source, checkpoints and acceptance
+  evidence are verified on Mac/local/Mangchi. The paired 523-clip TRAIN NLL
+  control uses the same-seed incumbent without generation or optimization;
+  its paired mechanism result never gates adoption. No accuracy gain is
+  claimed. Evidence: `proposals/next-sft-after-fit-redraw-20261030/native-c21efbf`.
 - **Data intake:** sampled WorldSpeech labels remain unadmitted. AliMeeting
   near-field TRAIN is acquired and audited: 186,605 labels contain no digits;
   conservative segmentation yields 31,029 candidates/25.07 h. Energy checks
