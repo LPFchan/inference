@@ -20,7 +20,8 @@ docs and commits.
 - At most four model workers. Slot 1 is `ROOT/.gpu-loop.lock` (serial drivers);
   launch every other model process (`train.py` or a `batching.py` probe) in
   tmux with `parallel.py run ROOT [--job-dir DIR] [--wait N] -- COMMAND`.
-  Budget: at most 5,000,000,000 bytes footprint per new worker, 20,000,000,000
+  Budget: at most 5,000,000,000 bytes footprint per new worker (5,500,000,000
+  only for DEC-20261030-001's 42- and 56-layer runs), 20,000,000,000
   reserved in total; pass `--memory-gb 4.5` or less. Admission denial exits
   75 (retry later); a stopped worker keeps its logs and checkpoints.
 - Each job owns a directory under `ROOT/parallel/` and runs a frozen

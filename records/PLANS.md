@@ -9,10 +9,9 @@ and [the four-slot contract](../skills/autoresearch/SKILL.md).
 - Complete the fixed TRAIN-only sampling diagnostic and use its measured
   greedy-versus-sampled headroom to assess further RL hypotheses. Preserve
   all learning/selection gates; oracle results remain a TRAIN diagnostic.
-- Complete the registered language-mean SFT trial and its paired,
-  unused-per-language TRAIN NLL diagnostic. Preserve all adoption gates;
-  proceed to independent confirmation and KSS only after a first-seed pass.
-  First failure closes the registered variants.
+- Complete the four looped-decoder levels of DEC-20261030-001 under the
+  unchanged gates. A passing level repeats with seed 21775174 and KSS before
+  adoption; each level's first failure closes it.
 - Fill free slots with fresh TRAIN-grounded SFT and RL proposals. Preserve
   sealed evaluation inputs, current incumbent capture and source/data hashes;
   no parameter sweeps selected from validation errors.

@@ -27,6 +27,7 @@
   | One-pass SFT selected, seed 21774173 | 3.99 | 10.58 | 4.29 | 4.94 | 0.8839 |
   | One-pass SFT confirmation, seed 21775174 | 4.06 | 10.55 | 4.53 | 5.24 | 0.9158 |
   | Late-decay SFT, closed | 4.01 | 10.47 | 4.52 | 5.14 | 0.9074 |
+  | Language-mean SFT, closed | 3.84 | 10.58 | 4.26 | 5.05 | 0.8875 |
   | 20-second TRAIN extension, closed | 3.96 | 10.44 | 4.34 | 5.18 | 0.8956 |
   | Reference-member GRPO, closed | 4.01 | 10.61 | 4.18 | 5.37 | 0.8988 |
   | SFT-parent cap-eight GRPO, closed | 3.95 | 10.64 | 4.22 | 5.51 | 0.9094 |
@@ -115,18 +116,24 @@
   verified on Mac/local/Mangchi. No new training or held-out decoding occurs;
   oracle headroom is a TRAIN diagnostic. Evidence:
   `proposals/train-sampling-probe-20261030/parent-acceptance.json`.
-- **Live language-mean SFT:** `sft-8f41bf5402204a8f` resumes its saved first
-  update toward the registered 944-update v005 recipe and full 1,295-clip
-  validation. PR35 merges as `03752d9`; actual runs retain frozen
-  `code/c21efbf`. All 254 focused tests pass. Native default parity matches
-  224 adapter/450 optimizer tensors and ten updates of loss, gradient norm and
-  draw IDs. The weighted longest-clip preflight passes at 4.40153 GB physical
-  with normal pressure; full-reference token means and the full-data first
-  raw loss match the preregistration. Source, checkpoints and acceptance
-  evidence are verified on Mac/local/Mangchi. The paired 523-clip TRAIN NLL
-  control uses the same-seed incumbent without generation or optimization;
-  its paired mechanism result never gates adoption. No accuracy gain is
-  claimed. Evidence: `proposals/next-sft-after-fit-redraw-20261030/native-c21efbf`.
+- **Live looped-decoder arm** ([DEC-20261030-001](decisions/DEC-20261030-001-qwen-asr-looped-decoder-arm.md)):
+  the incumbent's exact 944-update recipe with a block of the 28-layer decoder
+  looped. Repeats share frozen base weights and get their own LoRA; stored
+  parameters stay 2.04B. PR36 merges as `4af6a67`; runs use frozen
+  `code/4b2a716` (254 focused tests; exact default-off parity with `6bfe810`).
+  Ten-update longest-clip preflights peak at 4.37/4.53/4.66/4.88/5.11 GB for
+  28/32/36/42/56 layers, all with normal pressure. First-update losses
+  (0.58/0.61/0.54/0.56/0.67) show no breakage before training.
+  `sft-loop-12-16-2` and `sft-loop-10-18-2` run under 5 GB budgets;
+  `7:21:2` and `7:21:3` wait for PR37's operator-authorized 5.5 GB budget
+  and a free slot. Evidence: `proposals/loop-arm-20261030`.
+- **Closed language-mean SFT:** `sft-8f41bf5402204a8f` completes 944 updates
+  and all 1,295 validation clips, score 0.8875 vs incumbent 0.8839. Chinese
+  exceeds its limit; gain, CJK and confidence gates fail. Paired delta CI95
+  [-0.0375,+0.0307], no empty/truncated outputs. The candidate side of the
+  TRAIN NLL diagnostic is not run; it never gated adoption. No confirmation,
+  KSS or weighting/LR/budget/seed variants. Evidence verified on
+  Mac/local/Mangchi under the trial directory.
 - **Data intake:** sampled WorldSpeech labels remain unadmitted. AliMeeting
   near-field TRAIN is acquired and audited: 186,605 labels contain no digits;
   conservative segmentation yields 31,029 candidates/25.07 h. Energy checks
