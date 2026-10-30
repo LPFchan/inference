@@ -7,8 +7,8 @@
 ## Autoresearch — Qwen3-ASR
 
 - **Training incumbent:** one-pass SFT `sft-ce33a3d7a476e297/step-000944`,
-  adapter `ad63fb38…6e22`. Both independent seeds pass all 1,295 FLEURS gates
-  and both separate-cohort KSS vetoes. The lower-score first checkpoint is
+  adapter `ad63fb38…6e22`. At adoption, both independent seeds passed all
+  1,295 FLEURS gates and both separate-cohort KSS vetoes. The lower-score first checkpoint is
   selected under the charter. No trained model is deployed; Nemotron stays
   unloaded. Original MLX 8-bit remains the fixed normalization anchor.
 - [Confirmed findings](research/RSH-20261030-001-confirmed-qwen-asr-one-pass-sft.md).
@@ -18,28 +18,31 @@
   Frozen primary set: 1,295 validation clips (EN 394,KO 226,JA 266,ZH 409),
   manifest `c75a4b05069eba7d11a6b50efd7bb11d43800fc66e49b761cd08fb86354acf01`.
   Original 2,624-clip test, nine published predictions and artifacts stay sealed.
-- Full validation primary errors, percent (WER EN/KO; CER JA/ZH). Scores use
-  the original anchor; passing its screen alone cannot replace the incumbent.
+- Full validation primary errors, percent (WER EN/KO; CER JA/ZH), with
+  translator glosses optional ([DEC-20261030-002](decisions/DEC-20261030-002-qwen-asr-optional-gloss-scoring.md)).
+  Scores use the original anchor; passing its screen alone cannot replace the
+  incumbent. Trial bullets below keep the raw-reference scores recorded at
+  closure.
 
   | Trial | EN | KO | JA | ZH | CJK score |
   | --- | ---: | ---: | ---: | ---: | ---: |
-  | Original 8-bit anchor | 4.25 | 10.85 | 4.62 | 6.61 | 1.0000 |
-  | One-pass SFT selected, seed 21774173 | 3.99 | 10.58 | 4.29 | 4.94 | 0.8839 |
-  | One-pass SFT confirmation, seed 21775174 | 4.06 | 10.55 | 4.53 | 5.24 | 0.9158 |
-  | Late-decay SFT, closed | 4.01 | 10.47 | 4.52 | 5.14 | 0.9074 |
-  | Language-mean SFT, closed | 3.84 | 10.58 | 4.26 | 5.05 | 0.8875 |
-  | Looped decoder 32 layers `12:16:2`, closed | 4.24 | 11.09 | 4.66 | 5.02 | 0.9308 |
-  | Looped decoder 36 layers `10:18:2`, closed | 4.10 | 11.15 | 4.43 | 5.45 | 0.9374 |
-  | Looped decoder 42 layers `7:21:2`, closed | 4.17 | 11.62 | 4.78 | 5.12 | 0.9605 |
-  | Looped decoder 56 layers `7:21:3`, closed | 4.43 | 12.01 | 5.37 | 5.17 | 1.0173 |
-  | 20-second TRAIN extension, closed | 3.96 | 10.44 | 4.34 | 5.18 | 0.8956 |
-  | Reference-member GRPO, closed | 4.01 | 10.61 | 4.18 | 5.37 | 0.8988 |
-  | SFT-parent cap-eight GRPO, closed | 3.95 | 10.64 | 4.22 | 5.51 | 0.9094 |
-  | SFT-parent single-draw GRPO, closed | 3.99 | 10.50 | 4.25 | 5.30 | 0.8965 |
-  | Uniform two-seed SFT average, closed | 3.89 | 10.67 | 4.49 | 5.14 | 0.9110 |
-  | Base-init GRPO `bc8f2d8f6f19a369`, first seed | 4.15 | 10.41 | 4.63 | 5.65 | 0.9392 |
-  | Base-init GRPO confirmation, closed | 4.25 | 10.14 | 4.63 | 5.58 | 0.9270 |
-  | Fixed-scale GRPO `c3b0b430fab2ba0c`, closed | 4.21 | 10.73 | 4.52 | 5.66 | 0.9414 |
+  | Original 8-bit anchor | 4.25 | 10.25 | 4.63 | 3.36 | 1.0000 |
+  | One-pass SFT selected, seed 21774173 | 3.99 | 9.92 | 4.30 | 2.54 | 0.8841 |
+  | One-pass SFT confirmation, seed 21775174 | 4.06 | 9.89 | 4.54 | 2.84 | 0.9306 |
+  | Late-decay SFT, closed | 4.01 | 9.80 | 4.54 | 2.74 | 0.9173 |
+  | Language-mean SFT, closed | 3.84 | 9.92 | 4.27 | 2.57 | 0.8853 |
+  | Looped decoder 32 layers `12:16:2`, closed | 4.24 | 10.43 | 4.68 | 2.36 | 0.9102 |
+  | Looped decoder 36 layers `10:18:2`, closed | 4.10 | 10.49 | 4.44 | 2.45 | 0.9043 |
+  | Looped decoder 42 layers `7:21:2`, closed | 4.17 | 11.00 | 4.79 | 2.91 | 0.9914 |
+  | Looped decoder 56 layers `7:21:3`, closed | 4.43 | 11.44 | 5.38 | 3.31 | 1.0872 |
+  | 20-second TRAIN extension, closed | 3.96 | 9.77 | 4.36 | 2.45 | 0.8741 |
+  | Reference-member GRPO, closed | 4.01 | 9.95 | 4.19 | 2.37 | 0.8605 |
+  | SFT-parent cap-eight GRPO, closed | 3.95 | 9.98 | 4.23 | 2.22 | 0.8489 |
+  | SFT-parent single-draw GRPO, first seed | 3.99 | 9.83 | 4.26 | 2.21 | 0.8456 |
+  | Uniform two-seed SFT average, closed | 3.89 | 10.01 | 4.50 | 2.56 | 0.9032 |
+  | Base-init GRPO `bc8f2d8f6f19a369`, first seed | 4.15 | 9.77 | 4.65 | 2.37 | 0.8873 |
+  | Base-init GRPO confirmation, closed | 4.25 | 9.51 | 4.64 | 2.30 | 0.8710 |
+  | Fixed-scale GRPO `c3b0b430fab2ba0c`, closed | 4.21 | 10.10 | 4.53 | 2.38 | 0.8909 |
 
 - SFT score-delta CI95 vs original anchor: first[-0.1740,-0.0511],
   confirmation[-0.1370,-0.0348]. Every gate passes; all outputs end and none
@@ -109,6 +112,21 @@
   rollouts; no token-sum trial is admitted. Modal-output and re-tokenized-length
   proxies leave actual sampling headroom unmeasured. Evidence and the reported
   short CPU-memory overrun: `proposals/next-rl-after-redraw-20261030`.
+- **Optional-gloss scoring** ([DEC-20261030-002](decisions/DEC-20261030-002-qwen-asr-optional-gloss-scoring.md)):
+  `selection.py --glosses calibration/glosses-v1.json`, frozen `code/a4559db`
+  (PR38), makes 87 bracketed FLEURS translator glosses (KO 19, JA 5, ZH 63)
+  optional. Anchor ZH falls from 6.61% to 3.36%. The rescore of every
+  1,295-clip evaluation (`calibration/glosses-v1-rescore.json`) passes no
+  trial against the incumbent; the confirmation seed's CI95 against the anchor,
+  [-0.149,+0.019], now crosses zero. Seed spread is 0.047. Evidence verified on
+  Mac/local/Mangchi.
+- **Live trials** (`proposals/after-gloss-rescore-20261030`, admitted
+  18:35 KST): `grpo-76cf17e6620b34fb-confirm` is single-draw GRPO's
+  pre-registered second seed (parent `sft-a11b015fbeee0082`, seed 21326232,
+  `code/3ee30f6`); it adopts nothing alone while the operator decides whether
+  two seeds may pool errors for the CI gate. `sft-lr-1e-4` reruns the
+  incumbent recipe at learning rate 1e-4 (`code/a4559db`); a loss closes it
+  without other learning rates.
 - **TRAIN sampling diagnostic (complete):** `train-probe-ce33-20261030`
   finishes all 7,200 incumbent decodes (200 TRAIN sentences per language,
   greedy plus eight samples at 0.7), with no empty/truncated outputs. Greedy

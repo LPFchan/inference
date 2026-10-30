@@ -9,8 +9,12 @@ and [the four-slot contract](../skills/autoresearch/SKILL.md).
 - Fill free slots with fresh TRAIN-grounded SFT and RL proposals. Preserve
   sealed evaluation inputs, current incumbent capture and source/data hashes;
   no parameter sweeps selected from validation errors.
+- Score with optional translator glosses ([DEC-20261030-002](decisions/DEC-20261030-002-qwen-asr-optional-gloss-scoring.md)).
+  Settle with the operator whether two seeds may pool errors for the CI gate.
 - Preserve rejected snapshots. Rebuild Common Voice with the merged literal-
   quote parser; admit YODAS only after audio-language/transcript alignment checks.
+  AliMeeting stays parked: its meeting-speech conventions differ from v005,
+  and every non-FLEURS mix so far lost.
 - Admit at most four independently checked workers under the shared memory
   budget. Expand capacity only after simpler gains plateau. Keep existing
   models/data/results and serving paused.
