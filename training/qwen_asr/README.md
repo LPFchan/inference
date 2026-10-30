@@ -195,6 +195,23 @@ Token weighting only approximates the scorer, which counts words or
 characters, not BPE tokens. Per-update gradient size now varies; AdamW and
 clipping are not invariant to that, so the effective step size can change.
 
+### Looped decoder layers
+
+`--loop START:END:PASSES` runs decoder layers START..END-1 PASSES times in a
+row, then continues with END..27. `--loop 7:21:3` turns the 28-layer decoder
+into 0–20, 7–20, 7–20, 21–27 (56 layers), the same pattern as stacking a
+model's middle blocks to grow it. Repeats are fresh modules over the same
+frozen base arrays, so the 8-bit weights stay in memory once; each pass gets
+its own rank-`--rank` LoRA on q/k/v/o, and each pass gets its own KV cache
+during decoding. Repeats are not gated: the untrained looped model already
+differs from the base model, and LoRA has to adapt it.
+
+The loop is part of the resume contract and of every checkpoint; an adapter
+loads only into the same loop (`evaluate`, `probe`, external probes and GRPO
+need the same flag). Without the flag the model, contract and metrics are
+unchanged. Activations and decoding time grow with the added layers, so run
+the longest-clip memory preflight for each loop before a full trial.
+
 ## GRPO
 
 ```sh
