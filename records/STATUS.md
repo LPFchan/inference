@@ -120,15 +120,25 @@
   trial against the incumbent; the confirmation seed's CI95 against the anchor,
   [-0.149,+0.019], now crosses zero. Seed spread is 0.047. Evidence verified on
   Mac/local/Mangchi.
-- **Live trials:** `grpo-76cf17e6620b34fb-confirm` (admitted 18:35 KST,
-  `proposals/after-gloss-rescore-20261030`) is single-draw GRPO's
-  pre-registered second seed (parent `sft-a11b015fbeee0082`, seed 21326232,
-  `code/3ee30f6`); it adopts nothing alone while the operator decides whether
-  two seeds may pool errors for the CI gate. `sft-gloss-free` (admitted
-  19:42 KST, `proposals/gloss-free-train-20261030`) reruns the incumbent
-  recipe on v005 with translator glosses removed from TRAIN targets (ZH 286,
-  KO 91, JA 25 rows) by the frozen `glosses.py` rule; train manifest
-  `11c97042…17a6`.
+- **Gloss-free TRAIN SFT, awaiting operator** (`proposals/gloss-free-train-20261030`,
+  `two-seed-evidence.json`): the incumbent recipe on v005 with translator
+  glosses removed from TRAIN targets (ZH 286, KO 91, JA 25 rows; manifest
+  `11c97042…17a6`). Seeds 21774173/21775174 score 0.8431/0.8426 vs 0.8841,
+  improving every CJK language: EN/KO/JA/ZH 3.90/9.89/4.24/2.18% and
+  4.06/9.59/4.47/2.10%. Seed spread falls from 0.047 to 0.0005. Single-seed
+  gates fail: the first seed only on CI95 [-0.1104,+0.0078], the second also on JA.
+  Matched seeds against the old data: the second seed passes every gate against
+  `sft-a11b015fbeee0082`, CI95 [-0.1508,-0.0308]. Both seeds pass the KSS veto
+  (base rerun bound to the new manifest; hypotheses identical to `kss-v001-base`).
+  Pooled previews, not gates: both seeds against the incumbent checkpoint
+  give CI95 [-0.1053,+0.0061]; both seeds against both incumbent seeds give
+  0.8428 vs 0.9073, CI95 [-0.1221,-0.0173], within CJK limits. The incumbent
+  is unchanged until the operator decides on a two-seed adoption rule.
+- **Closed single-draw GRPO second seed:** `grpo-76cf17e6620b34fb-confirm`
+  (parent `sft-a11b015fbeee0082`, seed 21326232) scores 0.9101 vs 0.8841; gain,
+  CJK and confidence gates fail, CI95 [-0.0333,+0.0777]. The first seed's
+  0.8456 does not replicate, and the two-seed mean is within 1% of the
+  incumbent, so the recipe closes under any pooling rule.
 - **Closed learning-rate 1e-4 SFT:** `sft-lr-1e-4` reruns the incumbent recipe
   at 1e-4 (`code/a4559db`). Score 0.9783 vs 0.8841; EN improves (3.70%) but ZH
   reaches 3.38%. Gain, CJK and confidence gates fail; delta CI95
