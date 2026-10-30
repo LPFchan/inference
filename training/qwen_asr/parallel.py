@@ -27,7 +27,8 @@ import sys
 import time
 
 GB = 1_000_000_000
-WORKER_BYTES = 5 * GB  # largest budget for one new worker; unregistered model processes reserve at least this
+WORKER_BYTES = 5 * GB  # default budget for one new worker; unregistered model processes reserve at least this
+MAX_WORKER_BYTES = 5_500_000_000  # largest budget, only for runs DEC-20261030-001 authorizes
 AGGREGATE_BYTES = 20 * GB
 SYSTEM_ALLOWANCE_BYTES = 4 * GB  # set aside for macOS and apps, not measured free memory
 SLOTS = 4
@@ -231,8 +232,8 @@ def validate(root, command, budget, job=None):
     memory = value("--memory-gb")
     if memory is None or float(memory) * (1 << 30) > budget:
         problems.append(f"--memory-gb must be at most {budget / (1 << 30):.3f} GiB (budget {budget} bytes)")
-    if not 0 < budget <= WORKER_BYTES:
-        problems.append(f"budget must be at most {WORKER_BYTES} bytes")
+    if not 0 < budget <= MAX_WORKER_BYTES:
+        problems.append(f"budget must be at most {MAX_WORKER_BYTES} bytes")
     if not probe and (output / "run.json").exists() and "--resume" not in command:
         problems.append("existing run requires explicit --resume")
     return job, problems
@@ -491,7 +492,7 @@ def main(argv=None):
         s.add_argument("root", type=Path)
         if name != "status":
             s.add_argument("--budget-bytes", type=int, default=WORKER_BYTES,
-                           help=f"physical-footprint budget per worker, at most {WORKER_BYTES}")
+                           help=f"physical-footprint budget per worker, at most {MAX_WORKER_BYTES}")
         if name == "run":
             s.add_argument("--wait", type=float, default=0, help="retry admission every N seconds")
             s.add_argument("--job-dir", type=Path, help="required for batching.py probes; trainers use --output")
