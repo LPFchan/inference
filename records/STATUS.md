@@ -29,6 +29,7 @@
   | Late-decay SFT, closed | 4.01 | 10.47 | 4.52 | 5.14 | 0.9074 |
   | Language-mean SFT, closed | 3.84 | 10.58 | 4.26 | 5.05 | 0.8875 |
   | Looped decoder 32 layers `12:16:2`, closed | 4.24 | 11.09 | 4.66 | 5.02 | 0.9308 |
+  | Looped decoder 36 layers `10:18:2`, closed | 4.10 | 11.15 | 4.43 | 5.45 | 0.9374 |
   | 20-second TRAIN extension, closed | 3.96 | 10.44 | 4.34 | 5.18 | 0.8956 |
   | Reference-member GRPO, closed | 4.01 | 10.61 | 4.18 | 5.37 | 0.8988 |
   | SFT-parent cap-eight GRPO, closed | 3.95 | 10.64 | 4.22 | 5.51 | 0.9094 |
@@ -125,9 +126,11 @@
   (0.58/0.61/0.54/0.56/0.67) show no breakage before training.
   The 32-layer `sft-loop-12-16-2` closes at 0.9308 vs 0.8839: KO/JA exceed
   their limits and the paired delta CI95 [+0.0140,+0.0799] lies above zero;
-  no empty/truncated outputs. `sft-loop-10-18-2` runs under a 5 GB budget;
+  no empty/truncated outputs. The 36-layer `sft-loop-10-18-2` closes at
+  0.9374: KO/ZH exceed their limits, CI95 [+0.0061,+0.1020], no
+  empty/truncated outputs.
   PR37 merges as `0116029` with the operator-authorized 5.5 GB budget;
-  `sft-loop-7-21-2` runs and `7:21:3` waits for a slot and reservation.
+  `sft-loop-7-21-2` and `sft-loop-7-21-3` run under 5.5 GB budgets.
   Evidence: `proposals/loop-arm-20261030`.
 - **Closed language-mean SFT:** `sft-8f41bf5402204a8f` completes 944 updates
   and all 1,295 validation clips, score 0.8875 vs incumbent 0.8839. Chinese
