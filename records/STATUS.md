@@ -104,6 +104,17 @@
   rollouts; no token-sum trial is admitted. Modal-output and re-tokenized-length
   proxies leave actual sampling headroom unmeasured. Evidence and the reported
   short CPU-memory overrun: `proposals/next-rl-after-redraw-20261030`.
+- **Live TRAIN sampling diagnostic:** PR34 is merged as `90f8ba5` after
+  199 focused tests and a clear review. Frozen `code/385880d` resumes
+  `parallel/train-probe-ce33-20261030` toward 7,200 decodes: 200 unique
+  sentences per language, one greedy and eight sampled completions. The
+  72-decode smoke passes at 3.894 GB physical footprint with normal pressure;
+  an identical limited resume adds zero decodes and preserves the journal SHA.
+  Tokens/EOS, seeds, records and source/input/adapter hashes verify, and all
+  3,776 parent training draw IDs replay exactly. Source and smoke evidence are
+  verified on Mac/local/Mangchi. No new training or held-out decoding occurs;
+  oracle headroom is a TRAIN diagnostic. Evidence:
+  `proposals/train-sampling-probe-20261030/parent-acceptance.json`.
 - **Data intake:** sampled WorldSpeech labels remain unadmitted. AliMeeting
   near-field TRAIN is acquired and audited: 186,605 labels contain no digits;
   conservative segmentation yields 31,029 candidates/25.07 h. Energy checks

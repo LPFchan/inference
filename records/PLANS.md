@@ -6,11 +6,9 @@ Follow [DEC-001](decisions/DEC-20261029-001-qwen-asr-autoresearch.md),
 [DEC-002](decisions/DEC-20261029-002-four-slot-qwen-asr-autoresearch.md)
 and [the four-slot contract](../skills/autoresearch/SKILL.md).
 
-- Implement a resumable TRAIN-only sampling diagnostic on 200 unique sentences
-  per language: one greedy plus eight sampled completions from the incumbent.
-  Freeze inputs/seeds, retain actual tokens, and extend a limited smoke without
-  repeating predictions. Report oracle headroom as a TRAIN diagnostic; preserve
-  all learning/selection gates and admit no new RL trial from proxy estimates.
+- Complete the fixed TRAIN-only sampling diagnostic and use its measured
+  greedy-versus-sampled headroom to assess further RL hypotheses. Preserve
+  all learning/selection gates; oracle results remain a TRAIN diagnostic.
 - Implement one default-off language-mean SFT token-weighting trial on v005,
   preserving the sampler and all adoption gates. Bind denominators to the full
   reference TRAIN snapshot even in the longest-clip preflight; use paired,
