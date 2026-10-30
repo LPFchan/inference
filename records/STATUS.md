@@ -28,6 +28,7 @@
   | One-pass SFT confirmation, seed 21775174 | 4.06 | 10.55 | 4.53 | 5.24 | 0.9158 |
   | Late-decay SFT, closed | 4.01 | 10.47 | 4.52 | 5.14 | 0.9074 |
   | Language-mean SFT, closed | 3.84 | 10.58 | 4.26 | 5.05 | 0.8875 |
+  | Looped decoder 32 layers `12:16:2`, closed | 4.24 | 11.09 | 4.66 | 5.02 | 0.9308 |
   | 20-second TRAIN extension, closed | 3.96 | 10.44 | 4.34 | 5.18 | 0.8956 |
   | Reference-member GRPO, closed | 4.01 | 10.61 | 4.18 | 5.37 | 0.8988 |
   | SFT-parent cap-eight GRPO, closed | 3.95 | 10.64 | 4.22 | 5.51 | 0.9094 |
@@ -122,7 +123,9 @@
   Ten-update longest-clip preflights peak at 4.37/4.53/4.66/4.88/5.11 GB for
   28/32/36/42/56 layers, all with normal pressure. First-update losses
   (0.58/0.61/0.54/0.56/0.67) show no breakage before training.
-  `sft-loop-12-16-2` and `sft-loop-10-18-2` run under 5 GB budgets;
+  The 32-layer `sft-loop-12-16-2` closes at 0.9308 vs 0.8839: KO/JA exceed
+  their limits and the paired delta CI95 [+0.0140,+0.0799] lies above zero;
+  no empty/truncated outputs. `sft-loop-10-18-2` runs under a 5 GB budget;
   PR37 merges as `0116029` with the operator-authorized 5.5 GB budget;
   `sft-loop-7-21-2` runs and `7:21:3` waits for a slot and reservation.
   Evidence: `proposals/loop-arm-20261030`.
