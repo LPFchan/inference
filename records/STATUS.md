@@ -148,6 +148,15 @@
   CJK and confidence gates fail, CI95 [-0.0333,+0.0777]. The first seed's
   0.8456 does not replicate, and the two-seed mean is within 1% of the
   incumbent, so the recipe closes under any pooling rule.
+- **Closed decoder MLP LoRA:** `sft-gloss-free-mlp` reruns the gloss-free
+  recipe with `--mlp` (LoRA also on MLP gate/up/down, 17.4M trainable weights;
+  PR40, frozen `code/0275adf`, train.py identical to merged `55bcab9`) under the
+  operator-approved 5.5 GB budget. Preflight on the 40 longest clips peaks at
+  4.99 GB; the full run peaks at 5.14 GB, normal pressure. Seed 21774173 scores
+  0.8517 vs same-seed 0.8431: EN/KO/JA improve (3.78/9.74/4.18%), ZH worsens
+  (2.36%) across scattered number-format and name clips. It fails the
+  DEC-20261030-003 screen (pooled 0.8428), so no second seed or KSS. No
+  rank/target/LR/budget variants. Evidence verified on Mac/local/Mangchi.
 - **Closed GRPO on the gloss-free incumbent:** `grpo-gloss-free` (single-draw
   recipe, parent `sft-gloss-free`, seed 21325231, `code/523783e`, gloss-free
   data) scores 0.8578 vs its parent's 0.8431; KO WER rises to 10.19%. It fails
