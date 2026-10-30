@@ -9,6 +9,7 @@ import os
 import platform
 import random
 import socket
+import sys
 import time
 from pathlib import Path
 import wave
@@ -16,6 +17,7 @@ import wave
 from common import (LANGUAGES, advantages, atomic_json, decayed_learning_rate, grpo_row, informative,
                     load_manifests, read_jsonl, reward, recover_uncommitted_updates, sentence_epoch_draw,
                     sentence_epoch_order, sha256, summarize, training_targets, validate_splits)
+import sampling_probe
 
 MODEL_ID = "mlx-community/Qwen3-ASR-1.7B-8bit"
 MODEL_REVISION = "a8379a2e2f9e313c9292cdf1af4055ab56d50d55"
@@ -32,7 +34,7 @@ def grpo_loss(log_probs, old_probs, reference_probs, advantage, beta):
 
 def arguments():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("stage", choices=("sft", "grpo", "evaluate"))
+    p.add_argument("stage", choices=("sft", "grpo", "evaluate", "probe"))
     p.add_argument("--model", type=Path, required=True)
     p.add_argument("--data", type=Path, required=True)
     p.add_argument("--protected-test", type=Path, required=True)
@@ -72,7 +74,23 @@ def arguments():
                    help="frozen external probe manifest to transcribe instead of development")
     p.add_argument("--memory-gb", type=float, default=18.0)
     p.add_argument("--seed", type=int, default=20261029)
+    p.add_argument("--probe-limit", type=int,
+                   help="probe only: stop after this many plan clips per language; --resume extends")
     a = p.parse_args()
+    if a.stage == "probe":
+        # The probe's counts, seed, temperature and reward are fixed in sampling_probe.
+        fixed = ("steps", "accumulate", "learning_rate", "group_size", "temperature", "beta",
+                 "korean_wer_weight", "max_tokens", "save_every", "eval_clips", "skip_initial_eval", "seed")
+        supplied = {arg.split("=", 1)[0] for arg in sys.argv[1:]
+                    if arg.startswith("--") and arg != "--"}
+        changed = [name for name in fixed
+                   if any(("--" + name.replace("_", "-")).startswith(flag) for flag in supplied)]
+        if changed:
+            p.error(f"probe uses its fixed recipe; remove {', '.join('--' + n.replace('_', '-') for n in changed)}")
+        if not a.init_adapter:
+            p.error("probe requires --init-adapter")
+    if a.probe_limit is not None and (a.stage != "probe" or not 1 <= a.probe_limit <= sampling_probe.SENTENCES):
+        p.error(f"--probe-limit must be 1..{sampling_probe.SENTENCES} and is only valid for probe")
     if min(a.steps, a.accumulate, a.rank, a.save_every, a.eval_clips, a.max_tokens, a.max_draws) < 1:
         p.error("counts must be positive")
     if a.max_draws != 1 and a.stage != "grpo":
@@ -240,10 +258,11 @@ def run(a):
     if source != {"id": MODEL_ID, "revision": MODEL_REVISION}:
         raise ValueError("unexpected base model source")
     init = a.init_adapter.resolve() if a.init_adapter else None
-    if a.external and init and json.loads((init / "checkpoint.json").read_text())["contract"]["data"][
-            "train_sha256"] != data_meta["train_sha256"]:
+    if (a.external or a.stage == "probe") and init and json.loads((init / "checkpoint.json").read_text())[
+            "contract"]["data"]["train_sha256"] != data_meta["train_sha256"]:
         raise ValueError("--data must be the checkpoint's own training data")
-    settings = training_settings(a)
+    settings = training_settings(a) if a.stage != "probe" else {
+        key: getattr(a, key) for key in ("stage", "rank", "scale", "max_tokens", "memory_gb")}
     contract = {"settings": settings, "model_files": model_files,
                 "data": {k: data_meta[k] for k in (
                     "train_sha256", "dev_sha256", "protected_manifest_sha256")},
@@ -252,6 +271,10 @@ def run(a):
                 "scorer_sha256": sha256(Path(__file__).resolve().parents[2] / "scripts/stt-score.py")}
     if a.external:
         contract["external_sha256"] = sha256(a.external)
+    if a.stage == "probe":
+        probe_plan = sampling_probe.plan(pools)
+        contract["probe"] = {**sampling_probe.recipe(),
+                             "plan_sha256": hashlib.sha256(sampling_probe.plan_bytes(probe_plan)).hexdigest()}
     run_file = a.output / "run.json"
     if run_file.exists():
         if not a.resume or json.loads(run_file.read_text())["contract"] != contract:
@@ -268,6 +291,15 @@ def run(a):
         if summary.exists():
             raise FileExistsError(f"external evaluation already complete: {summary}")
         saved = saved_predictions(predictions, probe, contract_sha256)
+    if a.stage == "probe":
+        contract_sha256 = hashlib.sha256(json.dumps(contract, sort_keys=True).encode()).hexdigest()
+        probe_summary = a.output / "probe-summary.json"
+        if probe_summary.exists():
+            raise FileExistsError(f"probe already complete: {probe_summary}")
+        sampling_probe.freeze_plan(a.output / "probe-plan.json", probe_plan)
+        plan_decodes = sampling_probe.expected(probe_plan)
+        decodes = a.output / "decodes.jsonl"
+        saved = sampling_probe.saved_decodes(decodes, plan_decodes, contract_sha256)
     if a.resume:
         result = json.loads(run_file.read_text())
         result.update(status="running")
@@ -391,6 +423,59 @@ def run(a):
         atomic_json(a.output / f"dev-{tag}.json", {"rows": results,
                     "seconds": time.perf_counter() - started,
                     "peak_memory_bytes": mx.get_peak_memory()})
+
+    if a.stage == "probe":
+        limit = a.probe_limit or sampling_probe.SENTENCES
+        references = {row["id"]: row["text"] for row in train}
+        with decodes.open("a") as stream:
+            for clip in probe_plan[:limit * len(sampling_probe.ORDER)]:
+                pending = [plan_decodes[clip["id"], draw] for draw in range(sampling_probe.SAMPLES + 1)
+                           if (clip["id"], draw) not in saved]
+                if not pending:
+                    continue
+                # The model sees audio and the known language only; the TRAIN
+                # reference scores each completion after it is decoded.
+                audio_only = {"audio": clip["audio"], "language": clip["language"]}
+                ctx = context(audio_only)
+                for spec in pending:
+                    mx.random.seed(spec["seed"])
+                    began = time.perf_counter()
+                    tokens, text, ended = sample(audio_only, ctx, spec["temperature"])
+                    seconds = time.perf_counter() - began
+                    score = reward(references[clip["id"]], text, clip["language"],
+                                   sampling_probe.KOREAN_WER_WEIGHT) if ended else -1.0
+                    row = sampling_probe.record(spec, contract_sha256, tokens, text, ended, seconds, score)
+                    stream.write(json.dumps(row, ensure_ascii=False) + "\n")
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                    saved[spec["clip"], spec["draw"]] = row
+                mx.clear_cache()
+        result = json.loads(run_file.read_text())
+        if limit < sampling_probe.SENTENCES:
+            atomic_json(a.output / "probe-progress.json",
+                        {**sampling_probe.progress(limit, saved), "peak_memory_bytes": mx.get_peak_memory()})
+            result.update(status="partial", finished=time.time(), peak_memory_bytes=mx.get_peak_memory())
+            atomic_json(run_file, result)
+            return
+        parent = json.loads((init / "checkpoint.json").read_text())
+        parent_draws = None
+        if parent["stage"] == "sft":
+            recorded = parent["contract"]["settings"]
+            order = (sentence_epoch_order(pools, recorded["seed"])
+                     if recorded.get("sampler") == "sentence-epoch" else None)
+            parent_draws = [sft_row(pools, order, recorded["seed"], index)
+                            for index in range(parent["step"] * recorded["accumulate"])]
+        atomic_json(probe_summary, {
+            **sampling_probe.summary(probe_plan, saved, parent_draws),
+            "contract_sha256": contract_sha256, "plan_sha256": contract["probe"]["plan_sha256"],
+            "init_adapter": str(init), "init_adapter_sha256": contract["init_adapter_sha256"],
+            "parent": {"stage": parent["stage"], "step": parent["step"],
+                       "settings": parent["contract"]["settings"],
+                       "init_adapter_sha256": parent["contract"].get("init_adapter_sha256")},
+            "peak_memory_bytes": mx.get_peak_memory()})
+        result.update(status="complete", finished=time.time(), peak_memory_bytes=mx.get_peak_memory())
+        atomic_json(run_file, result)
+        return
 
     if a.external:
         with predictions.open("a") as stream:
