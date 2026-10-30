@@ -162,7 +162,9 @@ def test_validation_separates_probe_reports_from_job_directories(host):
     assert "4.657 GiB" in problems(trainer + ["--memory-gb", "4.7"])[0]
     assert problems(trainer)  # train.py defaults to 18 GiB
     assert problems(trainer + ["--memory-gb", "4.5"], job_dir=root / "parallel/other")
-    assert problems(trainer + ["--memory-gb", "4.5"], budget=6 * GB) == [f"budget must be at most {5 * GB} bytes"]
+    assert problems(trainer + ["--memory-gb", "4.5"], budget=5_500_000_000) == []
+    assert problems(trainer + ["--memory-gb", "4.5"], budget=5_500_000_001) == [
+        "budget must be at most 5500000000 bytes"]
     legacy_output = [sys.executable, str(source / "train.py"), "--output", str(root / "trials/x"), "--memory-gb", "4"]
     assert problems(legacy_output)
     assert problems(["python", "/repo/training/qwen_asr/train.py", *trainer[3:], "--memory-gb", "4"])
