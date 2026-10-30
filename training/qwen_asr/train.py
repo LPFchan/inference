@@ -18,6 +18,7 @@ from common import (LANGUAGES, advantages, atomic_json, decayed_learning_rate, g
                     load_manifests, read_jsonl, reward, recover_uncommitted_updates, sentence_epoch_draw,
                     sentence_epoch_order, sha256, summarize, training_targets, validate_splits)
 import sampling_probe
+import token_weight
 
 MODEL_ID = "mlx-community/Qwen3-ASR-1.7B-8bit"
 MODEL_REVISION = "a8379a2e2f9e313c9292cdf1af4055ab56d50d55"
@@ -76,9 +77,17 @@ def arguments():
     p.add_argument("--seed", type=int, default=20261029)
     p.add_argument("--probe-limit", type=int,
                    help="probe only: stop after this many plan clips per language; --resume extends")
+    p.add_argument("--sft-token-weight", choices=("off", token_weight.MODE), default="off",
+                   help="SFT only: divide each clip's summed token NLL by its language's mean reference token count")
+    p.add_argument("--sft-token-reference-data", type=Path,
+                   help="full snapshot whose TRAIN defines the language means; required by language-mean")
+    p.add_argument("--train-nll-probe", type=Path,
+                   help="evaluate only: teacher-forced TRAIN NLL of --init-adapter on this frozen per-seed plan")
     a = p.parse_args()
-    if a.stage == "probe":
-        # The probe's counts, seed, temperature and reward are fixed in sampling_probe.
+    if a.stage == "probe" or a.train_nll_probe:
+        # The probe's counts, seed, temperature and reward are fixed in sampling_probe;
+        # the TRAIN NLL probe takes its seed from the adapter and never decodes.
+        route = "probe" if a.stage == "probe" else "--train-nll-probe"
         fixed = ("steps", "accumulate", "learning_rate", "group_size", "temperature", "beta",
                  "korean_wer_weight", "max_tokens", "save_every", "eval_clips", "skip_initial_eval", "seed")
         supplied = {arg.split("=", 1)[0] for arg in sys.argv[1:]
@@ -86,9 +95,15 @@ def arguments():
         changed = [name for name in fixed
                    if any(("--" + name.replace("_", "-")).startswith(flag) for flag in supplied)]
         if changed:
-            p.error(f"probe uses its fixed recipe; remove {', '.join('--' + n.replace('_', '-') for n in changed)}")
+            p.error(f"{route} uses its fixed recipe; remove {', '.join('--' + n.replace('_', '-') for n in changed)}")
         if not a.init_adapter:
-            p.error("probe requires --init-adapter")
+            p.error(f"{route} requires --init-adapter")
+    if a.train_nll_probe and (a.stage != "evaluate" or a.external):
+        p.error("--train-nll-probe is only valid for evaluate, without --external")
+    if a.sft_token_weight != "off" and a.stage != "sft":
+        p.error("--sft-token-weight is only valid for SFT")
+    if (a.sft_token_weight == token_weight.MODE) != (a.sft_token_reference_data is not None):
+        p.error("--sft-token-reference-data is required by, and only valid with, --sft-token-weight language-mean")
     if a.probe_limit is not None and (a.stage != "probe" or not 1 <= a.probe_limit <= sampling_probe.SENTENCES):
         p.error(f"--probe-limit must be 1..{sampling_probe.SENTENCES} and is only valid for probe")
     if min(a.steps, a.accumulate, a.rank, a.save_every, a.eval_clips, a.max_tokens, a.max_draws) < 1:
@@ -250,6 +265,11 @@ def run(a):
         order = sentence_epoch_order(pools, a.seed)
         for index in range(a.steps * a.accumulate):  # refuse a repeat before any model load or update
             sentence_epoch_draw(order, index, SCHEDULE)
+    token_reference = token_binding = token_means = None
+    if a.sft_token_weight == token_weight.MODE:
+        # The full reference fixes the denominators even when --data is a subset of it.
+        token_reference, token_binding = token_weight.reference_rows(
+            a.sft_token_reference_data, a.data, a.protected_test, train, data_meta)
     model_files = {str(p.relative_to(a.model)): sha256(p) for p in sorted(a.model.rglob("*"))
                    if p.is_file() and ".cache" not in p.parts and not p.name.startswith(".")}
     if not any(name.endswith(".safetensors") for name in model_files):
@@ -258,11 +278,19 @@ def run(a):
     if source != {"id": MODEL_ID, "revision": MODEL_REVISION}:
         raise ValueError("unexpected base model source")
     init = a.init_adapter.resolve() if a.init_adapter else None
-    if (a.external or a.stage == "probe") and init and json.loads((init / "checkpoint.json").read_text())[
-            "contract"]["data"]["train_sha256"] != data_meta["train_sha256"]:
+    if (a.external or a.stage == "probe" or a.train_nll_probe) and init and json.loads(
+            (init / "checkpoint.json").read_text())["contract"]["data"]["train_sha256"] != data_meta["train_sha256"]:
         raise ValueError("--data must be the checkpoint's own training data")
-    settings = training_settings(a) if a.stage != "probe" else {
-        key: getattr(a, key) for key in ("stage", "rank", "scale", "max_tokens", "memory_gb")}
+    if a.train_nll_probe:
+        nll_plan, nll_binding = token_weight.probe_plan(
+            a.train_nll_probe, train, a.data, json.loads((init / "checkpoint.json").read_text()), SCHEDULE)
+        settings = {key: getattr(a, key) for key in ("stage", "rank", "scale", "memory_gb")}
+    elif a.stage == "probe":
+        settings = {key: getattr(a, key) for key in ("stage", "rank", "scale", "max_tokens", "memory_gb")}
+    else:
+        settings = training_settings(a)
+        if token_binding:
+            settings["sft_token_weight"] = token_binding
     contract = {"settings": settings, "model_files": model_files,
                 "data": {k: data_meta[k] for k in (
                     "train_sha256", "dev_sha256", "protected_manifest_sha256")},
@@ -271,6 +299,8 @@ def run(a):
                 "scorer_sha256": sha256(Path(__file__).resolve().parents[2] / "scripts/stt-score.py")}
     if a.external:
         contract["external_sha256"] = sha256(a.external)
+    if a.train_nll_probe:
+        contract["train_nll_probe"] = nll_binding
     if a.stage == "probe":
         probe_plan = sampling_probe.plan(pools)
         contract["probe"] = {**sampling_probe.recipe(),
@@ -300,6 +330,13 @@ def run(a):
         plan_decodes = sampling_probe.expected(probe_plan)
         decodes = a.output / "decodes.jsonl"
         saved = sampling_probe.saved_decodes(decodes, plan_decodes, contract_sha256)
+    if a.train_nll_probe:
+        contract_sha256 = token_weight.contract_sha256(contract)
+        nll_summary = a.output / "train-nll-summary.json"
+        if nll_summary.exists():
+            raise FileExistsError(f"TRAIN NLL probe already complete: {nll_summary}")
+        nll_records = a.output / "train-nll.jsonl"
+        saved = token_weight.saved_records(nll_records, nll_plan, contract_sha256)
     if a.resume:
         result = json.loads(run_file.read_text())
         result.update(status="running")
@@ -364,6 +401,11 @@ def run(a):
     eos = model._tokenizer.eos_token_id
     if eos not in model._eos_token_ids():
         raise ValueError("tokenizer EOS disagrees with runtime")
+    if token_binding:
+        # Counted exactly as each SFT microstep supervises: transcript tokens plus EOS.
+        token_means = token_weight.freeze_statistics(a.output / "token-weight.json", token_weight.statistics(
+            token_reference, lambda text: len(model._tokenizer.encode(text, add_special_tokens=False) + [eos]),
+            token_binding, eos), published=start > 0)
 
     def context(row):
         features, mask, count = model._preprocess_audio(str(a.data / row["audio"]))
@@ -423,6 +465,32 @@ def run(a):
         atomic_json(a.output / f"dev-{tag}.json", {"rows": results,
                     "seconds": time.perf_counter() - started,
                     "peak_memory_bytes": mx.get_peak_memory()})
+
+    if a.train_nll_probe:
+        rows = {row["id"]: row for row in train}
+        with nll_records.open("a") as stream:
+            for clip in nll_plan:
+                if clip["id"] in saved:
+                    continue
+                row = rows[clip["id"]]
+                tokens = model._tokenizer.encode(row["text"], add_special_tokens=False) + [eos]
+                nll = -log_probs(model, *context(row), tokens)  # teacher forcing only; no decode or gradient
+                saved[clip["id"]] = token_weight.record(clip, contract_sha256, len(tokens),
+                                                        math.fsum(nll.tolist()))
+                stream.write(json.dumps(saved[clip["id"]], ensure_ascii=False) + "\n")
+                stream.flush()
+                os.fsync(stream.fileno())
+                mx.clear_cache()
+        parent = json.loads((init / "checkpoint.json").read_text())
+        atomic_json(nll_summary, {
+            **token_weight.summary(nll_plan, saved), "contract": contract, "contract_sha256": contract_sha256,
+            "init_adapter": str(init), "checkpoint": {"stage": parent["stage"], "step": parent["step"],
+                                                      "settings": parent["contract"]["settings"]},
+            "peak_memory_bytes": mx.get_peak_memory()})
+        result = json.loads(run_file.read_text())
+        result.update(status="complete", finished=time.time(), peak_memory_bytes=mx.get_peak_memory())
+        atomic_json(run_file, result)
+        return
 
     if a.stage == "probe":
         limit = a.probe_limit or sampling_probe.SENTENCES
@@ -547,12 +615,26 @@ def run(a):
                     diagnostics.setdefault("ids", []).append(row["id"])
                 ctx = context(row)
                 completion = model._tokenizer.encode(row["text"], add_special_tokens=False) + [eos]
-                loss, grad = nn.value_and_grad(model, lambda m: -log_probs(m, *ctx, completion).mean())(model)
-                mx.eval(loss, grad)
+                if token_means is None:
+                    loss, grad = nn.value_and_grad(model, lambda m: -log_probs(m, *ctx, completion).mean())(model)
+                    mx.eval(loss, grad)
+                else:
+                    # One forward: the gradient follows the weighted objective, while
+                    # `loss` keeps the unweighted per-clip mean for comparable logs.
+                    mean = token_means[row["language"]]
+                    (objective, loss), grad = nn.value_and_grad(model, lambda m: token_weight.language_mean_objective(
+                        -log_probs(m, *ctx, completion), mean))(model)
+                    mx.eval(objective, loss, grad)
+                    diagnostics.setdefault("tokens", []).append(len(completion))
+                    diagnostics.setdefault("token_normalizers", []).append(mean)
+                    diagnostics.setdefault("objectives", []).append(float(objective.item()))
                 grads = grad if grads is None else tree_map(lambda x, y: x + y, grads, grad)
                 mx.eval(grads)  # a lazy sum would keep every microstep gradient alive
                 losses.append(float(loss.item()))
             grads = tree_map(lambda g: g / a.accumulate, grads)
+            if token_means is not None:
+                diagnostics.update(sequence_losses=list(losses),
+                                   objective=sum(diagnostics["objectives"]) / len(losses))
         else:
             lang = SCHEDULE[(step - 1) % len(SCHEDULE)]
             skipped = []
@@ -611,7 +693,7 @@ def run(a):
         grads, norm = optim.clip_grad_norm(grads, max_norm=1.0)
         mx.eval(grads, norm)
         norm_value = float(norm.item())
-        if not all(math.isfinite(x) for x in losses + [norm_value]):
+        if not all(math.isfinite(x) for x in losses + diagnostics.get("objectives", []) + [norm_value]):
             raise FloatingPointError("nonfinite loss/gradient; checkpoint not advanced")
         # From the fixed peak and absolute update index, replacing any restored rate;
         # the constant prefix leaves the optimizer's rate untouched.

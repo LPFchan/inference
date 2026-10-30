@@ -157,6 +157,44 @@ Each microstep's gradient is added and evaluated immediately. A lazy running
 sum would keep every microstep gradient alive until the update ends: about
 26 MB each at rank 16, or roughly 0.8 GB at `--accumulate 32`.
 
+### Language-mean token weighting
+
+By default each microstep's loss is the mean NLL over its transcript tokens
+(first token through EOS), so every clip counts equally. `--sft-token-weight
+language-mean --sft-token-reference-data FULL` (SFT only) instead uses the
+clip's summed token NLL divided by the mean token count of its language in
+FULL's TRAIN. Within a language a long clip now counts more, while each
+language's share stays close to the schedule. Accumulation, clipping and AdamW
+are unchanged.
+
+```sh
+... sft ... --data SUBSET --sft-token-weight language-mean \
+  --sft-token-reference-data FULL
+```
+
+FULL is validated like `--data` before the model loads (manifest, audio and
+held-out checks). `--data` may be FULL itself or a subset of it, for example a
+longest-clip memory preflight: every training row must equal a FULL row except
+for its audio location, and both must share the development and protected
+manifests. The denominators always come from all of FULL's TRAIN, never from
+the subset. FULL's `train.jsonl` and `data.json` hashes and the mode are part of
+the resume contract only when the flag is on; the default contract, math and
+metrics are unchanged.
+
+After loading, the runtime tokenizer counts each FULL TRAIN transcript plus EOS,
+exactly as a microstep supervises it. `token-weight.json` holds the per-language
+recordings, tokens and full-precision means. It is written once; on resume the
+recount must match it exactly, and a missing file is refused once an update is
+published. Each metrics event keeps `loss` as the unweighted mean of per-clip
+mean NLL (comparable with default runs) and adds per microstep
+`sequence_losses`, `tokens`, `token_normalizers` and `objectives` (sum NLL /
+language mean), plus `objective`, their mean, whose gradient was applied before
+clipping. Raw loss and objective come from the same forward pass.
+
+Token weighting only approximates the scorer, which counts words or
+characters, not BPE tokens. Per-update gradient size now varies; AdamW and
+clipping are not invariant to that, so the effective step size can change.
+
 ## GRPO
 
 ```sh
@@ -345,6 +383,50 @@ plan coverage. For an SFT adapter it also counts plan clips among that run's
 own draws, recomputed from its recorded sampler settings. Best-of-eight uses
 the TRAIN reference: it is an optimistic TRAIN diagnostic, not deployable
 decoding, held-out accuracy or a ceiling for RL.
+
+### TRAIN NLL probe
+
+`evaluate --train-nll-probe PLAN` reads out one SFT adapter's teacher-forced
+NLL on frozen TRAIN clips. It uses the trainer's own loader, `context()` and
+`log_probs()` at temperature 1, and never decodes, computes a gradient, updates
+weights, writes a checkpoint or touches development, KSS or test clips.
+
+```sh
+.venv/bin/python training/qwen_asr/train.py evaluate \
+  --model "$HOME/models/stt/qwen-base-8bit" --data TRAINING_DATA \
+  --protected-test "$HOME/models/stt/fleurs-test/manifest.jsonl" \
+  --init-adapter CHECKPOINT --train-nll-probe PLAN --memory-gb 4.5 --output RUN
+.venv/bin/python training/qwen_asr/token_weight.py compare \
+  CANDIDATE_RUN/train-nll-summary.json TWIN_RUN/train-nll-summary.json --output RESULT
+```
+
+PLAN holds per-seed clip IDs and their `ids_sha256`. Before loading, the probe
+requires a fresh sentence-epoch SFT checkpoint trained on `--data`, takes the
+entry for the checkpoint's seed, and replays that run's draws from its recorded
+seed, step and accumulate. Each clip must be a TRAIN row of its language with a
+valid 16 kHz WAV of its recorded duration, and its sentence must never have
+been drawn in that language. The same FLEURS sentence may have been drawn in
+another language; that is recorded per clip as `drawn_in_other_languages`, so
+the clips are unseen in their language, not globally unseen. Training and
+decoding flags are refused.
+
+Each clip's summed NLL over its reference tokens plus EOS is appended to
+`train-nll.jsonl` with its token count, plan fields, contract hash and a record
+digest. Resume, refusal and torn-line handling match the sampling probe.
+`train-nll-summary.json` is written once and reports token-pooled NLL per
+language (sum NLL / sum tokens), every clip record and the full contract.
+Empty languages report `null`.
+
+`compare` pairs a candidate with its same-seed twin. The two summaries must
+have identical contracts except the adapter, including the memory setting,
+and the same clips. Per language,
+and for the shortest and longest ZH thirds by tokens, it reports
+candidate-minus-twin token-pooled NLL with a 400-resample paired clip bootstrap
+(seed 20261030). ZH is primary: CI95 upper < 0 is `supported`, a point
+difference >= 0 `falsified`, otherwise `inconclusive`. EN is diagnostic; other
+languages, often tiny, are report-only. The result is a TRAIN-only mechanism
+check for one seed; it never gates adoption, and an existing result file is
+never replaced.
 
 ## Sharing the serving Mac
 
