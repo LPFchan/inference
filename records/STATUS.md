@@ -105,17 +105,15 @@
   rollouts; no token-sum trial is admitted. Modal-output and re-tokenized-length
   proxies leave actual sampling headroom unmeasured. Evidence and the reported
   short CPU-memory overrun: `proposals/next-rl-after-redraw-20261030`.
-- **Live TRAIN sampling diagnostic:** PR34 is merged as `90f8ba5` after
-  199 focused tests and a clear review. Frozen `code/385880d` resumes
-  `parallel/train-probe-ce33-20261030` toward 7,200 decodes: 200 unique
-  sentences per language, one greedy and eight sampled completions. The
-  72-decode smoke passes at 3.894 GB physical footprint with normal pressure;
-  an identical limited resume adds zero decodes and preserves the journal SHA.
-  Tokens/EOS, seeds, records and source/input/adapter hashes verify, and all
-  3,776 parent training draw IDs replay exactly. Source and smoke evidence are
-  verified on Mac/local/Mangchi. No new training or held-out decoding occurs;
-  oracle headroom is a TRAIN diagnostic. Evidence:
-  `proposals/train-sampling-probe-20261030/parent-acceptance.json`.
+- **TRAIN sampling diagnostic (complete):** `train-probe-ce33-20261030`
+  finishes all 7,200 incumbent decodes (200 TRAIN sentences per language,
+  greedy plus eight samples at 0.7), with no empty/truncated outputs. Greedy
+  beats the mean sample in every language. Best-of-8 oracle headroom over
+  greedy is small: KO 0.028, ZH 0.021, JA 0.013, EN 0.013 reward. Greedy
+  errors with a perfect sample: KO 31/105, JA 30/87, ZH 15/77, EN 22/77.
+  This is an optimistic TRAIN-only bound, so further RL has little to
+  extract; no RL trial is admitted without new evidence. Frozen `code/385880d`;
+  evidence verified on Mac/local/Mangchi under the trial directory.
 - **Live looped-decoder arm** ([DEC-20261030-001](decisions/DEC-20261030-001-qwen-asr-looped-decoder-arm.md)):
   the incumbent's exact 944-update recipe with a block of the 28-layer decoder
   looped. Repeats share frozen base weights and get their own LoRA; stored
@@ -125,8 +123,9 @@
   28/32/36/42/56 layers, all with normal pressure. First-update losses
   (0.58/0.61/0.54/0.56/0.67) show no breakage before training.
   `sft-loop-12-16-2` and `sft-loop-10-18-2` run under 5 GB budgets;
-  `7:21:2` and `7:21:3` wait for PR37's operator-authorized 5.5 GB budget
-  and a free slot. Evidence: `proposals/loop-arm-20261030`.
+  PR37 merges as `0116029` with the operator-authorized 5.5 GB budget;
+  `sft-loop-7-21-2` runs and `7:21:3` waits for a slot and reservation.
+  Evidence: `proposals/loop-arm-20261030`.
 - **Closed language-mean SFT:** `sft-8f41bf5402204a8f` completes 944 updates
   and all 1,295 validation clips, score 0.8875 vs incumbent 0.8839. Chinese
   exceeds its limit; gain, CJK and confidence gates fail. Paired delta CI95
