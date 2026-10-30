@@ -6,14 +6,18 @@
 
 ## Autoresearch — Qwen3-ASR
 
-- **Training incumbent:** one-pass SFT `sft-ce33a3d7a476e297/step-000944`,
-  adapter `ad63fb38…6e22`. At adoption, both independent seeds passed all
-  1,295 FLEURS gates and both separate-cohort KSS vetoes. The lower-score first checkpoint is
-  selected under the charter. No trained model is deployed; Nemotron stays
-  unloaded. Original MLX 8-bit remains the fixed normalization anchor.
+- **Training incumbent:** gloss-free TRAIN SFT
+  `sft-gloss-free-confirm/step-000944`, adapter `f025ecba…c568`, adopted
+  2026-10-30 22:13 KST by two-seed recipe comparison
+  ([DEC-20261030-003](decisions/DEC-20261030-003-qwen-asr-two-seed-recipe-adoption.md)).
+  Its pair `sft-gloss-free`/`sft-gloss-free-confirm` pools to 0.8428 vs the old
+  pair's 0.9073, CI95 [-0.1221,-0.0172], and both seeds pass KSS. The
+  lower-score seed is the checkpoint. No trained model is deployed; Nemotron
+  stays unloaded. Original MLX 8-bit remains the fixed normalization anchor.
 - [Confirmed findings](research/RSH-20261030-001-confirmed-qwen-asr-one-pass-sft.md).
   Selection authority: [DEC-001](decisions/DEC-20261029-001-qwen-asr-autoresearch.md),
-  [DEC-002](decisions/DEC-20261029-002-four-slot-qwen-asr-autoresearch.md)
+  [DEC-002](decisions/DEC-20261029-002-four-slot-qwen-asr-autoresearch.md),
+  [DEC-20261030-003](decisions/DEC-20261030-003-qwen-asr-two-seed-recipe-adoption.md)
   and [four-slot contract](../skills/autoresearch/SKILL.md).
   Frozen primary set: 1,295 validation clips (EN 394,KO 226,JA 266,ZH 409),
   manifest `c75a4b05069eba7d11a6b50efd7bb11d43800fc66e49b761cd08fb86354acf01`.
@@ -27,8 +31,10 @@
   | Trial | EN | KO | JA | ZH | CJK score |
   | --- | ---: | ---: | ---: | ---: | ---: |
   | Original 8-bit anchor | 4.25 | 10.25 | 4.63 | 3.36 | 1.0000 |
-  | One-pass SFT selected, seed 21774173 | 3.99 | 9.92 | 4.30 | 2.54 | 0.8841 |
-  | One-pass SFT confirmation, seed 21775174 | 4.06 | 9.89 | 4.54 | 2.84 | 0.9306 |
+  | Gloss-free TRAIN SFT, seed 21775174, incumbent | 4.06 | 9.59 | 4.47 | 2.10 | 0.8426 |
+  | Gloss-free TRAIN SFT, seed 21774173 | 3.90 | 9.89 | 4.24 | 2.18 | 0.8431 |
+  | One-pass SFT, seed 21774173, previous incumbent | 3.99 | 9.92 | 4.30 | 2.54 | 0.8841 |
+  | One-pass SFT, seed 21775174 | 4.06 | 9.89 | 4.54 | 2.84 | 0.9306 |
   | Late-decay SFT, closed | 4.01 | 9.80 | 4.54 | 2.74 | 0.9173 |
   | Language-mean SFT, closed | 3.84 | 9.92 | 4.27 | 2.57 | 0.8853 |
   | Looped decoder 32 layers `12:16:2`, closed | 4.24 | 10.43 | 4.68 | 2.36 | 0.9102 |
@@ -120,8 +126,8 @@
   trial against the incumbent; the confirmation seed's CI95 against the anchor,
   [-0.149,+0.019], now crosses zero. Seed spread is 0.047. Evidence verified on
   Mac/local/Mangchi.
-- **Gloss-free TRAIN SFT, awaiting operator** (`proposals/gloss-free-train-20261030`,
-  `two-seed-evidence.json`): the incumbent recipe on v005 with translator
+- **Adopted gloss-free TRAIN SFT** (`proposals/gloss-free-train-20261030`,
+  `two-seed-evidence.json`, `recipe-selection.json`): the incumbent recipe on v005 with translator
   glosses removed from TRAIN targets (ZH 286, KO 91, JA 25 rows; manifest
   `11c97042…17a6`). Seeds 21774173/21775174 score 0.8431/0.8426 vs 0.8841,
   improving every CJK language: EN/KO/JA/ZH 3.90/9.89/4.24/2.18% and
@@ -132,8 +138,11 @@
   (base rerun bound to the new manifest; hypotheses identical to `kss-v001-base`).
   Pooled previews, not gates: both seeds against the incumbent checkpoint
   give CI95 [-0.1053,+0.0061]; both seeds against both incumbent seeds give
-  0.8428 vs 0.9073, CI95 [-0.1221,-0.0173], within CJK limits. The incumbent
-  is unchanged until the operator decides on a two-seed adoption rule.
+  0.8428 vs 0.9073, CI95 [-0.1221,-0.0173], within CJK limits. The official
+  `code/523783e` comparison gives CI95 [-0.1221,-0.0172] and passes every gate.
+  Adoption is in `parallel/sft-gloss-free-confirm/adoption.json`; the prior
+  `parallel-trials.json` is kept as `parallel-trials.before-gloss-free-adoption.json`.
+  Evidence verified on Mac/local/Mangchi.
 - **Closed single-draw GRPO second seed:** `grpo-76cf17e6620b34fb-confirm`
   (parent `sft-a11b015fbeee0082`, seed 21326232) scores 0.9101 vs 0.8841; gain,
   CJK and confidence gates fail, CI95 [-0.0333,+0.0777]. The first seed's

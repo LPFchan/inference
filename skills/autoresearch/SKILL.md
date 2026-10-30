@@ -54,8 +54,10 @@ Architecture changes require evidence that simpler adaptations plateau.
 Score every clip in the same frozen 1,295-clip development manifest. Use
 `training/qwen_asr/selection.py CANDIDATE INCUMBENT ANCHOR`. It returns the
 normalized CJK error score, paired bootstrap interval, per-language errors and
-all acceptance gates defined by the charter. Confirm wins with a second
-training seed before advancing the incumbent. Keep rejected checkpoints and
+all acceptance gates defined by the charter. Adopt a recipe only when its two
+seeds, pooled with `--second-seeds`, pass every gate against the incumbent
+recipe's two seeds (DEC-20261030-003); a first seed earns its second only by
+scoring below the incumbent recipe's pooled score. Keep rejected checkpoints and
 measurements as evidence, without deploying them. No changes to normalization
 or the selection set within a comparison.
 
