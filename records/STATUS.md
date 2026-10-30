@@ -28,6 +28,7 @@
   | One-pass SFT confirmation, seed 21775174 | 4.06 | 10.55 | 4.53 | 5.24 | 0.9158 |
   | Late-decay SFT, closed | 4.01 | 10.47 | 4.52 | 5.14 | 0.9074 |
   | 20-second TRAIN extension, closed | 3.96 | 10.44 | 4.34 | 5.18 | 0.8956 |
+  | Reference-member GRPO, closed | 4.01 | 10.61 | 4.18 | 5.37 | 0.8988 |
   | SFT-parent cap-eight GRPO, closed | 3.95 | 10.64 | 4.22 | 5.51 | 0.9094 |
   | SFT-parent single-draw GRPO, closed | 3.99 | 10.50 | 4.25 | 5.30 | 0.8965 |
   | Uniform two-seed SFT average, closed | 3.89 | 10.67 | 4.49 | 5.14 | 0.9110 |
@@ -81,17 +82,13 @@
   v008's 10,154 clips/30.7208 h and all 3,776 unique preregistered draws verify;
   memory preflight passed at 4.72094 GB. Preserve the data and frozen evidence
   under `proposals/next-data-after-confirmed-20261030` and the trial directory.
-- **Reference-member GRPO:** `parallel/grpo-c34dabc489294800`, frozen
-  `code/e49648d`, has accepted default first-update parity and a ten-update
-  feature preflight. All 224 adapter/450 optimizer tensors match the retained
-  control with the flag off. With it on, the first policy group and all ten
-  row IDs match the control; five-member rewards/advantages and checkpoint
-  hashes validate. Measured physical peak is 4.275 GB, with normal pressure.
-  After accepted latest-head review and merged PR32, the trial resumes from
-  ten toward 1,000 updates and full validation. Its optional-MLX test guards are fixed;
-  159 focused tests pass, and both affected tests skip when MLX is blocked.
-  The test-only fix leaves every frozen training/scoring file byte-identical.
-  Evidence: `proposals/next-rl-after-parent-failure-20261030`.
+- **Closed reference-member GRPO:** `grpo-c34dabc489294800` completes
+  1,000 updates and all 1,295 validation clips, score 0.8988 vs incumbent
+  0.8839. Chinese exceeds its limit; gain, CJK and confidence gates fail.
+  Paired score-delta CI95 is [-0.0280,+0.0541], with no empty/truncated outputs.
+  All draws, five-member advantages, TRAIN rewards and final checkpoint/source/
+  data hashes verify. No confirmation, KSS or reference-weight/shaping/group/
+  LR/beta/temperature/step/seed variants. Evidence: `parallel/grpo-c34dabc489294800`.
 - **Closed MLP-LoRA fit trial:** frozen `code/41b7216` passes 169 focused
   tests and exact native default parity (224 adapter/450 optimizer tensors).
   Its ten-update, 40-longest-TRAIN preflight peaks at 4.99139 GB physical,
