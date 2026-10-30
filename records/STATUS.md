@@ -96,14 +96,21 @@
   No full-data candidate, confirmation, KSS or accuracy result is produced.
   PR33 closes unmerged; no budget/rank/target-subset/LR/length retuning.
   Evidence: `proposals/next-sft-after-two-losses-20261030/native-verdict.json`.
+- **Throughput measurement:** the idle Mac is running the planned 1/2/4-worker
+  comparison, 60 × 4 microsteps per worker, frozen `code/e49648d` and supervisor
+  `code/1ae82c5` on v005. This measures short-run fit and training throughput;
+  startup/JIT and final four-clip smokes are retained, without accuracy selection.
 - **RL audit:** token-length reweighting has weak support in the closed TRAIN
   rollouts; no token-sum trial is admitted. Modal-output and re-tokenized-length
   proxies leave actual sampling headroom unmeasured. Evidence and the reported
   short CPU-memory overrun: `proposals/next-rl-after-redraw-20261030`.
-- **Data scout:** sampled WorldSpeech TRAIN labels have unspaced Korean,
-  edited Japanese minutes and Traditional Chinese; no trial is admitted.
-  AliMeeting label conventions remain under audit; no corpus is admitted.
-  Evidence: `proposals/next-data-after-v008-loss-20261030`.
+- **Data intake:** sampled WorldSpeech labels remain unadmitted. AliMeeting
+  near-field TRAIN is acquired and audited: 186,605 labels contain no digits;
+  conservative segmentation yields 31,029 candidates/25.07 h. Energy checks
+  support timing alignment, with word-level accuracy unverified. Raw labels
+  have number/filler conventions unlike v005; no data trial is admitted.
+  The 24.53 GB archive stays on Mac; 705 metadata files/TextGrids are verified
+  on Mac/local/Mangchi. Evidence: `proposals/alimeeting-label-audit-20261030`.
 - **Intake protocol deviation:** the data worker reports displaying one unique
   sealed test reference through two exclusion-related files, without using it.
   The parent did not reopen it. No new test prediction/scoring occurred;

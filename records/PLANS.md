@@ -14,10 +14,10 @@ and [the four-slot contract](../skills/autoresearch/SKILL.md).
 - Fill free slots with fresh TRAIN-grounded SFT and RL proposals. Preserve
   sealed evaluation inputs, current incumbent capture and source/data hashes;
   no parameter sweeps selected from validation errors.
-- Audit official AliMeeting TRAIN annotations, using a transcript-only source
-  when available or one resumable near-field archive download up to 26 GB.
-  Keep the 100 GiB free-disk guard and human-label/alignment checks; admit no
-  model trial until the source's label conventions and exclusions are verified.
+- Assess one audited deterministic number-format proposal for AliMeeting's
+  human TRAIN labels, including ambiguity handling and a fixed source mixture.
+  Preserve raw labels/audio and the closed numeral-filter area. Admit neither
+  rewritten targets nor a training run until the proposal survives review.
 - Preserve rejected snapshots. Rebuild Common Voice with the merged literal-
   quote parser; admit YODAS only after audio-language/transcript alignment checks.
 - Benchmark 1/2/4-worker throughput on an idle Mac; fit evidence alone does not
