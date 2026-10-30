@@ -302,6 +302,50 @@ WER and CER per language and cohort using the shared scorer, plus empty and
 truncated output counts. A finished summary is never overwritten. Cohorts may
 be deliberately balanced, so never pool them into one accuracy.
 
+### TRAIN sampling probe
+
+`probe` measures how far one adapter's sampled completions differ from its
+greedy completion on its own TRAIN data. It never trains, never computes a
+loss, writes no checkpoint and decodes no development, KSS or test clip.
+
+```sh
+.venv/bin/python training/qwen_asr/train.py probe \
+  --model "$HOME/models/stt/qwen-base-8bit" --data TRAINING_DATA \
+  --protected-test "$HOME/models/stt/fleurs-test/manifest.jsonl" \
+  --init-adapter CHECKPOINT --memory-gb 4.5 --probe-limit 2 --output RUN
+```
+
+The recipe is fixed in `sampling_probe.py` and bound to the resume contract:
+the first 200 source sentences per language of `sentence_epoch_order` with
+seed 20261030 (one seeded recording each), interleaved KO/JA/ZH/EN; one greedy
+and eight temperature-0.7 draws per clip, through the trainer's own `context()`
+and `sample()` with `--max-tokens` 256. Each draw sets its own MLX seed from the
+clip ID and draw number. Training and evaluation flags are refused, as is an
+adapter trained on other data. `probe-plan.json` freezes all 800 clips with
+audio and reference hashes before the model loads.
+
+The model gets audio and the known language only. After decoding, the TRAIN
+reference scores the text with the frozen reward (Korean WER weight 0.5); a
+completion without EOS scores -1, as in GRPO. Every decode is appended to
+`decodes.jsonl` and fsynced, with its actual token IDs including EOS, text,
+seed, temperature, time, reward, contract hash and a record digest.
+
+`--probe-limit N` stops after the first N plan clips per language and writes
+`probe-progress.json`, which holds counts only. Repeat with `--resume` and a
+larger or no limit to extend: saved decodes are never repeated. A changed
+model, adapter, data, code, plan or setting is refused before loading, as are
+edited, duplicate, foreign or corrupt records; only a torn final line is
+dropped. `probe-summary.json` is written once, after all 7,200 decodes, and is
+never overwritten.
+
+The summary reports, per language: mean greedy and sampled reward, the
+reference-ranked best of eight, its positive headroom over greedy, how many
+greedy errors have a better or a perfect sample, empty/truncated counts and
+plan coverage. For an SFT adapter it also counts plan clips among that run's
+own draws, recomputed from its recorded sampler settings. Best-of-eight uses
+the TRAIN reference: it is an optimistic TRAIN diagnostic, not deployable
+decoding, held-out accuracy or a ceiling for RL.
+
 ## Sharing the serving Mac
 
 The 20 GB Nemotron service must be unloaded for training. The trainer refuses
