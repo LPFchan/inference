@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 import random
 
+import re
+
 import jiwer
 from common import normalize
 
@@ -11,16 +13,44 @@ LANGUAGES=('en','ko','ja','zh')
 CJK=('ko','ja','zh')
 
 
-def read_evaluation(path):
+def read_evaluation(path,glosses=None):
     rows=json.loads(Path(path).read_text())['rows']
     if len({r['id'] for r in rows})!=len(rows):raise ValueError('duplicate evaluation ids')
-    return {r['id']:r for r in rows}
+    rows={r['id']:r for r in rows}
+    if glosses is not None:
+        if set(glosses)!=set(rows):raise ValueError('gloss file covers a different evaluation set')
+        for i,r in rows.items():
+            if glosses[i]['reference']!=r['reference']:raise ValueError('gloss file reference differs')
+            r['glosses']=glosses[i]['glosses']
+    return rows
+
+
+def gloss_spans(reference,glosses):
+    """(start, end) of each normalized gloss in a normalized reference, left to right, not inside a Latin word."""
+    spans,start=[],0
+    for gloss in glosses:
+        found=re.compile(r'(?<![a-z0-9])'+re.escape(gloss)+r'(?![a-z0-9])').search(reference,start) if gloss else None
+        if not found:raise ValueError(f'gloss {gloss!r} is not in the reference {reference!r}')
+        spans.append(found.span());start=found.end()
+    return spans
 
 
 def error_counts(row):
     ref,hyp=normalize(row['reference']),normalize(row['hypothesis'])
-    out=jiwer.process_words(ref,hyp) if row['language'] in ('en','ko') else jiwer.process_characters(ref.replace(' ',''),hyp.replace(' ',''))
-    return out.substitutions+out.deletions+out.insertions,out.hits+out.substitutions+out.deletions
+
+    def counts(reference):
+        reference=' '.join(reference.split())
+        out=jiwer.process_words(reference,hyp) if row['language'] in ('en','ko') else jiwer.process_characters(reference.replace(' ',''),hyp.replace(' ',''))
+        return out.substitutions+out.deletions+out.insertions,out.hits+out.substitutions+out.deletions
+    glosses=row.get('glosses') or []
+    if not glosses:return counts(ref)
+    # Translator glosses are optional reference spans, as in NIST sclite: the fewest errors over
+    # keeping or dropping each one, over the length of the reference without any of them.
+    variants,last=[''],0
+    for start,end in gloss_spans(ref,glosses):
+        variants=[v+ref[last:start]+kept for v in variants for kept in (ref[start:end],'')];last=end
+    variants=[v+ref[last:] for v in variants]
+    return min(counts(v)[0] for v in variants),counts(variants[-1])[1]
 
 
 def rates(rows):
@@ -71,8 +101,10 @@ def assess(candidate,incumbent,anchor,repetitions=400,seed=20261029):
 
 
 def main():
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument('candidate',type=Path);p.add_argument('incumbent',type=Path);p.add_argument('anchor',type=Path);a=p.parse_args()
-    print(json.dumps(assess(*[read_evaluation(v) for v in (a.candidate,a.incumbent,a.anchor)]),indent=2))
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument('candidate',type=Path);p.add_argument('incumbent',type=Path);p.add_argument('anchor',type=Path)
+    p.add_argument('--glosses',type=Path,help='frozen glosses.py file: score translator glosses as optional reference spans');a=p.parse_args()
+    glosses=json.loads(a.glosses.read_text())['rows'] if a.glosses else None
+    print(json.dumps(assess(*[read_evaluation(v,glosses) for v in (a.candidate,a.incumbent,a.anchor)]),indent=2))
 
 
 if __name__=='__main__':main()
