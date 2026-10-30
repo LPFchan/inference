@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Qwen3-ASR decoder LoRA SFT and serialized, audio-conditioned GRPO on MLX."""
 import argparse
+import copy
 import fcntl
 import hashlib
 import json
@@ -23,6 +24,7 @@ import token_weight
 MODEL_ID = "mlx-community/Qwen3-ASR-1.7B-8bit"
 MODEL_REVISION = "a8379a2e2f9e313c9292cdf1af4055ab56d50d55"
 SCHEDULE = ("ko", "ja", "zh") * 3 + ("en",)
+DECODER_LAYERS = 28
 
 
 def grpo_loss(log_probs, old_probs, reference_probs, advantage, beta):
@@ -31,6 +33,17 @@ def grpo_loss(log_probs, old_probs, reference_probs, advantage, beta):
     policy = mx.minimum(ratio * advantage, mx.clip(ratio, 0.8, 1.2) * advantage)
     diff = reference_probs - log_probs
     return (-policy + beta * (mx.exp(diff) - diff - 1)).mean()
+
+
+def loop_spec(value):
+    """START:END:PASSES -> decoder layers START..END-1 run PASSES times in a row."""
+    try:
+        first, last, passes = map(int, value.split(":"))
+    except ValueError:
+        raise argparse.ArgumentTypeError("expected START:END:PASSES") from None
+    if not 0 <= first < last <= DECODER_LAYERS or passes < 2:
+        raise argparse.ArgumentTypeError(f"need 0 <= START < END <= {DECODER_LAYERS} and PASSES >= 2")
+    return first, last, passes
 
 
 def arguments():
@@ -83,6 +96,9 @@ def arguments():
                    help="full snapshot whose TRAIN defines the language means; required by language-mean")
     p.add_argument("--train-nll-probe", type=Path,
                    help="evaluate only: teacher-forced TRAIN NLL of --init-adapter on this frozen per-seed plan")
+    p.add_argument("--loop", type=loop_spec, metavar="START:END:PASSES",
+                   help="run decoder layers START..END-1 PASSES times in a row; repeats share the frozen "
+                        "base weights and get their own LoRA")
     a = p.parse_args()
     if a.stage == "probe" or a.train_nll_probe:
         # The probe's counts, seed, temperature and reward are fixed in sampling_probe;
@@ -291,6 +307,11 @@ def run(a):
         settings = training_settings(a)
         if token_binding:
             settings["sft_token_weight"] = token_binding
+    if a.loop:
+        settings["loop"] = dict(zip(("start", "end", "passes"), a.loop))
+    if init and json.loads((init / "checkpoint.json").read_text())["contract"].get(
+            "settings", {}).get("loop") != settings.get("loop"):
+        raise ValueError("checkpoint/base or adapter geometry mismatch: --loop differs from the adapter's")
     contract = {"settings": settings, "model_files": model_files,
                 "data": {k: data_meta[k] for k in (
                     "train_sha256", "dev_sha256", "protected_manifest_sha256")},
@@ -350,13 +371,24 @@ def run(a):
     outer = load_model(str(a.model))
     model = getattr(outer, "_model", outer)
     model.freeze()
+    if len(model.model.layers) != DECODER_LAYERS:
+        raise ValueError(f"expected {DECODER_LAYERS} decoder layers, got {len(model.model.layers)}")
+    if a.loop:
+        first, last, passes = a.loop
+        layers = model.model.layers
+        # Repeats are new modules over the same frozen base arrays: one copy of the
+        # weights in memory, and a separate LoRA per pass below.
+        shared = {id(value): value for _, value in tree_flatten(model.parameters())}
+        repeats = [copy.deepcopy(layer, dict(shared)) for _ in range(passes - 1) for layer in layers[first:last]]
+        model.model.layers = layers[:last] + repeats + layers[last:]
+        model.config.text_config.num_hidden_layers = len(model.model.layers)  # one KV cache per pass
     modules = []
     for name, layer in model.named_modules():
         if name.startswith("model.layers.") and name.rsplit(".", 1)[-1] in {
                 "q_proj", "k_proj", "v_proj", "o_proj"}:
             modules.append((name, LoRALinear.from_base(layer, r=a.rank, scale=a.scale)))
-    if len(modules) != 112:
-        raise ValueError(f"expected 112 decoder projections, got {len(modules)}")
+    if len(modules) != 4 * len(model.model.layers):
+        raise ValueError(f"expected {4 * len(model.model.layers)} decoder projections, got {len(modules)}")
     model.update_modules(tree_unflatten(modules))
     model.freeze()
     for _, layer in modules:
