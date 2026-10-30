@@ -30,6 +30,7 @@
   | Language-mean SFT, closed | 3.84 | 10.58 | 4.26 | 5.05 | 0.8875 |
   | Looped decoder 32 layers `12:16:2`, closed | 4.24 | 11.09 | 4.66 | 5.02 | 0.9308 |
   | Looped decoder 36 layers `10:18:2`, closed | 4.10 | 11.15 | 4.43 | 5.45 | 0.9374 |
+  | Looped decoder 42 layers `7:21:2`, closed | 4.17 | 11.62 | 4.78 | 5.12 | 0.9605 |
   | 20-second TRAIN extension, closed | 3.96 | 10.44 | 4.34 | 5.18 | 0.8956 |
   | Reference-member GRPO, closed | 4.01 | 10.61 | 4.18 | 5.37 | 0.8988 |
   | SFT-parent cap-eight GRPO, closed | 3.95 | 10.64 | 4.22 | 5.51 | 0.9094 |
@@ -130,7 +131,9 @@
   0.9374: KO/ZH exceed their limits, CI95 [+0.0061,+0.1020], no
   empty/truncated outputs.
   PR37 merges as `0116029` with the operator-authorized 5.5 GB budget;
-  `sft-loop-7-21-2` and `sft-loop-7-21-3` run under 5.5 GB budgets.
+  The 42-layer `sft-loop-7-21-2` closes at 0.9605: KO/JA exceed their
+  limits, CI95 [+0.0143,+0.1232], peak 5.02 GB, no empty/truncated
+  outputs. `sft-loop-7-21-3` runs under a 5.5 GB budget.
   Evidence: `proposals/loop-arm-20261030`.
 - **Closed language-mean SFT:** `sft-8f41bf5402204a8f` completes 944 updates
   and all 1,295 validation clips, score 0.8875 vs incumbent 0.8839. Chinese
