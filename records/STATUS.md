@@ -148,13 +148,23 @@
   CJK and confidence gates fail, CI95 [-0.0333,+0.0777]. The first seed's
   0.8456 does not replicate, and the two-seed mean is within 1% of the
   incumbent, so the recipe closes under any pooling rule.
+- **Closed GRPO on the gloss-free incumbent:** `grpo-gloss-free` (single-draw
+  recipe, parent `sft-gloss-free`, seed 21325231, `code/523783e`, gloss-free
+  data) scores 0.8578 vs its parent's 0.8431; KO WER rises to 10.19%. It fails
+  the DEC-20261030-003 screen (pooled 0.8428), so no second seed or KSS runs.
+  Earlier GRPO gains came mostly from avoiding invented glosses, which the
+  gloss-free targets already remove. No LR/beta/step/temperature/seed variants.
+  Evidence verified on Mac/local/Mangchi.
 - **Closed learning-rate 1e-4 SFT:** `sft-lr-1e-4` reruns the incumbent recipe
   at 1e-4 (`code/a4559db`). Score 0.9783 vs 0.8841; EN improves (3.70%) but ZH
   reaches 3.38%. Gain, CJK and confidence gates fail; delta CI95
   [+0.0055,+0.1838]. Most of the ZH loss is invented bracketed English names,
   which the v005 TRAIN targets teach. Clips with an invented gloss where the
   reference has none: incumbent 7, this trial 7, single-draw GRPO and anchor
-  0. No other learning rates. Evidence verified on Mac/local/Mangchi.
+  0. No other learning rates. On the 1,245 clips where neither model writes
+  bracketed Latin, it still loses on every CJK language (0.8589 vs 0.8073,
+  CI95 [+0.0145,+0.0906]), so it is not rerun on gloss-free data. Evidence
+  verified on Mac/local/Mangchi.
 - **TRAIN sampling diagnostic (complete):** `train-probe-ce33-20261030`
   finishes all 7,200 incumbent decodes (200 TRAIN sentences per language,
   greedy plus eight samples at 0.7), with no empty/truncated outputs. Greedy
