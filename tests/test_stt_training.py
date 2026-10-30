@@ -184,6 +184,32 @@ def test_selection_refuses_changed_evaluation_references():
         assess(candidate, anchor, anchor, repetitions=40)
 
 
+def test_one_seed_lists_match_single_evaluations():
+    from selection import assess
+    anchor, candidate = evaluation_rows(), evaluation_rows(False)
+    single = assess(candidate, anchor, anchor, repetitions=40)
+    assert assess([candidate], [anchor], anchor, repetitions=40) == single
+    assert single["seeds"] == 1
+
+
+def test_two_seeds_pool_errors_per_clip():
+    from selection import assess, error_counts
+    anchor, clean = evaluation_rows(), evaluation_rows(False)
+    result = assess([clean, anchor], [anchor, anchor], anchor, repetitions=40)
+    ko = [error_counts(r) for r in anchor.values() if r["language"] == "ko"]
+    assert result["candidate_errors"]["ko"] == sum(e for e, _ in ko) / (2 * sum(n for _, n in ko))
+    assert result["seeds"] == 2 and result["passes"]
+    with pytest.raises(ValueError, match="same number of seeds"):
+        assess([clean, clean], anchor, anchor, repetitions=40)
+
+
+def test_two_seed_gates_count_empty_outputs_over_both_runs():
+    from selection import assess
+    anchor, clean, empty = evaluation_rows(), evaluation_rows(False), evaluation_rows(False)
+    empty["zh-0"]["hypothesis"] = ""
+    assert not assess([clean, empty], [anchor, anchor], anchor, repetitions=40)["gates"]["empty_output_limit"]
+
+
 def test_aishell_ingestion_excludes_official_dev_and_test():
     from expand_clean import aishell_training_member
     assert aishell_training_member("train/S0002/BAC009S0002W0122.wav")

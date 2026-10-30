@@ -53,10 +53,10 @@ def error_counts(row):
     return min(counts(v)[0] for v in variants),counts(variants[-1])[1]
 
 
-def rates(rows):
+def rates(*runs):
     result={}
     for lang in LANGUAGES:
-        pairs=[error_counts(r) for r in rows.values() if r['language']==lang]
+        pairs=[error_counts(r) for rows in runs for r in rows.values() if r['language']==lang]
         denominator=sum(n for _,n in pairs)
         if not denominator:raise ValueError(f'missing reference denominator: {lang}')
         result[lang]=sum(e for e,_ in pairs)/denominator
@@ -76,18 +76,27 @@ def normalized_score(errors,anchor):
     return sum(errors[l]/anchor[l] for l in CJK)/3
 
 
+def pooled(runs,i):
+    return tuple(map(sum,zip(*(error_counts(rows[i]) for rows in runs))))
+
+
 def assess(candidate,incumbent,anchor,repetitions=400,seed=20261029):
-    aligned(candidate,incumbent,anchor)
-    cr,ir,ar=rates(candidate),rates(incumbent),rates(anchor)
+    """Gate candidate against incumbent. Each side is one evaluation, or the same number of
+    independent seeds of one recipe, whose errors pool per clip before every gate."""
+    cands=[candidate] if isinstance(candidate,dict) else list(candidate)
+    incs=[incumbent] if isinstance(incumbent,dict) else list(incumbent)
+    if len(cands)!=len(incs):raise ValueError('candidate and incumbent need the same number of seeds')
+    aligned(*cands,*incs,anchor)
+    cr,ir,ar=rates(*cands),rates(*incs),rates(anchor)
     cs,ins=normalized_score(cr,ar),normalized_score(ir,ar)
     gates={
         'one_percent_relative_gain':cs<ins*0.99,
         'cjk_regression_limits':all(cr[l]<=min(ir[l],ar[l])*1.02 for l in CJK),
         'english_limit':cr['en']<=min(ir['en'],ar['en'])+0.005,
-        'empty_output_limit':sum(not r['hypothesis'].strip() for r in candidate.values())<=sum(not r['hypothesis'].strip() for r in incumbent.values()),
-        'truncation_limit':sum(not r.get('ended',True) for r in candidate.values())<=sum(not r.get('ended',True) for r in incumbent.values())}
+        'empty_output_limit':sum(not r['hypothesis'].strip() for c in cands for r in c.values())<=sum(not r['hypothesis'].strip() for c in incs for r in c.values()),
+        'truncation_limit':sum(not r.get('ended',True) for c in cands for r in c.values())<=sum(not r.get('ended',True) for c in incs for r in c.values())}
     rng=random.Random(seed);deltas=[]
-    counts={l:[(error_counts(candidate[i]),error_counts(incumbent[i])) for i in sorted(candidate) if candidate[i]['language']==l] for l in CJK}
+    counts={l:[(pooled(cands,i),pooled(incs,i)) for i in sorted(anchor) if anchor[i]['language']==l] for l in CJK}
     for _ in range(repetitions):
         delta=0
         for l,pairs in counts.items():
@@ -97,14 +106,19 @@ def assess(candidate,incumbent,anchor,repetitions=400,seed=20261029):
     deltas.sort();lower=deltas[int(0.025*len(deltas))];upper=deltas[min(len(deltas)-1,int(0.975*len(deltas)))];gates['paired_ci_below_zero']=upper<0
     return {'passes':all(gates.values()),'gates':gates,'candidate_score':cs,'incumbent_score':ins,
             'candidate_errors':cr,'incumbent_errors':ir,'anchor_errors':ar,'paired_delta_ci95':[lower,upper],
-            'clips':{l:sum(r['language']==l for r in candidate.values()) for l in LANGUAGES}}
+            'clips':{l:sum(r['language']==l for r in anchor.values()) for l in LANGUAGES},'seeds':len(cands)}
 
 
 def main():
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('candidate',type=Path);p.add_argument('incumbent',type=Path);p.add_argument('anchor',type=Path)
-    p.add_argument('--glosses',type=Path,help='frozen glosses.py file: score translator glosses as optional reference spans');a=p.parse_args()
+    p.add_argument('--glosses',type=Path,help='frozen glosses.py file: score translator glosses as optional reference spans')
+    p.add_argument('--second-seeds',type=Path,nargs=2,metavar=('CANDIDATE','INCUMBENT'),
+                   help='second-seed evaluations of both recipes: pool each recipe\'s two seeds per clip');a=p.parse_args()
     glosses=json.loads(a.glosses.read_text())['rows'] if a.glosses else None
-    print(json.dumps(assess(*[read_evaluation(v,glosses) for v in (a.candidate,a.incumbent,a.anchor)]),indent=2))
+    read=lambda v:read_evaluation(v,glosses)
+    candidate,incumbent=read(a.candidate),read(a.incumbent)
+    if a.second_seeds:candidate,incumbent=[candidate,read(a.second_seeds[0])],[incumbent,read(a.second_seeds[1])]
+    print(json.dumps(assess(candidate,incumbent,read(a.anchor)),indent=2))
 
 
 if __name__=='__main__':main()
