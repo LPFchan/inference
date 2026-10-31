@@ -16,7 +16,7 @@ import time
 from pathlib import Path
 import wave
 
-from common import (LANGUAGES, advantages, atomic_json, decayed_learning_rate, grpo_row, informative,
+from common import (LANGUAGES, advantages, atomic_json, band_limit, decayed_learning_rate, grpo_row, informative,
                     load_manifests, read_jsonl, reward, recover_uncommitted_updates, sentence_epoch_draw,
                     sentence_epoch_order, sha256, summarize, training_targets, validate_splits)
 import sampling_probe
@@ -88,6 +88,8 @@ def arguments():
     p.add_argument("--external", type=Path,
                    help="frozen external probe manifest to transcribe instead of development")
     p.add_argument("--memory-gb", type=float, default=18.0)
+    p.add_argument("--audio-rate", type=int, choices=(16000, 8000), default=16000,
+                   help="evaluate only: band-limit every clip to this rate, then back to 16 kHz, before the model hears it")
     p.add_argument("--seed", type=int, default=20261029)
     p.add_argument("--probe-limit", type=int,
                    help="probe only: stop after this many plan clips per language; --resume extends")
@@ -142,6 +144,8 @@ def arguments():
         p.error("--base-reference is only valid for GRPO")
     if a.sampler != "replacement" and a.stage != "sft":
         p.error("--sampler sentence-epoch is only valid for SFT")
+    if a.audio_rate != 16000 and a.stage != "evaluate":
+        p.error("--audio-rate is only valid for evaluate")
     if a.external and a.stage != "evaluate":
         p.error("--external is only valid for evaluate")
     if a.stage == "grpo" and not (a.init_adapter or a.base_reference):
@@ -314,6 +318,8 @@ def run(a):
         settings["loop"] = dict(zip(("start", "end", "passes"), a.loop))
     if a.mlp:
         settings["mlp"] = True
+    if a.audio_rate != 16000:
+        settings["audio_rate"] = a.audio_rate
     if init:
         adapter_settings = json.loads((init / "checkpoint.json").read_text())["contract"].get("settings", {})
         for key in ("loop", "mlp"):
@@ -453,7 +459,11 @@ def run(a):
             token_binding, eos), published=start > 0)
 
     def context(row):
-        features, mask, count = model._preprocess_audio(str(a.data / row["audio"]))
+        audio = str(a.data / row["audio"])
+        if a.audio_rate != 16000:
+            from mlx_audio.stt.utils import load_audio
+            audio = band_limit(load_audio(audio), a.audio_rate)
+        features, mask, count = model._preprocess_audio(audio)
         audio = mx.stop_gradient(model.get_audio_features(features, mask))
         prompt = model._build_prompt(count, language=LANGUAGES[row["language"]])
         prompt_ids = prompt[0].tolist()
