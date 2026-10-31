@@ -218,6 +218,8 @@ def test_selection_makes_korean_spacing_optional():
     assert error_counts(ko(reference, "슈퍼대회전 에서 13위로")) == (0, 3)
     assert error_counts(ko(reference, "슈퍼 대회전에서 14위로")) == (1, 3)
     assert error_counts(ko(reference, "슈퍼 대회전에서 아주 13위로")) == (1, 3)
+    assert error_counts(ko(reference, "슈퍼 전에서 13위로")) == (1, 3)
+    assert error_counts(ko("정말 좋은 하루", "정말 은 하루")) == (1, 3)
     assert error_counts(ko(reference, "")) == (3, 3)
     assert error_counts(ko("슈퍼 대회전super g에서", "슈퍼대회전에서", ["super g"])) == (0, 2)
     english = {"language": "en", "reference": "some english words", "hypothesis": "someenglish words"}
