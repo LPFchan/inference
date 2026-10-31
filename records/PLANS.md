@@ -12,10 +12,11 @@ and [the four-slot contract](../skills/autoresearch/SKILL.md).
 - Score with optional translator glosses ([DEC-20261030-002](decisions/DEC-20261030-002-qwen-asr-optional-gloss-scoring.md))
   and Korean space-normalized WER ([DEC-20261031-001](decisions/DEC-20261031-001-qwen-asr-korean-space-normalized-wer.md)).
   Adopt recipes by two-seed comparison ([DEC-20261030-003](decisions/DEC-20261030-003-qwen-asr-two-seed-recipe-adoption.md)).
-- Diagnose the plateau before more recipe work (operator, 2026-10-31): the
-  three `why-*` branches in STATUS. Cap-eight GRPO `grpo-ae448ecc75d8e01f`
-  earned a second seed under sWER (0.8345); run it if the noise branch shows
-  two-seed comparisons can resolve it.
+- The plateau is diagnosed ([RSH-20261031-001](research/RSH-20261031-001-qwen-asr-plateau-diagnosis.md)):
+  admit only changes with a plausible effect of 6% or more, not recipe or
+  capacity tweaks. Cap-eight GRPO `grpo-ae448ecc75d8e01f` earned a second
+  seed under sWER, but its 1.3% lead is inside seed noise and its sibling
+  recipe already failed from the same parent seed, so it is not run.
 - Preserve rejected snapshots. Rebuild Common Voice with the merged literal-
   quote parser; admit YODAS only after audio-language/transcript alignment checks.
   AliMeeting stays parked: its meeting-speech conventions differ from v005,

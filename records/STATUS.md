@@ -15,31 +15,14 @@
   old pair's 0.9098, CI95 [-0.1218,-0.0111], and both seeds pass KSS. No
   trained model is deployed; Nemotron stays unloaded. Original MLX 8-bit
   remains the fixed normalization anchor.
-- **Live:** `grpo-gloss-free-confirm` (slot 2 since 15:42 KST). Operator's
-  plateau question, fresh-agent branch `why-seen-train` (base model on TRAIN
-  vs DEV clips).
-- **Plateau, seed noise (yes by its rule):** `why-seed-noise` adds seed
-  21776175 of the incumbent recipe (`parallel/why-seed-noise-s21776175`,
-  0.8562, KO 5.21% vs the anchor's 5.15%); the second new seed was skipped by
-  its preregistered start cutoff. Single-seed score SD pools to 0.029 over four
-  recipes (df 5), 0.012 for the incumbent recipe's three seeds. Two of six
-  same-recipe pairs pass every single-seed gate against themselves. Simulated
-  DEC-20261030-003 power: about 8% true gain for 80% adoption (6% with
-  incumbent-recipe noise only), and 8–12% false adoption at no gain;
-  sentence-cluster CIs agree. MLP LoRA and GRPO on gloss-free sit inside the
-  no-effect band; only the gloss fix (about 7%) has cleared it since. Evidence
-  verified on Mac/local/Mangchi: `proposals/why-seed-noise-20261031`.
-- **Plateau, shared error floor (mixed):** `why-sentence-bound` (CPU, sWER, 20
-  trained runs scoring below 0.95). Of `sft-gloss-free-confirm`'s errors,
-  every other run also makes EN/KO/JA/ZH 74/63/54/69%, and 85/78/76/79% were
-  already the base model's. Recipes reach only the remaining 31–46% of CJK
-  errors, and each run fixes a different part, so recent losses fit churn.
-  Korean shared errors are text-set: number style 22%, names about 30%, and
-  reference oddities about 24% (hanja/Latin notes, misspellings such as 아랫쪽).
-  Chinese shared errors are ordinary single-character mistakes in words TRAIN
-  contains, so the text-set claim fails there; Japanese is borderline (52% by
-  hand). One rater, unblinded. Evidence verified on Mac/local/Mangchi:
-  `proposals/why-sentence-bound-20261031`.
+- **Live:** `grpo-gloss-free-confirm` (slot 2 since 15:42 KST).
+- **Plateau diagnosis** ([RSH-20261031-001](research/RSH-20261031-001-qwen-asr-plateau-diagnosis.md)):
+  the two-seed screen resolves only gains of about 6–8% (seed SD 0.029
+  pooled, 0.012 for the incumbent recipe), so post-gloss losses are ties. 54–74%
+  of remaining errors are shared by every trained run, and about 80% were
+  already the base model's. No sign of memorized FLEURS TRAIN in KO/JA/ZH.
+  New seed `parallel/why-seed-noise-s21776175` scores 0.8562. Evidence
+  verified on Mac/local/Mangchi under `proposals/why-*-20261031`.
 - [Confirmed findings](research/RSH-20261030-001-confirmed-qwen-asr-one-pass-sft.md).
   Selection authority: [DEC-001](decisions/DEC-20261029-001-qwen-asr-autoresearch.md),
   [DEC-002](decisions/DEC-20261029-002-four-slot-qwen-asr-autoresearch.md),
