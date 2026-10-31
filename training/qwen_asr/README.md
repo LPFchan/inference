@@ -359,6 +359,12 @@ run refuses a checkpoint trained on other data.
 
 Add `--init-adapter CHECKPOINT` to evaluate a checkpoint.
 
+`evaluate --audio-rate 8000` makes each clip sound like phone audio before
+the model hears it. Every clip is downsampled to 8 kHz with an anti-aliasing
+filter, then upsampled back to 16 kHz. This works on development and on any
+`--external` probe, and the rate is recorded in the run contract. Other
+stages refuse the flag.
+
 Before loading the model it checks the manifest against `probe.json`'s
 `probe_sha256`, and each WAV's hash, 16 kHz mono PCM16 format and declared
 duration. It also rejects any shared clip, text or speaker with `--data` and

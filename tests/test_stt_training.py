@@ -130,6 +130,29 @@ def test_invalid_advantage_scale_is_rejected(monkeypatch, stage, value):
     assert error.value.code == 2
 
 
+@pytest.mark.parametrize("stage", ["sft", "grpo"])
+def test_audio_rate_is_evaluate_only(monkeypatch, stage):
+    extra = ["--base-reference"] if stage == "grpo" else []
+    with pytest.raises(SystemExit) as error:
+        parse_training_args(monkeypatch, stage, [*extra, "--audio-rate", "8000"])
+    assert error.value.code == 2
+    _, args = parse_training_args(monkeypatch, "evaluate", ["--audio-rate", "8000"])
+    assert args.audio_rate == 8000
+
+
+def test_band_limit_keeps_the_telephone_band_and_removes_the_rest():
+    np = pytest.importorskip("numpy")
+    pytest.importorskip("scipy")
+    from common import band_limit
+    t = np.arange(16000) / 16000
+    speech, hiss = np.sin(2 * np.pi * 1000 * t), np.sin(2 * np.pi * 6000 * t)
+    out = band_limit(speech + hiss, 8000)
+    assert out.shape == t.shape and out.dtype == np.float32
+    middle = slice(1000, -1000)
+    assert np.abs(out[middle] - speech[middle]).max() < 0.05
+    assert np.allclose(band_limit(speech, 16000), speech, atol=1e-6)
+
+
 def test_grpo_gradient_increases_rewarded_token_probability():
     mx = pytest.importorskip("mlx.core")
     spec = importlib.util.spec_from_file_location("qwen_train", DIRECTORY / "train.py")

@@ -130,6 +130,16 @@ def reward(reference, hypothesis, language, korean_wer_weight=0.0):
     return max(-1.0, 1.0 - error)
 
 
+def band_limit(audio, rate):
+    """16 kHz audio as heard through a `rate` Hz channel: anti-aliased down to `rate`, then back up."""
+    import numpy as np
+    from scipy.signal import resample_poly
+    x = np.asarray(audio, dtype=np.float32)
+    g = math.gcd(16000, rate)
+    y = resample_poly(resample_poly(x, rate // g, 16000 // g), 16000 // g, rate // g)
+    return np.pad(y, (0, max(0, len(x) - len(y))))[:len(x)].astype(np.float32)
+
+
 def advantages(rewards, scale=None):
     """Group-centered rewards over the group std, or over a fixed positive scale if given."""
     mean = sum(rewards) / len(rewards)
