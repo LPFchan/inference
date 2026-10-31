@@ -16,10 +16,20 @@
   trained model is deployed; Nemotron stays unloaded. Original MLX 8-bit
   remains the fixed normalization anchor.
 - **Live:** `grpo-gloss-free-confirm` (slot 2 since 15:42 KST). Operator's
-  plateau question, three fresh-agent branches: `why-seed-noise` (two more
-  seeds of the incumbent recipe, screen power), `why-sentence-bound` (CPU:
-  errors shared by every run and speaker) and `why-seen-train` (base model on
-  TRAIN vs DEV clips).
+  plateau question, two fresh-agent branches: `why-seed-noise` (two more
+  seeds of the incumbent recipe, screen power) and `why-seen-train` (base model
+  on TRAIN vs DEV clips).
+- **Plateau, shared error floor (mixed):** `why-sentence-bound` (CPU, sWER, 20
+  trained runs scoring below 0.95). Of `sft-gloss-free-confirm`'s errors,
+  every other run also makes EN/KO/JA/ZH 74/63/54/69%, and 85/78/76/79% were
+  already the base model's. Recipes reach only the remaining 31–46% of CJK
+  errors, and each run fixes a different part, so recent losses fit churn.
+  Korean shared errors are text-set: number style 22%, names about 30%, and
+  reference oddities about 24% (hanja/Latin notes, misspellings such as 아랫쪽).
+  Chinese shared errors are ordinary single-character mistakes in words TRAIN
+  contains, so the text-set claim fails there; Japanese is borderline (52% by
+  hand). One rater, unblinded. Evidence verified on Mac/local/Mangchi:
+  `proposals/why-sentence-bound-20261031`.
 - [Confirmed findings](research/RSH-20261030-001-confirmed-qwen-asr-one-pass-sft.md).
   Selection authority: [DEC-001](decisions/DEC-20261029-001-qwen-asr-autoresearch.md),
   [DEC-002](decisions/DEC-20261029-002-four-slot-qwen-asr-autoresearch.md),
