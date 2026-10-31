@@ -28,8 +28,11 @@
   incumbent is worse than base: verbatim sWER 24.3% vs 21.4%, CI95 of the
   change [+10.3%, +17.6%]. Most of the gap is dropped discourse words (style);
   calls stay +9% worse even with those words optional. Calls are the weakest
-  area at base sWER 24.4%. Evidence verified on Mac/local/Mangchi under
-  `proposals/real-use-ko-20261101` and `parallel/realuse-ko-v001-*`.
+  area at base sWER 24.4%. Under the clean rule ([DEC-20261101-001](decisions/DEC-20261101-001-qwen-asr-clean-transcripts-and-8khz.md)),
+  base vs incumbent is: call 24.3% vs 26.8% (CI95 [+5.6%, +14.8%]),
+  broadcast 20.2% vs 20.2%, meeting 19.0% vs 19.6%. Evidence verified on
+  Mac/local/Mangchi under `proposals/real-use-ko-20261101` and
+  `parallel/realuse-ko-v001-*`.
 - [Confirmed findings](research/RSH-20261030-001-confirmed-qwen-asr-one-pass-sft.md).
   Selection authority: [DEC-001](decisions/DEC-20261029-001-qwen-asr-autoresearch.md),
   [DEC-002](decisions/DEC-20261029-002-four-slot-qwen-asr-autoresearch.md),
