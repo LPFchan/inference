@@ -9,8 +9,13 @@ and [the four-slot contract](../skills/autoresearch/SKILL.md).
 - Fill free slots with fresh TRAIN-grounded SFT and RL proposals. Preserve
   sealed evaluation inputs, current incumbent capture and source/data hashes;
   no parameter sweeps selected from validation errors.
-- Score with optional translator glosses ([DEC-20261030-002](decisions/DEC-20261030-002-qwen-asr-optional-gloss-scoring.md)).
+- Score with optional translator glosses ([DEC-20261030-002](decisions/DEC-20261030-002-qwen-asr-optional-gloss-scoring.md))
+  and Korean space-normalized WER ([DEC-20261031-001](decisions/DEC-20261031-001-qwen-asr-korean-space-normalized-wer.md)).
   Adopt recipes by two-seed comparison ([DEC-20261030-003](decisions/DEC-20261030-003-qwen-asr-two-seed-recipe-adoption.md)).
+- Diagnose the plateau before more recipe work (operator, 2026-10-31): the
+  three `why-*` branches in STATUS. Cap-eight GRPO `grpo-ae448ecc75d8e01f`
+  earned a second seed under sWER (0.8345); run it if the noise branch shows
+  two-seed comparisons can resolve it.
 - Preserve rejected snapshots. Rebuild Common Voice with the merged literal-
   quote parser; admit YODAS only after audio-language/transcript alignment checks.
   AliMeeting stays parked: its meeting-speech conventions differ from v005,

@@ -6,49 +6,61 @@
 
 ## Autoresearch — Qwen3-ASR
 
-- **Training incumbent:** gloss-free TRAIN SFT
-  `sft-gloss-free-confirm/step-000944`, adapter `f025ecba…c568`, adopted
-  2026-10-30 22:13 KST by two-seed recipe comparison
-  ([DEC-20261030-003](decisions/DEC-20261030-003-qwen-asr-two-seed-recipe-adoption.md)).
-  Its pair `sft-gloss-free`/`sft-gloss-free-confirm` pools to 0.8428 vs the old
-  pair's 0.9073, CI95 [-0.1221,-0.0172], and both seeds pass KSS. The
-  lower-score seed is the checkpoint. No trained model is deployed; Nemotron
-  stays unloaded. Original MLX 8-bit remains the fixed normalization anchor.
+- **Training incumbent:** gloss-free TRAIN SFT `sft-gloss-free/step-000944`,
+  adapter `1a1baedd…9d99`. Its recipe was adopted 2026-10-30 22:13 KST by
+  two-seed comparison ([DEC-20261030-003](decisions/DEC-20261030-003-qwen-asr-two-seed-recipe-adoption.md)),
+  and the checkpoint was re-picked 2026-10-31 16:00 KST as the lower-score
+  seed under Korean sWER ([DEC-20261031-001](decisions/DEC-20261031-001-qwen-asr-korean-space-normalized-wer.md)).
+  The pair `sft-gloss-free`/`sft-gloss-free-confirm` pools to 0.8458 vs the
+  old pair's 0.9098, CI95 [-0.1218,-0.0111], and both seeds pass KSS. No
+  trained model is deployed; Nemotron stays unloaded. Original MLX 8-bit
+  remains the fixed normalization anchor.
+- **Live:** `grpo-gloss-free-confirm` (slot 2 since 15:42 KST). Operator's
+  plateau question, three fresh-agent branches: `why-seed-noise` (two more
+  seeds of the incumbent recipe, screen power), `why-sentence-bound` (CPU:
+  errors shared by every run and speaker) and `why-seen-train` (base model on
+  TRAIN vs DEV clips).
 - [Confirmed findings](research/RSH-20261030-001-confirmed-qwen-asr-one-pass-sft.md).
   Selection authority: [DEC-001](decisions/DEC-20261029-001-qwen-asr-autoresearch.md),
   [DEC-002](decisions/DEC-20261029-002-four-slot-qwen-asr-autoresearch.md),
-  [DEC-20261030-003](decisions/DEC-20261030-003-qwen-asr-two-seed-recipe-adoption.md)
+  [DEC-20261030-003](decisions/DEC-20261030-003-qwen-asr-two-seed-recipe-adoption.md),
+  [DEC-20261031-001](decisions/DEC-20261031-001-qwen-asr-korean-space-normalized-wer.md)
   and [four-slot contract](../skills/autoresearch/SKILL.md).
   Frozen primary set: 1,295 validation clips (EN 394,KO 226,JA 266,ZH 409),
   manifest `c75a4b05069eba7d11a6b50efd7bb11d43800fc66e49b761cd08fb86354acf01`.
   Original 2,624-clip test, nine published predictions and artifacts stay sealed.
-- Full validation primary errors, percent (WER EN/KO; CER JA/ZH), with
-  translator glosses optional ([DEC-20261030-002](decisions/DEC-20261030-002-qwen-asr-optional-gloss-scoring.md)).
+- Full validation primary errors, percent (WER EN, space-normalized WER KO,
+  CER JA/ZH), with translator glosses optional ([DEC-20261030-002](decisions/DEC-20261030-002-qwen-asr-optional-gloss-scoring.md))
+  and Korean spacing optional (`calibration/korean-swer-rescore.json`).
   Scores use the original anchor; passing its screen alone cannot replace the
   incumbent. Trial bullets below keep the raw-reference scores recorded at
   closure.
 
   | Trial | EN | KO | JA | ZH | CJK score |
   | --- | ---: | ---: | ---: | ---: | ---: |
-  | Original 8-bit anchor | 4.25 | 10.25 | 4.63 | 3.36 | 1.0000 |
-  | Gloss-free TRAIN SFT, seed 21775174, incumbent | 4.06 | 9.59 | 4.47 | 2.10 | 0.8426 |
-  | Gloss-free TRAIN SFT, seed 21774173 | 3.90 | 9.89 | 4.24 | 2.18 | 0.8431 |
-  | One-pass SFT, seed 21774173, previous incumbent | 3.99 | 9.92 | 4.30 | 2.54 | 0.8841 |
-  | One-pass SFT, seed 21775174 | 4.06 | 9.89 | 4.54 | 2.84 | 0.9306 |
-  | Late-decay SFT, closed | 4.01 | 9.80 | 4.54 | 2.74 | 0.9173 |
-  | Language-mean SFT, closed | 3.84 | 9.92 | 4.27 | 2.57 | 0.8853 |
-  | Looped decoder 32 layers `12:16:2`, closed | 4.24 | 10.43 | 4.68 | 2.36 | 0.9102 |
-  | Looped decoder 36 layers `10:18:2`, closed | 4.10 | 10.49 | 4.44 | 2.45 | 0.9043 |
-  | Looped decoder 42 layers `7:21:2`, closed | 4.17 | 11.00 | 4.79 | 2.91 | 0.9914 |
-  | Looped decoder 56 layers `7:21:3`, closed | 4.43 | 11.44 | 5.38 | 3.31 | 1.0872 |
-  | 20-second TRAIN extension, closed | 3.96 | 9.77 | 4.36 | 2.45 | 0.8741 |
-  | Reference-member GRPO, closed | 4.01 | 9.95 | 4.19 | 2.37 | 0.8605 |
-  | SFT-parent cap-eight GRPO, closed | 3.95 | 9.98 | 4.23 | 2.22 | 0.8489 |
-  | SFT-parent single-draw GRPO, first seed | 3.99 | 9.83 | 4.26 | 2.21 | 0.8456 |
-  | Uniform two-seed SFT average, closed | 3.89 | 10.01 | 4.50 | 2.56 | 0.9032 |
-  | Base-init GRPO `bc8f2d8f6f19a369`, first seed | 4.15 | 9.77 | 4.65 | 2.37 | 0.8873 |
-  | Base-init GRPO confirmation, closed | 4.25 | 9.51 | 4.64 | 2.30 | 0.8710 |
-  | Fixed-scale GRPO `c3b0b430fab2ba0c`, closed | 4.21 | 10.10 | 4.53 | 2.38 | 0.8909 |
+  | Original 8-bit anchor | 4.25 | 5.15 | 4.63 | 3.36 | 1.0000 |
+  | Gloss-free TRAIN SFT, seed 21774173, incumbent | 3.90 | 4.86 | 4.24 | 2.18 | 0.8354 |
+  | Gloss-free TRAIN SFT, seed 21775174 | 4.06 | 5.04 | 4.47 | 2.10 | 0.8562 |
+  | One-pass SFT, seed 21774173, previous incumbent | 3.99 | 4.98 | 4.30 | 2.54 | 0.8832 |
+  | One-pass SFT, seed 21775174 | 4.06 | 5.07 | 4.54 | 2.84 | 0.9364 |
+  | Late-decay SFT, closed | 4.01 | 4.83 | 4.54 | 2.74 | 0.9107 |
+  | Language-mean SFT, closed | 3.84 | 4.98 | 4.27 | 2.57 | 0.8844 |
+  | Looped decoder 32 layers `12:16:2`, closed | 4.24 | 5.21 | 4.68 | 2.36 | 0.9082 |
+  | Looped decoder 36 layers `10:18:2`, closed | 4.10 | 5.01 | 4.44 | 2.45 | 0.8869 |
+  | Looped decoder 42 layers `7:21:2`, closed | 4.17 | 5.21 | 4.79 | 2.91 | 0.9710 |
+  | Looped decoder 56 layers `7:21:3`, closed | 4.43 | 5.90 | 5.38 | 3.31 | 1.0966 |
+  | 20-second TRAIN extension, closed | 3.96 | 5.21 | 4.36 | 2.45 | 0.8935 |
+  | Learning-rate 1e-4 SFT, closed | 3.70 | 5.24 | 4.43 | 3.38 | 0.9938 |
+  | Decoder MLP LoRA, closed | 3.78 | 4.83 | 4.18 | 2.36 | 0.8470 |
+  | Reference-member GRPO, closed | 4.01 | 4.89 | 4.19 | 2.37 | 0.8528 |
+  | SFT-parent cap-eight GRPO, first seed | 3.95 | 4.80 | 4.23 | 2.22 | 0.8345 |
+  | SFT-parent single-draw GRPO, first seed | 3.99 | 4.83 | 4.26 | 2.21 | 0.8380 |
+  | SFT-parent single-draw GRPO, second seed, closed | 4.04 | 5.13 | 4.57 | 2.51 | 0.9092 |
+  | GRPO on gloss-free SFT, first seed | 3.94 | 4.86 | 4.31 | 2.18 | 0.8405 |
+  | Uniform two-seed SFT average, closed | 3.89 | 5.01 | 4.50 | 2.56 | 0.9013 |
+  | Base-init GRPO `bc8f2d8f6f19a369`, first seed | 4.15 | 4.77 | 4.65 | 2.37 | 0.8778 |
+  | Base-init GRPO confirmation, closed | 4.25 | 4.68 | 4.64 | 2.30 | 0.8644 |
+  | Fixed-scale GRPO `c3b0b430fab2ba0c`, closed | 4.21 | 4.80 | 4.53 | 2.38 | 0.8726 |
 
 - SFT score-delta CI95 vs original anchor: first[-0.1740,-0.0511],
   confirmation[-0.1370,-0.0348]. Every gate passes; all outputs end and none
@@ -126,6 +138,15 @@
   trial against the incumbent; the confirmation seed's CI95 against the anchor,
   [-0.149,+0.019], now crosses zero. Seed spread is 0.047. Evidence verified on
   Mac/local/Mangchi.
+- **Korean space-normalized WER** ([DEC-20261031-001](decisions/DEC-20261031-001-qwen-asr-korean-space-normalized-wer.md)):
+  `selection.py`, frozen `code/d0626bb` (PR41), scores Korean by KsponSpeech
+  sWER, so spacing alone never counts. Anchor KO falls from 10.25% to 5.15%;
+  the incumbent seeds' 9.89/9.59% become 4.86/5.04%, so nearly all of the
+  Korean gain was FLEURS spacing habit. The gloss-free pair still passes every
+  gate against the old pair. Evidence: `calibration/korean-swer-rescore.json`,
+  `proposals/korean-swer-20261031`; `parallel-trials.json` before the
+  checkpoint re-pick is `parallel-trials.before-korean-swer.json`. Evidence
+  verified on Mac/local/Mangchi.
 - **Adopted gloss-free TRAIN SFT** (`proposals/gloss-free-train-20261030`,
   `two-seed-evidence.json`, `recipe-selection.json`): the incumbent recipe on v005 with translator
   glosses removed from TRAIN targets (ZH 286, KO 91, JA 25 rows; manifest
@@ -147,7 +168,8 @@
   (parent `sft-a11b015fbeee0082`, seed 21326232) scores 0.9101 vs 0.8841; gain,
   CJK and confidence gates fail, CI95 [-0.0333,+0.0777]. The first seed's
   0.8456 does not replicate, and the two-seed mean is within 1% of the
-  incumbent, so the recipe closes under any pooling rule.
+  incumbent, so the recipe closes under any pooling rule. Under sWER the pair
+  pools to 0.8736 vs the incumbent pair's 0.8458.
 - **Closed decoder MLP LoRA:** `sft-gloss-free-mlp` reruns the gloss-free
   recipe with `--mlp` (LoRA also on MLP gate/up/down, 17.4M trainable weights;
   PR40, frozen `code/0275adf`, train.py identical to merged `55bcab9`) under the
@@ -155,15 +177,16 @@
   4.99 GB; the full run peaks at 5.14 GB, normal pressure. Seed 21774173 scores
   0.8517 vs same-seed 0.8431: EN/KO/JA improve (3.78/9.74/4.18%), ZH worsens
   (2.36%) across scattered number-format and name clips. It fails the
-  DEC-20261030-003 screen (pooled 0.8428), so no second seed or KSS. No
+  DEC-20261030-003 screen (pooled 0.8428), so no second seed or KSS. Under
+  sWER it scores 0.8470, still above the pooled 0.8458. No
   rank/target/LR/budget variants. Evidence verified on Mac/local/Mangchi.
-- **Closed GRPO on the gloss-free incumbent:** `grpo-gloss-free` (single-draw
-  recipe, parent `sft-gloss-free`, seed 21325231, `code/523783e`, gloss-free
-  data) scores 0.8578 vs its parent's 0.8431; KO WER rises to 10.19%. It fails
-  the DEC-20261030-003 screen (pooled 0.8428), so no second seed or KSS runs.
-  Earlier GRPO gains came mostly from avoiding invented glosses, which the
-  gloss-free targets already remove. No LR/beta/step/temperature/seed variants.
-  Evidence verified on Mac/local/Mangchi.
+- **GRPO on the gloss-free incumbent, second seed live:** `grpo-gloss-free`
+  (single-draw recipe, parent `sft-gloss-free`, seed 21325231, `code/523783e`,
+  gloss-free data) scored 0.8578 vs its parent's 0.8431 under word-scored
+  Korean (KO WER 10.19%) and failed the screen. Under sWER it scores 0.8405,
+  below the pooled 0.8458, so the preregistered second seed
+  `grpo-gloss-free-confirm` (seed 21326232, parent `sft-gloss-free-confirm`)
+  runs. No LR/beta/step/temperature variants.
 - **Closed learning-rate 1e-4 SFT:** `sft-lr-1e-4` reruns the incumbent recipe
   at 1e-4 (`code/a4559db`). Score 0.9783 vs 0.8841; EN improves (3.70%) but ZH
   reaches 3.38%. Gain, CJK and confidence gates fail; delta CI95
