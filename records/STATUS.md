@@ -16,9 +16,19 @@
   trained model is deployed; Nemotron stays unloaded. Original MLX 8-bit
   remains the fixed normalization anchor.
 - **Live:** `grpo-gloss-free-confirm` (slot 2 since 15:42 KST). Operator's
-  plateau question, two fresh-agent branches: `why-seed-noise` (two more
-  seeds of the incumbent recipe, screen power) and `why-seen-train` (base model
-  on TRAIN vs DEV clips).
+  plateau question, fresh-agent branch `why-seen-train` (base model on TRAIN
+  vs DEV clips).
+- **Plateau, seed noise (yes by its rule):** `why-seed-noise` adds seed
+  21776175 of the incumbent recipe (`parallel/why-seed-noise-s21776175`,
+  0.8562, KO 5.21% vs the anchor's 5.15%); the second new seed was skipped by
+  its preregistered start cutoff. Single-seed score SD pools to 0.029 over four
+  recipes (df 5), 0.012 for the incumbent recipe's three seeds. Two of six
+  same-recipe pairs pass every single-seed gate against themselves. Simulated
+  DEC-20261030-003 power: about 8% true gain for 80% adoption (6% with
+  incumbent-recipe noise only), and 8–12% false adoption at no gain;
+  sentence-cluster CIs agree. MLP LoRA and GRPO on gloss-free sit inside the
+  no-effect band; only the gloss fix (about 7%) has cleared it since. Evidence
+  verified on Mac/local/Mangchi: `proposals/why-seed-noise-20261031`.
 - **Plateau, shared error floor (mixed):** `why-sentence-bound` (CPU, sWER, 20
   trained runs scoring below 0.95). Of `sft-gloss-free-confirm`'s errors,
   every other run also makes EN/KO/JA/ZH 74/63/54/69%, and 85/78/76/79% were
