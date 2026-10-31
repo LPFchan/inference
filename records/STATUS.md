@@ -23,6 +23,13 @@
   already the base model's. No sign of memorized FLEURS TRAIN in KO/JA/ZH.
   New seed `parallel/why-seed-noise-s21776175` scores 0.8562. Evidence
   verified on Mac/local/Mangchi under `proposals/why-*-20261031`.
+- **Korean real-use probe** ([RSH-20261101-001](research/RSH-20261101-001-qwen-asr-korean-real-use-probe.md)):
+  1,200 AIHub validation clips (call, broadcast, meeting; 400 each). The
+  incumbent is worse than base: verbatim sWER 24.3% vs 21.4%, CI95 of the
+  change [+10.3%, +17.6%]. Most of the gap is dropped discourse words (style);
+  calls stay +9% worse even with those words optional. Calls are the weakest
+  area at base sWER 24.4%. Evidence verified on Mac/local/Mangchi under
+  `proposals/real-use-ko-20261101` and `parallel/realuse-ko-v001-*`.
 - [Confirmed findings](research/RSH-20261030-001-confirmed-qwen-asr-one-pass-sft.md).
   Selection authority: [DEC-001](decisions/DEC-20261029-001-qwen-asr-autoresearch.md),
   [DEC-002](decisions/DEC-20261029-002-four-slot-qwen-asr-autoresearch.md),

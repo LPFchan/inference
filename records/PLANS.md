@@ -17,6 +17,10 @@ and [the four-slot contract](../skills/autoresearch/SKILL.md).
   capacity tweaks. Cap-eight GRPO `grpo-ae448ecc75d8e01f` earned a second
   seed under sWER, but its 1.3% lead is inside seed noise and its sibling
   recipe already failed from the same parent seed, so it is not run.
+- FLEURS gains do not transfer to Korean real-use speech ([RSH-20261101-001](research/RSH-20261101-001-qwen-asr-korean-real-use-probe.md)).
+  Next: train for the weakest area, phone calls, on AIHub 571 TRAIN and
+  select on the real-use probe. This waits on the operator's verbatim-vs-clean
+  transcript choice, and still needs JA/ZH/EN real-use probes.
 - Preserve rejected snapshots. Rebuild Common Voice with the merged literal-
   quote parser; admit YODAS only after audio-language/transcript alignment checks.
   AliMeeting stays parked: its meeting-speech conventions differ from v005,
