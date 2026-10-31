@@ -15,7 +15,7 @@
   old pair's 0.9098, CI95 [-0.1218,-0.0111], and both seeds pass KSS. No
   trained model is deployed; Nemotron stays unloaded. Original MLX 8-bit
   remains the fixed normalization anchor.
-- **Live:** `grpo-gloss-free-confirm` (slot 2 since 15:42 KST).
+- **Live:** none; all slots idle.
 - **Plateau diagnosis** ([RSH-20261031-001](research/RSH-20261031-001-qwen-asr-plateau-diagnosis.md)):
   the two-seed screen resolves only gains of about 6–8% (seed SD 0.029
   pooled, 0.012 for the incumbent recipe), so post-gloss losses are ties. 54–74%
@@ -183,13 +183,16 @@
   DEC-20261030-003 screen (pooled 0.8428), so no second seed or KSS. Under
   sWER it scores 0.8470, still above the pooled 0.8458. No
   rank/target/LR/budget variants. Evidence verified on Mac/local/Mangchi.
-- **GRPO on the gloss-free incumbent, second seed live:** `grpo-gloss-free`
-  (single-draw recipe, parent `sft-gloss-free`, seed 21325231, `code/523783e`,
-  gloss-free data) scored 0.8578 vs its parent's 0.8431 under word-scored
-  Korean (KO WER 10.19%) and failed the screen. Under sWER it scores 0.8405,
-  below the pooled 0.8458, so the preregistered second seed
+- **Closed GRPO on the gloss-free incumbent (tie):** `grpo-gloss-free`
+  (single-draw recipe, seed 21325231, parent `sft-gloss-free`, `code/523783e`,
+  gloss-free data) scored 0.8578 under word-scored Korean and failed the
+  screen; under sWER it scores 0.8405, so its preregistered second seed
   `grpo-gloss-free-confirm` (seed 21326232, parent `sft-gloss-free-confirm`)
-  runs. No LR/beta/step/temperature variants.
+  ran: 0.8290, EN/KO/JA/ZH 3.90/4.74/4.45/2.04%, no empty/unended outputs,
+  peak footprint 4.52 GB. The pair pools to 0.8347 vs the incumbent pair's
+  0.8458; only the paired-CI gate fails, CI95 [-0.0450,+0.0216]. The 1.3%
+  lead is inside the seed-noise band, so no KSS or variants. Evidence verified
+  on Mac/local/Mangchi: `proposals/grpo-on-gloss-free-20261030/verdict.json`.
 - **Closed learning-rate 1e-4 SFT:** `sft-lr-1e-4` reruns the incumbent recipe
   at 1e-4 (`code/a4559db`). Score 0.9783 vs 0.8841; EN improves (3.70%) but ZH
   reaches 3.38%. Gain, CJK and confidence gates fail; delta CI95
