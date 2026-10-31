@@ -21,8 +21,9 @@ and [the four-slot contract](../skills/autoresearch/SKILL.md).
   Next: train for the weakest area, phone calls, on AIHub 571 TRAIN with clean
   targets, and select on the real-use probe. Every set is also scored at
   8 kHz ([DEC-20261101-001](decisions/DEC-20261101-001-qwen-asr-clean-transcripts-and-8khz.md));
-  first measure the base and incumbent 8 kHz baselines. JA/ZH/EN real-use
-  probes are still needed.
+  baselines are in [RSH-20261101-002](research/RSH-20261101-002-qwen-asr-8khz-baselines.md),
+  and the gates await the operator. JA/ZH/EN real-use probes are still
+  needed; Japanese is the language that 8 kHz hurts.
 - Preserve rejected snapshots. Rebuild Common Voice with the merged literal-
   quote parser; admit YODAS only after audio-language/transcript alignment checks.
   AliMeeting stays parked: its meeting-speech conventions differ from v005,
