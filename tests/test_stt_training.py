@@ -210,6 +210,22 @@ def test_two_seed_gates_count_empty_outputs_over_both_runs():
     assert not assess([clean, empty], [anchor, anchor], anchor, repetitions=40)["gates"]["empty_output_limit"]
 
 
+def test_selection_makes_korean_spacing_optional():
+    from selection import error_counts
+    ko = lambda reference, hypothesis, glosses=(): {"language": "ko", "reference": reference,
+                                                    "hypothesis": hypothesis, "glosses": list(glosses)}
+    reference = "슈퍼 대회전에서 13위로"
+    assert error_counts(ko(reference, "슈퍼대회전 에서 13위로")) == (0, 3)
+    assert error_counts(ko(reference, "슈퍼 대회전에서 14위로")) == (1, 3)
+    assert error_counts(ko(reference, "슈퍼 대회전에서 아주 13위로")) == (1, 3)
+    assert error_counts(ko(reference, "슈퍼 전에서 13위로")) == (1, 3)
+    assert error_counts(ko("정말 좋은 하루", "정말 은 하루")) == (1, 3)
+    assert error_counts(ko(reference, "")) == (3, 3)
+    assert error_counts(ko("슈퍼 대회전super g에서", "슈퍼대회전에서", ["super g"])) == (0, 2)
+    english = {"language": "en", "reference": "some english words", "hypothesis": "someenglish words"}
+    assert error_counts(english) == (2, 3)
+
+
 def test_aishell_ingestion_excludes_official_dev_and_test():
     from expand_clean import aishell_training_member
     assert aishell_training_member("train/S0002/BAC009S0002W0122.wav")

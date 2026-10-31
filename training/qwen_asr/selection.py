@@ -35,12 +35,34 @@ def gloss_spans(reference,glosses):
     return spans
 
 
+def respace(reference,hypothesis):
+    """The hypothesis with Korean spacing made optional, as in KsponSpeech's space-normalized WER:
+    characters aligned to the reference break words where it does, and inserted ones where the hypothesis does.
+    A word that loses its first characters still starts at its first surviving one."""
+    def starts(text):
+        out,i=set(),0
+        for word in text.split():out.add(i);i+=len(word)
+        return out
+    chars=hypothesis.replace(' ','')
+    if not chars:return ''
+    ref_starts,hyp_starts,words,pending=starts(reference),starts(hypothesis),'',False
+    for c in jiwer.process_characters(reference.replace(' ',''),chars).alignments[0]:
+        if c.type=='delete':pending=pending or any(i in ref_starts for i in range(c.ref_start_idx,c.ref_end_idx))
+        for k in range(c.hyp_end_idx-c.hyp_start_idx):
+            h=c.hyp_start_idx+k
+            new=pending or (h in hyp_starts if c.type=='insert' else c.ref_start_idx+k in ref_starts)
+            words+=(' ' if new and words else '')+chars[h];pending=False
+    return words
+
+
 def error_counts(row):
     ref,hyp=normalize(row['reference']),normalize(row['hypothesis'])
 
     def counts(reference):
         reference=' '.join(reference.split())
-        out=jiwer.process_words(reference,hyp) if row['language'] in ('en','ko') else jiwer.process_characters(reference.replace(' ',''),hyp.replace(' ',''))
+        if row['language']=='en':out=jiwer.process_words(reference,hyp)
+        elif row['language']=='ko':out=jiwer.process_words(reference,respace(reference,hyp))
+        else:out=jiwer.process_characters(reference.replace(' ',''),hyp.replace(' ',''))
         return out.substitutions+out.deletions+out.insertions,out.hits+out.substitutions+out.deletions
     glosses=row.get('glosses') or []
     if not glosses:return counts(ref)

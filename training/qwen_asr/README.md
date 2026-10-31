@@ -335,6 +335,8 @@ accepted final candidate with the shared scorer. Keep English regressions
 visible. Do not merge/quantize/deploy adapters on the strength of training loss.
 
 `selection.py CANDIDATE INCUMBENT ANCHOR` gates one evaluation against another.
+Korean is scored by space-normalized WER (KsponSpeech's sWER): the hypothesis
+takes the reference's word breaks, so spacing alone never counts as an error.
 `--glosses` scores FLEURS translator glosses as optional spans.
 `--second-seeds CANDIDATE2 INCUMBENT2` compares two recipes instead: each
 recipe's two seeds pool their errors per clip, and every gate, including the
