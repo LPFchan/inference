@@ -40,6 +40,12 @@
   while base holds: 20.99% vs 22.96%. Calls are unchanged because they are
   already 8 kHz. The 8 kHz gate is set ([DEC-20261101-002](decisions/DEC-20261101-002-qwen-asr-8khz-no-regression-gate.md)):
   no candidate may be clearly worse than the incumbent at 8 kHz on any set.
+- **Phone-call SFT** ([RSH-20261101-003](research/RSH-20261101-003-qwen-asr-phone-call-sft.md)):
+  adding 10,000 clean AIHub 571 call clips cuts call sWER from 26.8% to 20.4%
+  (-24%, both rates) and also beats base on calls. Both candidates fail the
+  8 kHz gate: on KSS because numbers are now written in digits like the call
+  transcripts, and on FLEURS EN (and KO for v009). The incumbent is
+  unchanged.
 - [Confirmed findings](research/RSH-20261030-001-confirmed-qwen-asr-one-pass-sft.md).
   Selection authority: [DEC-001](decisions/DEC-20261029-001-qwen-asr-autoresearch.md),
   [DEC-002](decisions/DEC-20261029-002-four-slot-qwen-asr-autoresearch.md),

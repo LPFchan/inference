@@ -18,12 +18,14 @@ and [the four-slot contract](../skills/autoresearch/SKILL.md).
   seed under sWER, but its 1.3% lead is inside seed noise and its sibling
   recipe already failed from the same parent seed, so it is not run.
 - FLEURS gains do not transfer to Korean real-use speech ([RSH-20261101-001](research/RSH-20261101-001-qwen-asr-korean-real-use-probe.md)).
-  Next: train for the weakest area, phone calls, on AIHub 571 TRAIN with clean
-  targets, and select on the real-use probe. Every set is also scored at
-  8 kHz ([DEC-20261101-001](decisions/DEC-20261101-001-qwen-asr-clean-transcripts-and-8khz.md));
-  baselines are in [RSH-20261101-002](research/RSH-20261101-002-qwen-asr-8khz-baselines.md),
-  and the gate is [DEC-20261101-002](decisions/DEC-20261101-002-qwen-asr-8khz-no-regression-gate.md). JA/ZH/EN real-use probes are still
-  needed; Japanese is the language that 8 kHz hurts.
+  Phone-call SFT fixes calls but fails the 8 kHz gate
+  ([RSH-20261101-003](research/RSH-20261101-003-qwen-asr-phone-call-sft.md),
+  [DEC-20261101-002](decisions/DEC-20261101-002-qwen-asr-8khz-no-regression-gate.md)).
+  Next: once the operator chooses a number style, rebuild call targets in
+  that style, keep discourse words, drop only pure interjections, and
+  retrain without FLEURS 8 kHz copies. Repetition loops need a fix.
+  JA/ZH/EN real-use probes are still needed; Japanese is the language that
+  8 kHz hurts.
 - Preserve rejected snapshots. Rebuild Common Voice with the merged literal-
   quote parser; admit YODAS only after audio-language/transcript alignment checks.
   AliMeeting stays parked: its meeting-speech conventions differ from v005,
