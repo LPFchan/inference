@@ -36,6 +36,15 @@
   incumbent's 18.2% (+20.5% [+15.6, +25.8]; calls +45.7%). It is worse than
   base Qwen as well. Evidence verified on yeowoolmac and Mangchi under
   `proposals/nemotron-realuse-20261102`.
+- **Korean bar: MAI-Transcribe 2** ([DEC-20261102-001](decisions/DEC-20261102-001-qwen-asr-korean-mai-bar.md),
+  [RSH-20261102-001](research/RSH-20261102-001-qwen-asr-korean-mai-bar.md)):
+  the incumbent must beat or tie MAI on 800 Seoul Corpus interview clips,
+  which MAI may receive. AIHub audio may not. Not met: MAI 11.35% vs the
+  incumbent's 13.37% at 16 kHz (+17.8% [+13.3, +22.6]) and 11.42% vs 13.68%
+  at 8 kHz. The incumbent ties base on interviews. The gap is mostly
+  misheard words in unscripted speech, spread over many clips. MAI cost
+  $0.46 for both rates. Evidence verified on yeowoolmac and Mangchi under
+  `proposals/seoul-ko-20261102`.
 - **8 kHz baselines** ([RSH-20261101-002](research/RSH-20261101-002-qwen-asr-8khz-baselines.md)):
   the telephone band costs little except Japanese FLEURS (+14% base, +16%
   gloss-free SFT). FLEURS scores at 8 kHz: base 1.062, gloss-free SFT 0.892. On

@@ -28,6 +28,12 @@ and [the four-slot contract](../skills/autoresearch/SKILL.md).
   redecodes a looped clip with the adapter off, so loops no longer swing gates.
   JA/ZH/EN real-use probes are still needed; Japanese is the language that
   8 kHz hurts.
+- The Korean target is to beat or tie MAI-Transcribe 2 on the Seoul Corpus
+  probe at 16 and 8 kHz ([DEC-20261102-001](decisions/DEC-20261102-001-qwen-asr-korean-mai-bar.md)).
+  It is not met (+17.8% at 16 kHz). The gap is misheard unscripted speech
+  ([RSH-20261102-001](research/RSH-20261102-001-qwen-asr-korean-mai-bar.md)),
+  so the next data to try is spontaneous Korean from AIHub training splits,
+  used locally. A MAI-safe calls set needs the operator's own recordings.
 - Preserve rejected snapshots. Rebuild Common Voice with the merged literal-
   quote parser; admit YODAS only after audio-language/transcript alignment checks.
   AliMeeting stays parked: its meeting-speech conventions differ from v005,
