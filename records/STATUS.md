@@ -31,7 +31,11 @@
   base vs gloss-free SFT is: call 24.3% vs 26.8% (CI95 [+5.6%, +14.8%]),
   broadcast 20.2% vs 20.2%, meeting 19.0% vs 19.6%. Evidence verified on
   Mac/local/Mangchi under `proposals/real-use-ko-20261101` and
-  `parallel/realuse-ko-v001-*`.
+  `parallel/realuse-ko-v001-*`. Nemotron, the model behind
+  `transcribe.lost.plus`, scores 22.0% clean sWER against the calls
+  incumbent's 18.2% (+20.5% [+15.6, +25.8]; calls +45.7%). It is worse than
+  base Qwen as well. Evidence verified on yeowoolmac and Mangchi under
+  `proposals/nemotron-realuse-20261102`.
 - **8 kHz baselines** ([RSH-20261101-002](research/RSH-20261101-002-qwen-asr-8khz-baselines.md)):
   the telephone band costs little except Japanese FLEURS (+14% base, +16%
   gloss-free SFT). FLEURS scores at 8 kHz: base 1.062, gloss-free SFT 0.892. On

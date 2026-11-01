@@ -62,6 +62,34 @@ sWER, with paired-bootstrap CI95 for best vs base:
 - Real-use Korean errors (21% sWER, 13% CER) are about twice FLEURS Korean
   (10%), so the headroom is here rather than in FLEURS validation.
 
+## Nemotron on this probe (2026-11-02)
+
+The model behind `transcribe.lost.plus`, Nemotron 3.5 Transcribe 30B-A4B
+MLX INT4 (artifact `7018b1c1…`), transcribed all 1,200 clips through its
+loopback server with language `ko`. The 8 kHz pass uses the same band limit
+as `evaluate --audio-rate 8000`. Scoring is clean and number-blind sWER
+(DEC-20261101-001, DEC-20261101-003). Evidence is in
+`proposals/nemotron-realuse-20261102` (`score_nemotron.py` sha256
+`85d031ae…`, `compare_nemotron.py` `40099e18…`, `compare-v001.json`).
+
+| Cohort | Calls-model incumbent | Base Qwen | Nemotron | Nemotron vs incumbent |
+| --- | --- | --- | --- | --- |
+| call | 19.6% | 23.6% | 28.6% | +45.7% [+34.6, +57.6] |
+| broadcast | 19.0% | 19.5% | 22.3% | +17.3% [+9.0, +26.3] |
+| meeting | 16.7% | 17.6% | 17.1% | +2.3% [-4.6, +9.9] |
+| all | 18.2% | 19.9% | 22.0% | +20.5% [+15.6, +25.8] |
+
+- **Nemotron is clearly worse than both Qwen models on Korean real-use
+  speech.** It is worse than base Qwen too (+10.4% [+6.5, +14.6]), and it
+  ties only on meetings.
+- **Calls are its weakest area.** Its mistakes are acoustic, like 문자 2통 →
+  문득 두통, and once an English sentence. They are spread out: the 20
+  worst clips explain 22% of the gap. It had no empty outputs.
+- **At 8 kHz the gap widens** to +28.9% [+23.1, +34.8] overall and +56.4% on
+  calls.
+- MAI-Transcribe 2 was not run. The AIHub terms forbid sending this audio
+  abroad.
+
 ## Next
 
 - Product decision for the operator: should transcripts be verbatim (keep
