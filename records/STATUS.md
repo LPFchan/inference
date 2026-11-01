@@ -46,7 +46,15 @@
   8 kHz gate: on KSS because numbers are now written in digits like the call
   transcripts, and on FLEURS EN (and KO for v009). The incumbent is
   unchanged. Under number-blind gates ([DEC-20261101-003](decisions/DEC-20261101-003-qwen-asr-korean-number-style.md))
-  only FLEURS EN at 8 kHz still fails.
+  only FLEURS EN at 8 kHz still fails. Retrained on Korean-style targets
+  (`data-v011-calls-ko`) with seeds 21774173 and 21776175, calls are -25% at
+  both rates on both seeds, meetings improve, and KSS ties. The first seed
+  alone fails FLEURS EN at 8 kHz (+8.7% [+0.3, +17.8]), but the pooled
+  pair ties everywhere. FLEURS slips to 0.8817, against the incumbent
+  pair's 0.8458, which is a tie but no gain, so the FLEURS selection rule
+  cannot adopt it. Evidence
+  verified on yeowoolmac and Mangchi under `proposals/calls-train-20261101`
+  and `parallel/*v011*`.
 - [Confirmed findings](research/RSH-20261030-001-confirmed-qwen-asr-one-pass-sft.md).
   Selection authority: [DEC-001](decisions/DEC-20261029-001-qwen-asr-autoresearch.md),
   [DEC-002](decisions/DEC-20261029-002-four-slot-qwen-asr-autoresearch.md),

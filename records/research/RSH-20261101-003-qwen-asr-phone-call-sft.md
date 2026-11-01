@@ -72,15 +72,54 @@ real-use. On calls, both runs also beat base, by 16.0% and 14.6%.
 - **The 8 kHz copies did not help 8 kHz.** v010's FLEURS 8 kHz score (0.930)
   equals v009's (0.929). It also cost Japanese at 16 kHz.
 
+## Korean-style retrain
+
+- **Data:** `data-v011-calls-ko` (builder `build_calls2.py` sha256
+  `9bc9d1e4…`, number styling `ko_numbers.py` `65a9731b…`) is v005 plus
+  10,000 newly drawn call clips (14.1 h, 3,387 calls, 5,774 speakers). Its
+  targets follow DEC-20261101-003. It has 18,966 clips (39.3 h) in all.
+- **Runs:** the same recipe at seeds 21774173 (`sft-calls-ko-v011`) and
+  21776175 (`sft-calls-ko-v011-s21776175`). The incumbent pair's second seed
+  is 21775174, so the second seeds differ.
+- **Scoring:** `gate2.py` per seed (`gate2-v011.json`). Both seeds are also
+  pooled against the incumbent: per clip at 8 kHz, and with
+  `selection.py --second-seeds` for the FLEURS score.
+
+Clean sWER change vs the incumbent, seed 21774173 / seed 21776175:
+
+| Cohort | 16 kHz | 8 kHz |
+| --- | --- | --- |
+| call | -25.2% / -25.1% | -25.3% / -24.7% |
+| meeting | -14.0% / -11.9% | -20.8% / -18.3% |
+| broadcast | -4.3% / -1.4% (ties) | -3.1% / +10.6% (ties; one loop) |
+| KSS, all | -3.0% / -8.9% (ties) | -4.8% / -7.6% (ties) |
+
+- **Calls hold at -25%** on both seeds and at both rates, and meetings
+  improve too (every CI95 below zero). Both seeds beat base on calls by about
+  17%.
+- **Number style is fixed.** On KSS the models write native counts in
+  Hangul as often as the incumbent: 16 Hangul counts, against 16 for the
+  incumbent and 3 for v009. KSS ties the incumbent at both rates.
+- **FLEURS English at 8 kHz costs a little, but does not veto.** Seed
+  21774173 fails alone: +8.7% [+0.3, +17.8]. Seed 21776175 ties: +3.6%
+  [-3.3, +10.6]. Pooled, the pair ties: +6.1% [-0.7, +13.3]. All four call
+  runs so far are above the incumbent here, so the cost is probably real,
+  but it is about the size of seed noise.
+- **FLEURS slips about 4% overall, which is a tie.** The two-seed selection
+  scores the pair 0.8817, against the incumbent pair's 0.8458 (paired CI95
+  [-0.006, +0.074]). Every pooled language ties at both rates. The pair
+  still cannot be adopted under DEC-20261030-003, which requires a FLEURS
+  gain.
+- **Loops: 1 in 4,800 clips.** Seed 21776175 repeats 예를 들어서 on one
+  8 kHz broadcast clip (`D221336.1.2.27`), and that one clip accounts for its
+  broadcast +10.6%. Seed 21774173 never loops. The incumbent loops on one
+  8 kHz meeting clip too, so loops come from training generally, not from
+  the call data. Base never loops.
+
 ## Next
 
-- The operator should choose how numbers are written: digits like the call
-  transcripts, or Hangul for native counts (한 번, 두 명) with digits for
-  amounts, dates and times. They should also say whether gates should
-  score digit and Hangul forms of the same number as equal.
-- Keep discourse words that are often real words (그, 이제, 뭐, 저기, 네, 예)
-  in training targets, and drop only pure interjections. Scoring already
-  treats them as optional.
-- Drop 8 kHz copies of FLEURS. Calls already supply 8 kHz audio.
-- Repetition loops need a fix, either at decode time or by excluding them in
-  training. Base never loops on this probe.
+- Adopting a calls model needs an operator decision on the selection rule.
+  The current rule rewards only FLEURS gains. This pair trades a tie-sized
+  FLEURS cost for a quarter fewer call errors.
+- Repetition loops need a fix, either at decode time or in training.
+- JA/ZH/EN real-use probes are still needed.
