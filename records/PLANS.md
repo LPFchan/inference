@@ -11,7 +11,8 @@ and [the four-slot contract](../skills/autoresearch/SKILL.md).
   no parameter sweeps selected from validation errors.
 - Score with optional translator glosses ([DEC-20261030-002](decisions/DEC-20261030-002-qwen-asr-optional-gloss-scoring.md))
   and Korean space-normalized WER ([DEC-20261031-001](decisions/DEC-20261031-001-qwen-asr-korean-space-normalized-wer.md)).
-  Adopt recipes by two-seed comparison ([DEC-20261030-003](decisions/DEC-20261030-003-qwen-asr-two-seed-recipe-adoption.md)).
+  Adopt recipes by two-seed real-use selection ([DEC-20261101-004](decisions/DEC-20261101-004-qwen-asr-real-use-selection.md)):
+  clearly better on Korean real-use speech, clearly worse nowhere.
 - The plateau is diagnosed ([RSH-20261031-001](research/RSH-20261031-001-qwen-asr-plateau-diagnosis.md)):
   admit only changes with a plausible effect of 6% or more, not recipe or
   capacity tweaks. Cap-eight GRPO `grpo-ae448ecc75d8e01f` earned a second
@@ -23,8 +24,7 @@ and [the four-slot contract](../skills/autoresearch/SKILL.md).
   [DEC-20261101-002](decisions/DEC-20261101-002-qwen-asr-8khz-no-regression-gate.md)).
   The Korean-style retrain (`data-v011-calls-ko`, [DEC-20261101-003](decisions/DEC-20261101-003-qwen-asr-korean-number-style.md))
   keeps calls at -25% and ties FLEURS and 8 kHz when its two seeds are
-  pooled. Adopting it waits on the operator's choice of selection rule for
-  real-use models. Repetition loops (about 1 in 2,400 clips in trained
+  pooled. It is the incumbent. Repetition loops (about 1 in 2,400 clips in trained
   models, never in base) need a fix.
   JA/ZH/EN real-use probes are still needed; Japanese is the language that
   8 kHz hurts.

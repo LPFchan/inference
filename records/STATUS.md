@@ -6,15 +6,14 @@
 
 ## Autoresearch — Qwen3-ASR
 
-- **Training incumbent:** gloss-free TRAIN SFT `sft-gloss-free/step-000944`,
-  adapter `1a1baedd…9d99`. Its recipe was adopted 2026-10-30 22:13 KST by
-  two-seed comparison ([DEC-20261030-003](decisions/DEC-20261030-003-qwen-asr-two-seed-recipe-adoption.md)),
-  and the checkpoint was re-picked 2026-10-31 16:00 KST as the lower-score
-  seed under Korean sWER ([DEC-20261031-001](decisions/DEC-20261031-001-qwen-asr-korean-space-normalized-wer.md)).
-  The pair `sft-gloss-free`/`sft-gloss-free-confirm` pools to 0.8458 vs the
-  old pair's 0.9098, CI95 [-0.1218,-0.0111], and both seeds pass KSS. No
-  trained model is deployed; Nemotron stays unloaded. Original MLX 8-bit
-  remains the fixed normalization anchor.
+- **Training incumbent:** Korean-style calls SFT `sft-calls-ko-v011/step-003436`,
+  adapter `b54f3ef5…5f25`. It was adopted 2026-11-01 18:17 KST by real-use
+  selection ([DEC-20261101-004](decisions/DEC-20261101-004-qwen-asr-real-use-selection.md)):
+  the pair `sft-calls-ko-v011`/`sft-calls-ko-v011-s21776175` cuts real-use
+  Korean sWER 14.2% [-17.1, -11.3] against the gloss-free SFT (calls -25%),
+  and no FLEURS, KSS or 8 kHz check is clearly worse. Real-use 18.24%, FLEURS
+  score 0.8668. No trained model is deployed; Nemotron stays unloaded.
+  Original MLX 8-bit remains the fixed normalization anchor.
 - **Live:** none; all slots idle.
 - **Plateau diagnosis** ([RSH-20261031-001](research/RSH-20261031-001-qwen-asr-plateau-diagnosis.md)):
   the two-seed screen resolves only gains of about 6–8% (seed SD 0.029
@@ -25,18 +24,18 @@
   verified on Mac/local/Mangchi under `proposals/why-*-20261031`.
 - **Korean real-use probe** ([RSH-20261101-001](research/RSH-20261101-001-qwen-asr-korean-real-use-probe.md)):
   1,200 AIHub validation clips (call, broadcast, meeting; 400 each). The
-  incumbent is worse than base: verbatim sWER 24.3% vs 21.4%, CI95 of the
+  gloss-free SFT is worse than base: verbatim sWER 24.3% vs 21.4%, CI95 of the
   change [+10.3%, +17.6%]. Most of the gap is dropped discourse words (style);
   calls stay +9% worse even with those words optional. Calls are the weakest
   area at base sWER 24.4%. Under the clean rule ([DEC-20261101-001](decisions/DEC-20261101-001-qwen-asr-clean-transcripts-and-8khz.md)),
-  base vs incumbent is: call 24.3% vs 26.8% (CI95 [+5.6%, +14.8%]),
+  base vs gloss-free SFT is: call 24.3% vs 26.8% (CI95 [+5.6%, +14.8%]),
   broadcast 20.2% vs 20.2%, meeting 19.0% vs 19.6%. Evidence verified on
   Mac/local/Mangchi under `proposals/real-use-ko-20261101` and
   `parallel/realuse-ko-v001-*`.
 - **8 kHz baselines** ([RSH-20261101-002](research/RSH-20261101-002-qwen-asr-8khz-baselines.md)):
   the telephone band costs little except Japanese FLEURS (+14% base, +16%
-  incumbent). FLEURS scores at 8 kHz: base 1.062, incumbent 0.892. On
-  real-use Korean (clean) the incumbent loses +5.2% [+1.3, +11.2] at 8 kHz,
+  gloss-free SFT). FLEURS scores at 8 kHz: base 1.062, gloss-free SFT 0.892. On
+  real-use Korean (clean) the gloss-free SFT loses +5.2% [+1.3, +11.2] at 8 kHz,
   while base holds: 20.99% vs 22.96%. Calls are unchanged because they are
   already 8 kHz. The 8 kHz gate is set ([DEC-20261101-002](decisions/DEC-20261101-002-qwen-asr-8khz-no-regression-gate.md)):
   no candidate may be clearly worse than the incumbent at 8 kHz on any set.
@@ -44,22 +43,22 @@
   adding 10,000 clean AIHub 571 call clips cuts call sWER from 26.8% to 20.4%
   (-24%, both rates) and also beats base on calls. Both candidates fail the
   8 kHz gate: on KSS because numbers are now written in digits like the call
-  transcripts, and on FLEURS EN (and KO for v009). The incumbent is
-  unchanged. Under number-blind gates ([DEC-20261101-003](decisions/DEC-20261101-003-qwen-asr-korean-number-style.md))
+  transcripts, and on FLEURS EN (and KO for v009). Neither was adopted.
+  Under number-blind gates ([DEC-20261101-003](decisions/DEC-20261101-003-qwen-asr-korean-number-style.md))
   only FLEURS EN at 8 kHz still fails. Retrained on Korean-style targets
   (`data-v011-calls-ko`) with seeds 21774173 and 21776175, calls are -25% at
   both rates on both seeds, meetings improve, and KSS ties. The first seed
   alone fails FLEURS EN at 8 kHz (+8.7% [+0.3, +17.8]), but the pooled
-  pair ties everywhere. FLEURS slips to 0.8817, against the incumbent
-  pair's 0.8458, which is a tie but no gain, so the FLEURS selection rule
-  cannot adopt it. Evidence
+  pair ties everywhere. FLEURS slips to 0.8817 against the gloss-free
+  pair's 0.8458, a tie. Real-use selection adopted this pair. Evidence
   verified on yeowoolmac and Mangchi under `proposals/calls-train-20261101`
   and `parallel/*v011*`.
 - [Confirmed findings](research/RSH-20261030-001-confirmed-qwen-asr-one-pass-sft.md).
   Selection authority: [DEC-001](decisions/DEC-20261029-001-qwen-asr-autoresearch.md),
   [DEC-002](decisions/DEC-20261029-002-four-slot-qwen-asr-autoresearch.md),
   [DEC-20261030-003](decisions/DEC-20261030-003-qwen-asr-two-seed-recipe-adoption.md),
-  [DEC-20261031-001](decisions/DEC-20261031-001-qwen-asr-korean-space-normalized-wer.md)
+  [DEC-20261031-001](decisions/DEC-20261031-001-qwen-asr-korean-space-normalized-wer.md),
+  [DEC-20261101-004](decisions/DEC-20261101-004-qwen-asr-real-use-selection.md)
   and [four-slot contract](../skills/autoresearch/SKILL.md).
   Frozen primary set: 1,295 validation clips (EN 394,KO 226,JA 266,ZH 409),
   manifest `c75a4b05069eba7d11a6b50efd7bb11d43800fc66e49b761cd08fb86354acf01`.
@@ -74,9 +73,10 @@
   | Trial | EN | KO | JA | ZH | CJK score |
   | --- | ---: | ---: | ---: | ---: | ---: |
   | Original 8-bit anchor | 4.25 | 5.15 | 4.63 | 3.36 | 1.0000 |
-  | Gloss-free TRAIN SFT, seed 21774173, incumbent | 3.90 | 4.86 | 4.24 | 2.18 | 0.8354 |
+  | Korean-style calls SFT, seed 21774173, incumbent | 3.93 | 5.01 | 4.47 | 2.23 | 0.8668 |
+  | Gloss-free TRAIN SFT, seed 21774173, previous incumbent | 3.90 | 4.86 | 4.24 | 2.18 | 0.8354 |
   | Gloss-free TRAIN SFT, seed 21775174 | 4.06 | 5.04 | 4.47 | 2.10 | 0.8562 |
-  | One-pass SFT, seed 21774173, previous incumbent | 3.99 | 4.98 | 4.30 | 2.54 | 0.8832 |
+  | One-pass SFT, seed 21774173, earlier incumbent | 3.99 | 4.98 | 4.30 | 2.54 | 0.8832 |
   | One-pass SFT, seed 21775174 | 4.06 | 5.07 | 4.54 | 2.84 | 0.9364 |
   | Late-decay SFT, closed | 4.01 | 4.83 | 4.54 | 2.74 | 0.9107 |
   | Language-mean SFT, closed | 3.84 | 4.98 | 4.27 | 2.57 | 0.8844 |

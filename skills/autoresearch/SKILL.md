@@ -51,13 +51,15 @@ Architecture changes require evidence that simpler adaptations plateau.
 
 ## Score and select
 
-Score every clip in the same frozen 1,295-clip development manifest. Use
-`training/qwen_asr/selection.py CANDIDATE INCUMBENT ANCHOR`. It returns the
-normalized CJK error score, paired bootstrap interval, per-language errors and
-all acceptance gates defined by the charter. Adopt a recipe only when its two
-seeds, pooled with `--second-seeds`, pass every gate against the incumbent
-recipe's two seeds (DEC-20261030-003); a first seed earns its second only by
-scoring below the incumbent recipe's pooled score. Keep rejected checkpoints and
+Evaluate each seed on the frozen 1,295-clip FLEURS development manifest, the
+KSS probe and the 1,200-clip Korean real-use probe, each at 16 and 8 kHz
+(`train.py evaluate --audio-rate 8000`). Adopt a recipe only when
+`proposals/calls-train-20261101/adopt.py CAND1 CAND2 --incumbent INC1 INC2`
+passes (DEC-20261101-004). Its two seeds, pooled, must be clearly better on
+real-use speech at 16 kHz and clearly worse nowhere. The lower real-use seed
+becomes the incumbent. `training/qwen_asr/selection.py` still reports the
+FLEURS score against the anchor. A first seed earns its second only by
+scoring below the incumbent recipe on real-use. Keep rejected checkpoints and
 measurements as evidence, without deploying them. No changes to normalization
 or the selection set within a comparison.
 
