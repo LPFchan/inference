@@ -530,6 +530,25 @@ def run(a):
                                        skip_special_tokens=True)
         return completion, text, ended
 
+    def transcribe(row, ctx):
+        """Greedy transcript plus the looped text it replaced, if any.
+
+        A greedy decode that never ends is a repetition loop. Trained adapters
+        loop about once in 2,400 real-use clips; the base model has not looped
+        on any probe, so it redecodes that clip with the adapter switched off.
+        """
+        _, text, ended = sample(row, ctx, 0.0)
+        if ended:
+            return text, ended, None
+        for _, layer in modules:
+            layer.scale = 0.0
+        try:
+            _, base_text, base_ended = sample(row, ctx, 0.0)
+        finally:
+            for _, layer in modules:
+                layer.scale = a.scale
+        return base_text, base_ended, text
+
     def evaluate(tag):
         from collections import defaultdict
         results = []
@@ -542,10 +561,12 @@ def run(a):
             ctx = context(row)
             tokens = model._tokenizer.encode(row["text"], add_special_tokens=False) + [eos]
             loss = float(-log_probs(model, *ctx, tokens).mean().item())
-            completion, text, ended = sample(row, ctx, 0.0)
+            text, ended, looped = transcribe(row, ctx)
             results.append({"id": row["id"], "language": language, "reference": row["text"],
                             "hypothesis": text, "loss": loss, "ended": ended,
                             "reward": reward(row["text"], text, language)})
+            if looped is not None:
+                results[-1]["looped"] = looped
             counts[language] += 1
             if len(results) % 20 == 0:
                 print(json.dumps({"phase": "evaluation", "tag": tag, "clips": len(results)}), flush=True)
@@ -642,12 +663,14 @@ def run(a):
                 # The model sees audio and the known language only. An absolute
                 # path replaces the --data root inside context().
                 audio_only = {"audio": str(a.external.parent / row["audio"]), "language": row["language"]}
-                _, text, ended = sample(audio_only, context(audio_only), 0.0)
+                text, ended, looped = transcribe(audio_only, context(audio_only))
                 saved[row["id"]] = {
                     "id": row["id"], "language": row["language"], "cohort": row["cohort"],
                     "reference": row["text"], "hypothesis": text, "ended": ended,
                     "seconds": row["seconds"], "batch_seconds": time.perf_counter() - began,
                     "batch_samples": 1, "contract_sha256": contract_sha256}
+                if looped is not None:
+                    saved[row["id"]]["looped"] = looped
                 stream.write(json.dumps(saved[row["id"]], ensure_ascii=False) + "\n")
                 stream.flush()
                 os.fsync(stream.fileno())
