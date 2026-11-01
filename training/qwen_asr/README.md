@@ -378,6 +378,13 @@ duration. It also rejects any shared clip, text or speaker with `--data` and
 the frozen test. The model gets audio and the known language only. Decoding
 matches development: greedy, `--max-tokens`, 128 MiB cache.
 
+A greedy decode that reaches `--max-tokens` without EOS is a repetition loop.
+Trained adapters loop about once in 2,400 real-use clips, while the base model
+has not looped on any probe. Development and external evaluation therefore
+redecode such a clip with the adapter switched off (LoRA scale 0). The row
+keeps the base transcript as `hypothesis`, and the looped text as `looped`.
+GRPO rollouts and the sampling probe keep raw decodes.
+
 `--eval-clips` counts clips per cohort. Every model gets the same seeded subset,
 and a larger count keeps the smaller one's clips. Each clip is appended to
 `predictions.jsonl` with the run's contract hash as soon as it finishes. Repeat

@@ -271,8 +271,9 @@ def test_resume_keeps_saved_rows_and_extends_the_same_seeded_subset(world):
     world.run("eval-base", "--eval-clips", 3, "--resume")
     rows = predictions(out)
     assert len(rows) == len({r["id"] for r in rows}) == 6
-    assert sorted(world.spy.decoded) == sorted({Path(r["id"]).name + ".wav" for r in rows} -
-                                               {Path(r["id"]).name + ".wav" for r in smoke})
+    new = {Path(r["id"]).name + ".wav" for r in rows} - {Path(r["id"]).name + ".wav" for r in smoke}
+    # o3 never ends, so it is decoded once more with the adapter off.
+    assert sorted(world.spy.decoded) == sorted([*new, *(new & {"o3.wav"})])
     assert rows[:2] == smoke
     assert json.loads((out / "summary-2.json").read_text())["clips"] == 2
     assert json.loads((out / "summary-6.json").read_text())["clips"] == 6

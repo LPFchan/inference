@@ -961,6 +961,28 @@ def test_sft_decay_keeps_the_constant_prefix_and_resumes_exactly(monkeypatch, tm
     assert contract["settings"]["lr_schedule"] == {"decay_start": 3, "decay_end": 6}
 
 
+def test_evaluation_redecodes_a_loop_with_the_adapter_off(monkeypatch, tmp_path):
+    import json
+    env = fake_grpo_runtime(monkeypatch, tmp_path, [])
+    calls = []
+
+    def generate_step(prompt, model, input_embeddings, max_tokens, sampler, prefill_step_size):
+        marker, scale = int(prompt[0].item()), model.model.layers[0].q_proj.scale
+        calls.append((marker, scale))
+        looping = scale != 0.0 and marker == 1001  # only the Korean clip loops, and only with the adapter on
+        for token in ([3] * 5 if looping else [1, GRPO_EOS])[:max_tokens]:
+            yield token, None
+
+    monkeypatch.setattr(sys.modules["mlx_audio.lm.generate"], "generate_step", generate_step)
+    with env.cpu():
+        env.trainer.run(env.configure([], "evaluate", "evaluation"))
+    rows = {r["language"]: r for r in json.loads((env.root / "evaluation/dev-initial.json").read_text())["rows"]}
+    assert (rows["ko"]["hypothesis"], rows["ko"]["ended"], rows["ko"]["looped"]) == ("abcd", True, "zzzz" * 2)
+    assert all("looped" not in row and row["ended"] for lang, row in rows.items() if lang != "ko")
+    # One redecode with the adapter off, then the adapter is back on for the next clip.
+    assert calls == [(1000, 1.0), (1001, 1.0), (1001, 0.0), (1002, 1.0), (1003, 1.0)]
+
+
 def test_changed_decay_endpoint_is_refused_before_model_load(monkeypatch, tmp_path):
     env = fake_grpo_runtime(monkeypatch, tmp_path, [])
     common = ["--learning-rate", "0.05", "--accumulate", "1", "--lr-decay-start", "2"]
