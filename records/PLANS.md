@@ -24,8 +24,8 @@ and [the four-slot contract](../skills/autoresearch/SKILL.md).
   [DEC-20261101-002](decisions/DEC-20261101-002-qwen-asr-8khz-no-regression-gate.md)).
   The Korean-style retrain (`data-v011-calls-ko`, [DEC-20261101-003](decisions/DEC-20261101-003-qwen-asr-korean-number-style.md))
   keeps calls at -25% and ties FLEURS and 8 kHz when its two seeds are
-  pooled. It is the incumbent. Repetition loops (about 1 in 2,400 clips in trained
-  models, never in base) need a fix.
+  pooled. It is the incumbent. Evaluation from code `4cf83f9` (PR #44)
+  redecodes a looped clip with the adapter off, so loops no longer swing gates.
   JA/ZH/EN real-use probes are still needed; Japanese is the language that
   8 kHz hurts.
 - Preserve rejected snapshots. Rebuild Common Voice with the merged literal-

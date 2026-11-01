@@ -121,5 +121,11 @@ Clean sWER change vs the incumbent, seed 21774173 / seed 21776175:
 - Adopting a calls model needs an operator decision on the selection rule.
   The current rule rewards only FLEURS gains. This pair trades a tie-sized
   FLEURS cost for a quarter fewer call errors.
-- Repetition loops need a fix, either at decode time or in training.
+- Repetition loops are fixed at decode time by PR #44 (code `4cf83f9`). A
+  greedy decode that never ends is redone with the adapter off. On the 6
+  looped clips in all saved evaluations (73 reference words), errors drop from
+  916 to 14. Trimming the loop leaves 122. With the fallback, seed
+  21776175's 8 kHz broadcast change is -2.2% [-7.4, +3.4] instead of +10.6%.
+  Evidence: `proposals/loop-fallback-20261102` and
+  `parallel/loopcheck-8k-sft-calls-ko-v011-s21776175`.
 - JA/ZH/EN real-use probes are still needed.
