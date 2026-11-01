@@ -38,7 +38,8 @@
   incumbent). FLEURS scores at 8 kHz: base 1.062, incumbent 0.892. On
   real-use Korean (clean) the incumbent loses +5.2% [+1.3, +11.2] at 8 kHz,
   while base holds: 20.99% vs 22.96%. Calls are unchanged because they are
-  already 8 kHz. 8 kHz gates await the operator.
+  already 8 kHz. The 8 kHz gate is set ([DEC-20261101-002](decisions/DEC-20261101-002-qwen-asr-8khz-no-regression-gate.md)):
+  no candidate may be clearly worse than the incumbent at 8 kHz on any set.
 - [Confirmed findings](research/RSH-20261030-001-confirmed-qwen-asr-one-pass-sft.md).
   Selection authority: [DEC-001](decisions/DEC-20261029-001-qwen-asr-autoresearch.md),
   [DEC-002](decisions/DEC-20261029-002-four-slot-qwen-asr-autoresearch.md),

@@ -22,7 +22,7 @@ and [the four-slot contract](../skills/autoresearch/SKILL.md).
   targets, and select on the real-use probe. Every set is also scored at
   8 kHz ([DEC-20261101-001](decisions/DEC-20261101-001-qwen-asr-clean-transcripts-and-8khz.md));
   baselines are in [RSH-20261101-002](research/RSH-20261101-002-qwen-asr-8khz-baselines.md),
-  and the gates await the operator. JA/ZH/EN real-use probes are still
+  and the gate is [DEC-20261101-002](decisions/DEC-20261101-002-qwen-asr-8khz-no-regression-gate.md). JA/ZH/EN real-use probes are still
   needed; Japanese is the language that 8 kHz hurts.
 - Preserve rejected snapshots. Rebuild Common Voice with the merged literal-
   quote parser; admit YODAS only after audio-language/transcript alignment checks.
