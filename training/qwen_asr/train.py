@@ -28,6 +28,32 @@ SCHEDULE = ("ko", "ja", "zh") * 3 + ("en",)
 DECODER_LAYERS = 28
 
 
+def schedule_spec(text):
+    """`ko=30,ja=3,zh=3,en=1`: one cycle of microstep languages with these counts, spread evenly."""
+    weights = {}
+    for part in text.split(","):
+        lang, _, count = part.partition("=")
+        if lang not in LANGUAGES or lang in weights or not count.isdigit() or int(count) < 1:
+            raise argparse.ArgumentTypeError("expected ko=N,ja=N,zh=N,en=N with positive counts")
+        weights[lang] = int(count)
+    if set(weights) != set(LANGUAGES):
+        raise argparse.ArgumentTypeError("every training language needs a count")
+    # Smooth weighted round-robin: each slot goes to the language furthest behind its share.
+    total, credit, cycle = sum(weights.values()), dict.fromkeys(LANGUAGES, 0), []
+    for _ in range(total):
+        for lang in credit:
+            credit[lang] += weights[lang]
+        lang = max(credit, key=credit.get)
+        credit[lang] -= total
+        cycle.append(lang)
+    return tuple(cycle)
+
+
+def schedule_of(settings):
+    """The SFT language schedule a run recorded; the fixed default when it recorded none."""
+    return tuple(settings.get("schedule") or SCHEDULE)
+
+
 def grpo_loss(log_probs, old_probs, reference_probs, advantage, beta):
     import mlx.core as mx
     ratio = mx.exp(log_probs - old_probs)
@@ -81,6 +107,8 @@ def arguments():
     p.add_argument("--korean-wer-weight", type=float, default=0.0)
     p.add_argument("--sampler", choices=("replacement", "sentence-epoch"), default="replacement",
                    help="SFT only: draw with replacement, or each source sentence at most once")
+    p.add_argument("--schedule", type=schedule_spec, metavar="ko=N,ja=N,zh=N,en=N",
+                   help="SFT only: microstep language counts per cycle instead of the fixed 3:3:3:1")
     p.add_argument("--max-tokens", type=int, default=256)
     p.add_argument("--save-every", type=int, default=25)
     p.add_argument("--eval-clips", type=int, default=4,
@@ -144,6 +172,8 @@ def arguments():
         p.error("--base-reference is only valid for GRPO")
     if a.sampler != "replacement" and a.stage != "sft":
         p.error("--sampler sentence-epoch is only valid for SFT")
+    if a.schedule and a.stage != "sft":
+        p.error("--schedule is only valid for SFT")
     if a.audio_rate != 16000 and a.stage != "evaluate":
         p.error("--audio-rate is only valid for evaluate")
     if a.external and a.stage != "evaluate":
@@ -172,14 +202,16 @@ def training_settings(a):
     # --steps is only a stop target; the decay endpoint is fixed for the whole run.
     settings["lr_schedule"] = None if a.lr_decay_start is None else {
         "decay_start": a.lr_decay_start, "decay_end": a.lr_decay_end}
+    if a.schedule:  # absent by default, so existing contracts still resume
+        settings["schedule"] = list(a.schedule)
     return settings
 
 
-def sft_row(pools, order, seed, index):
+def sft_row(pools, order, seed, index, schedule=SCHEDULE):
     """SFT microstep row: seeded replacement draw, or the sentence-epoch order if given."""
     if order is not None:
-        return sentence_epoch_draw(order, index, SCHEDULE)
-    return random.Random(seed + index).choice(pools[SCHEDULE[index % len(SCHEDULE)]])
+        return sentence_epoch_draw(order, index, schedule)
+    return random.Random(seed + index).choice(pools[schedule[index % len(schedule)]])
 
 
 def external_plan(manifest, per_cohort, seed):
@@ -283,11 +315,11 @@ def run(a):
     pools = {lang: [r for r in train if r["language"] == lang] for lang in LANGUAGES}
     if any(not pool for pool in pools.values()):
         raise ValueError("all four training languages required")
-    order = None
+    order, schedule = None, a.schedule or SCHEDULE
     if a.sampler == "sentence-epoch":
         order = sentence_epoch_order(pools, a.seed)
         for index in range(a.steps * a.accumulate):  # refuse a repeat before any model load or update
-            sentence_epoch_draw(order, index, SCHEDULE)
+            sentence_epoch_draw(order, index, schedule)
     token_reference = token_binding = token_means = None
     if a.sft_token_weight == token_weight.MODE:
         # The full reference fixes the denominators even when --data is a subset of it.
@@ -305,8 +337,9 @@ def run(a):
             (init / "checkpoint.json").read_text())["contract"]["data"]["train_sha256"] != data_meta["train_sha256"]:
         raise ValueError("--data must be the checkpoint's own training data")
     if a.train_nll_probe:
+        parent = json.loads((init / "checkpoint.json").read_text())
         nll_plan, nll_binding = token_weight.probe_plan(
-            a.train_nll_probe, train, a.data, json.loads((init / "checkpoint.json").read_text()), SCHEDULE)
+            a.train_nll_probe, train, a.data, parent, schedule_of(parent["contract"]["settings"]))
         settings = {key: getattr(a, key) for key in ("stage", "rank", "scale", "memory_gb")}
     elif a.stage == "probe":
         settings = {key: getattr(a, key) for key in ("stage", "rank", "scale", "max_tokens", "memory_gb")}
@@ -586,7 +619,7 @@ def run(a):
             recorded = parent["contract"]["settings"]
             order = (sentence_epoch_order(pools, recorded["seed"])
                      if recorded.get("sampler") == "sentence-epoch" else None)
-            parent_draws = [sft_row(pools, order, recorded["seed"], index)
+            parent_draws = [sft_row(pools, order, recorded["seed"], index, schedule_of(recorded))
                             for index in range(parent["step"] * recorded["accumulate"])]
         atomic_json(probe_summary, {
             **sampling_probe.summary(probe_plan, saved, parent_draws),
@@ -665,7 +698,7 @@ def run(a):
         grads, losses, diagnostics = None, [], {}
         if a.stage == "sft":
             for micro in range(a.accumulate):
-                row = sft_row(pools, order, a.seed, (step - 1) * a.accumulate + micro)
+                row = sft_row(pools, order, a.seed, (step - 1) * a.accumulate + micro, schedule)
                 if order is not None:
                     diagnostics.setdefault("ids", []).append(row["id"])
                 ctx = context(row)

@@ -137,6 +137,13 @@ the run is refused before the model loads; the other pools are not exhausted.
 The sampler is stored in the exact-match resume contract, and each metrics
 event records that update's row `ids`.
 
+`--schedule ko=30,ja=3,zh=3,en=1` (SFT only) replaces the fixed 3:3:3:1
+language cycle with these counts per cycle, spread evenly. It lets a large
+Korean pool, such as FLEURS plus phone calls, be seen once while the other
+languages keep their usual number of draws. The expanded cycle enters the
+resume contract; runs without the flag keep the fixed cycle and an unchanged
+contract.
+
 The learning rate is constant by default. `--lr-decay-start S` (SFT only, with
 optional `--lr-decay-end E`, default `--steps`) keeps the configured rate for
 one-based optimizer updates 1..S without touching the optimizer, then uses

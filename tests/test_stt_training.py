@@ -490,6 +490,37 @@ def test_default_sft_draws_are_unchanged_and_sentence_epoch_is_opt_in(monkeypatc
     assert trainer.training_settings(args)["sampler"] == "sentence-epoch"
 
 
+def test_schedule_spreads_its_counts_and_enters_the_contract(monkeypatch):
+    from common import sentence_epoch_draw, sentence_epoch_order
+    trainer, args = parse_training_args(monkeypatch, "sft", ["--sampler", "sentence-epoch",
+                                                             "--schedule", "zh=3,en=1,ko=30,ja=3"])
+    cycle = args.schedule
+    assert cycle == trainer.schedule_spec("ko=30,ja=3,zh=3,en=1")  # input order does not matter
+    assert {lang: cycle.count(lang) for lang in set(cycle)} == {"ko": 30, "ja": 3, "zh": 3, "en": 1}
+    others = [i for i, lang in enumerate(cycle) if lang != "ko"]
+    assert max(b - a for a, b in zip(others, others[1:] + [others[0] + len(cycle)])) <= 7  # no long KO-only run
+    assert trainer.training_settings(args)["schedule"] == list(cycle)
+    assert trainer.schedule_of(trainer.training_settings(args)) == cycle
+    pools = sentence_pools()
+    order = sentence_epoch_order(pools, 11)
+    assert [trainer.sft_row(pools, order, 11, i, cycle)["language"] for i in range(13)] == list(cycle[:13])
+    assert [trainer.sft_row(pools, order, 11, i, cycle) for i in range(13)] == [
+        sentence_epoch_draw(order, i, cycle) for i in range(13)]
+    trainer, args = parse_training_args(monkeypatch, "sft", [])
+    assert "schedule" not in trainer.training_settings(args)  # existing contracts are unchanged
+    assert trainer.schedule_of(trainer.training_settings(args)) == trainer.SCHEDULE
+
+
+@pytest.mark.parametrize("stage,extra,schedule", [
+    ("sft", [], "ko=3,ja=3,zh=3"), ("sft", [], "ko=3,ja=3,zh=3,en=0"), ("sft", [], "ko=3,ko=1,ja=3,zh=3,en=1"),
+    ("sft", [], "ko=3,ja=3,zh=3,fr=1"), ("grpo", ["--base-reference"], "ko=3,ja=3,zh=3,en=1"),
+    ("evaluate", [], "ko=3,ja=3,zh=3,en=1")])
+def test_schedule_needs_all_four_positive_counts_and_sft(monkeypatch, stage, extra, schedule):
+    with pytest.raises(SystemExit) as error:
+        parse_training_args(monkeypatch, stage, [*extra, "--schedule", schedule])
+    assert error.value.code == 2
+
+
 @pytest.mark.parametrize("stage,extra", [
     ("grpo", ["--base-reference"]), ("evaluate", []), ("evaluate", ["--external", "probe.jsonl"])])
 def test_sentence_epoch_is_rejected_outside_sft(monkeypatch, stage, extra):
