@@ -21,9 +21,10 @@ and [the four-slot contract](../skills/autoresearch/SKILL.md).
   Phone-call SFT fixes calls but fails the 8 kHz gate
   ([RSH-20261101-003](research/RSH-20261101-003-qwen-asr-phone-call-sft.md),
   [DEC-20261101-002](decisions/DEC-20261101-002-qwen-asr-8khz-no-regression-gate.md)).
-  Next: once the operator chooses a number style, rebuild call targets in
-  that style, keep discourse words, drop only pure interjections, and
-  retrain without FLEURS 8 kHz copies. Repetition loops need a fix.
+  Next: retrain on `data-v011-calls-ko` (Korean number style, only
+  interjections dropped, [DEC-20261101-003](decisions/DEC-20261101-003-qwen-asr-korean-number-style.md))
+  with two seeds, to tell whether the FLEURS EN 8 kHz loss is real.
+  Repetition loops need a fix.
   JA/ZH/EN real-use probes are still needed; Japanese is the language that
   8 kHz hurts.
 - Preserve rejected snapshots. Rebuild Common Voice with the merged literal-

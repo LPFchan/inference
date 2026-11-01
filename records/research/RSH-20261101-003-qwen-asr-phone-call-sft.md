@@ -65,6 +65,10 @@ real-use. On calls, both runs also beat base, by 16.0% and 14.6%.
   - The rest are a dropped 저기 or 뭐 and one two-speaker clip cut to its
     first speaker.
   - 17% of call targets contain digits, some unnatural (`2 다` for 둘 다).
+- **Number-blind, only English fails.** Rescored with `gate2.py` (sha256
+  `2716452c…`, DEC-20261101-003), the KSS and FLEURS KO failures disappear
+  for both runs. FLEURS EN at 8 kHz is the only one left. Calls stay -23%
+  (v009) and -22% (v010) at both rates (`gate2-v001.json`).
 - **The 8 kHz copies did not help 8 kHz.** v010's FLEURS 8 kHz score (0.930)
   equals v009's (0.929). It also cost Japanese at 16 kHz.
 

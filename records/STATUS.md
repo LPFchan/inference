@@ -45,7 +45,8 @@
   (-24%, both rates) and also beats base on calls. Both candidates fail the
   8 kHz gate: on KSS because numbers are now written in digits like the call
   transcripts, and on FLEURS EN (and KO for v009). The incumbent is
-  unchanged.
+  unchanged. Under number-blind gates ([DEC-20261101-003](decisions/DEC-20261101-003-qwen-asr-korean-number-style.md))
+  only FLEURS EN at 8 kHz still fails.
 - [Confirmed findings](research/RSH-20261030-001-confirmed-qwen-asr-one-pass-sft.md).
   Selection authority: [DEC-001](decisions/DEC-20261029-001-qwen-asr-autoresearch.md),
   [DEC-002](decisions/DEC-20261029-002-four-slot-qwen-asr-autoresearch.md),
