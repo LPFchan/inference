@@ -15,14 +15,16 @@
   score 0.8668. No trained model is deployed; Nemotron stays unloaded.
   Original MLX 8-bit remains the fixed normalization anchor.
 - **Live:** none; all slots idle.
-- **Operator hold, download only:** yeowoolmac is in use for another project.
+- **Operator hold:** yeowoolmac is in use for another project.
   Data preparation and model jobs wait for the operator to explicitly release
-  it. The existing serial AIHub queue continues under
-  `~/models/stt/aihub-ko-20261031/fetch-robust.sh` on yeowoolmac; meetings
-  (`464/31655`) and variety shows (`71314/465441`) are complete, and talk
-  shows (`71314/465445`) are the final active download. Check
-  `fetch-robust.log` and `.done` markers before taking action; never duplicate
-  transfers. Keep these downloads off Dumpling and hosted APIs. The unlaunched
+  it. The serial AIHub queue completed on 2026-11-03 at 01:06 GMT+9:
+  meetings (`464/31655`), variety shows (`71314/465441`) and talk shows
+  (`71314/465445`) have `.done` markers under
+  `~/models/stt/aihub-ko-20261031` on yeowoolmac. The final talk-show ZIP
+  is 82,341,015,843 bytes; its central directory contains 1,255 unique WAV
+  filenames matching all 1,255 training labels. This is an index/pairing
+  check, not a full CRC or audio decode. Keep these downloads off Dumpling
+  and hosted APIs; do not repeat completed transfers. The unlaunched
   builder is `proposals/spont-train-20261102/build_spont.py` under the Mac's
   hill-climb root.
 - **Plateau diagnosis** ([RSH-20261031-001](research/RSH-20261031-001-qwen-asr-plateau-diagnosis.md)):

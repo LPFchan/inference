@@ -6,10 +6,8 @@ Follow [DEC-001](decisions/DEC-20261029-001-qwen-asr-autoresearch.md),
 [DEC-002](decisions/DEC-20261029-002-four-slot-qwen-asr-autoresearch.md)
 and [the four-slot contract](../skills/autoresearch/SKILL.md).
 
-- Finish watching the existing AIHub download queue on yeowoolmac. After it
-  finishes, check the final ZIP's file index against its training labels,
-  retire the temporary download monitor, and wait for the operator to release
-  the Mac before data preparation or training. Keep AIHub data off Dumpling.
+- Wait for the operator to release yeowoolmac before preparing the completed
+  AIHub training downloads or starting model jobs. Keep AIHub data off Dumpling.
 - Fill free slots with fresh TRAIN-grounded SFT and RL proposals. Preserve
   sealed evaluation inputs, current incumbent capture and source/data hashes;
   no parameter sweeps selected from validation errors.
