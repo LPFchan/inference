@@ -15,6 +15,16 @@
   score 0.8668. No trained model is deployed; Nemotron stays unloaded.
   Original MLX 8-bit remains the fixed normalization anchor.
 - **Live:** none; all slots idle.
+- **Operator hold, download only:** yeowoolmac is in use for another project.
+  Data preparation and model jobs wait for the operator to explicitly release
+  it. The existing serial AIHub queue continues under
+  `~/models/stt/aihub-ko-20261031/fetch-robust.sh` on yeowoolmac; meetings
+  (`464/31655`) and variety shows (`71314/465441`) are complete, and talk
+  shows (`71314/465445`) are the final active download. Check
+  `fetch-robust.log` and `.done` markers before taking action; never duplicate
+  transfers. Keep these downloads off Dumpling and hosted APIs. The unlaunched
+  builder is `proposals/spont-train-20261102/build_spont.py` under the Mac's
+  hill-climb root.
 - **Plateau diagnosis** ([RSH-20261031-001](research/RSH-20261031-001-qwen-asr-plateau-diagnosis.md)):
   the two-seed screen resolves only gains of about 6–8% (seed SD 0.029
   pooled, 0.012 for the incumbent recipe), so post-gloss losses are ties. 54–74%
