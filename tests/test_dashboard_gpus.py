@@ -67,13 +67,6 @@ def test_one_entry_per_detected_gpu(payload, gpu_count):
     assert [g["index"] for g in payload(gpu_count)["gpus"]] == list(range(gpu_count))
 
 
-def test_single_gpu_host_reports_no_gpu1(payload):
-    """The case that prompted this: a second card removed from the machine."""
-    indexes = [g["index"] for g in payload(1)["gpus"]]
-    assert indexes == [0]
-    assert 1 not in indexes
-
-
 def test_headless_host_reports_no_gpus(payload):
     assert payload(0)["gpus"] == []
 

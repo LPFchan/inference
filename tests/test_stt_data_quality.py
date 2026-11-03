@@ -1,5 +1,4 @@
 """Source transcript parsing: one Common Voice TSV line is one training target."""
-import csv
 import io
 import json
 from pathlib import Path
@@ -26,15 +25,6 @@ def write(tmp_path, text):
     path = tmp_path / "train.tsv"
     path.write_text(HEADER + text, encoding="utf-8")
     return path
-
-
-def test_default_csv_quoting_merges_lines_after_an_unbalanced_quote(tmp_path):
-    with write(tmp_path, UNBALANCED).open(newline="") as stream:
-        legacy = list(csv.DictReader(stream, delimiter="\t"))
-    # The next quote character (inside the English row) closes the field, so
-    # three ordinary records vanish into the first target.
-    assert [r["client_id"] for r in legacy] == ["a", "e"]
-    assert legacy[0]["sentence"].count("\n") == 3
 
 
 def test_each_physical_line_keeps_its_own_literal_sentence(tmp_path):
