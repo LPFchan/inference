@@ -335,9 +335,11 @@ class DropInBlockerTests(unittest.TestCase):
 
             async def fake_start(active):
                 launches.append(active)
+                active.status = config.MODEL_STATUS_LOADING
+                active.running = True
                 started.set()
                 await release.wait()
-                active.running = True
+                active.status = config.MODEL_STATUS_LOADED
 
             with patch.object(mm_module, "registry", FakeRegistry()), \
                  patch.object(mm_module, "ActiveModel", FakeActive), \
@@ -352,6 +354,7 @@ class DropInBlockerTests(unittest.TestCase):
                 await started.wait()
                 second = asyncio.create_task(manager.start_model("model"))
                 await asyncio.sleep(0)
+                self.assertFalse(second.done())
                 release.set()
                 results = await asyncio.gather(first, second)
 

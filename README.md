@@ -30,6 +30,10 @@ docker exec grimoire grimoire unpin gemma-4-31B        # release
 curl -X POST http://localhost:9001/switch/qwen-3.6-27B -H "Authorization: Bearer $LOST_PLUS_TOKEN"
 ```
 
+Concurrent loads wait for backend readiness before reusing a process, including
+compatible reasoning aliases. A failed unload keeps the model tracked as
+`failed` for retry; proxy routes include only loaded, running models.
+
 ## Auth
 
 `auth.lost.plus` is the only public identity and credential authority.

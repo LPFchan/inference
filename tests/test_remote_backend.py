@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
+import pytest
+
 import grimoire.model_manager as mm
 from grimoire.model_manager import ActiveModel, ModelManager
 from grimoire.registry import ModelRegistry
@@ -149,6 +151,46 @@ def test_manager_remote_start_bypasses_local_gpu_allocator():
     assert active.gpu is None
     assert active.port is None
     assert manager.list_active() == ["remote"]
+
+
+def test_manager_failed_remote_unload_keeps_claim_for_retry():
+    manager = ModelManager(gpu_count=1)
+    active = ActiveModel("remote", dict(REMOTE), port=None, gpu=None)
+    active.remote_running = True
+    active.status = "loaded"
+    manager.active["remote"] = active
+    with patch.object(mm, "registry", _Registry()), \
+            patch.object(mm.httpx, "Client", _Client), \
+            patch.object(mm, "_publish_route_table") as publish:
+        with patch.object(_Client, "post", side_effect=mm.httpx.ConnectError("agent unavailable")):
+            with pytest.raises(RuntimeError, match="failed to stop remote"):
+                asyncio.run(manager.stop_model("remote"))
+        assert active.remote_running
+        assert manager.get_active("remote") is active
+        assert manager.get_status("remote") == "failed"
+        assert publish.call_args.args[0] == {}
+
+        assert asyncio.run(manager.stop_model("remote"))
+        assert not active.remote_running
+        assert manager.active == {}
+        assert publish.call_args.args[0] == {}
+
+
+def test_manager_external_unload_only_releases_claim():
+    manager = ModelManager(gpu_count=1)
+    cfg = {"backend": "vllm-remote", "remote-url": REMOTE["remote-url"]}
+    active = ActiveModel("remote", cfg, port=None, gpu=None)
+    active.remote_running = True
+    active.status = "loaded"
+    manager.active["remote"] = active
+    with patch.object(mm, "registry", _Registry()), \
+            patch.object(mm.httpx, "Client") as client, \
+            patch.object(mm, "_publish_route_table") as publish:
+        assert asyncio.run(manager.stop_model("remote"))
+        client.assert_not_called()
+        assert not active.remote_running
+        assert manager.active == {}
+        assert publish.call_args.args[0] == {}
 
 
 def test_remote_health_probe_requires_agent_residency_and_backend_health():

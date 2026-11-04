@@ -720,9 +720,12 @@ class ModelManager:
             return sorted(self.gpu_mask)
         return list(range(self.gpu_count))
 
-    def _compatible_active_entry(self, model_name, cfg=None):
+    def _compatible_active_entry(self, model_name, cfg=None, *, ready_only=False):
+        """Find shared ownership; startup reuse additionally requires readiness."""
         direct = self.active.get(model_name)
-        if direct is not None and direct.is_running():
+        if (direct is not None
+                and (not ready_only or direct.status == config.MODEL_STATUS_LOADED)
+                and (direct.is_running() or direct.status == config.MODEL_STATUS_FAILED)):
             return model_name, direct
 
         cfg = cfg or self.effective_config(model_name)
@@ -737,7 +740,9 @@ class ModelManager:
         if signature is None:
             return None, None
         for active_name, active in self.active.items():
-            if not active.is_running():
+            if ready_only and active.status != config.MODEL_STATUS_LOADED:
+                continue
+            if not active.is_running() and active.status != config.MODEL_STATUS_FAILED:
                 continue
             active_cfg = active.cfg
             if active_cfg.get("gpu-ids") is not None:
@@ -762,13 +767,16 @@ class ModelManager:
         return None, None
 
     def _build_route_table(self):
-        """Map each running model -> its replica backends for the proxy workers.
+        """Map each ready model -> its replica backends for the proxy workers.
 
-        A model's replicas are itself plus any running `replica_peers` (sibling
+        A model's replicas are itself plus any ready `replica_peers` (sibling
         data-parallel copies on other GPUs), so the proxy can round-robin a single
         model name across GPUs.
         """
-        running = {name: a for name, a in self.active.items() if a.is_running()}
+        running = {
+            name: a for name, a in self.active.items()
+            if a.status == config.MODEL_STATUS_LOADED and a.is_running()
+        }
 
         def entry(name):
             a = running[name]
@@ -1071,15 +1079,15 @@ class ModelManager:
         """
         existing_direct = self.active.get(model_name)
         if existing_direct is not None:
-            if existing_direct.is_running():
+            if (existing_direct.status == config.MODEL_STATUS_LOADED
+                    and existing_direct.is_running()):
                 return existing_direct
-            await asyncio.to_thread(existing_direct.stop)
-            del self.active[model_name]
+            await self._stop_active_model(model_name, existing_direct)
 
         cfg = self.effective_config(model_name)
         if not cfg:
             raise KeyError(f"Model '{model_name}' not found in registry")
-        _, existing = self._compatible_active_entry(model_name, cfg)
+        _, existing = self._compatible_active_entry(model_name, cfg, ready_only=True)
         if existing is not None:
             return existing
         valid, reason = registry.validate(model_name, gpu_count=self.gpu_count)
@@ -1175,14 +1183,12 @@ class ModelManager:
         if not cfg:
             raise KeyError(f"Model '{model_name}' not found in registry")
 
-        # Fast path: an already-running model is the common case for proxied
-        # traffic. Return it without taking the global lock so high-RPS requests
-        # don't serialize through one async critical section. Safe in asyncio:
-        # no await between the dict read and is_running(), so it's atomic; the
-        # rare not-running case falls through to the locked start path.
+        # Ready models serve proxied traffic without taking the global lock.
+        # A live process may still be loading: those callers wait for the
+        # lifecycle lock and recheck after the existing startup finishes.
         direct = self.active.get(model_name)
         if direct is None or direct.is_running():
-            _, existing = self._compatible_active_entry(model_name, cfg)
+            _, existing = self._compatible_active_entry(model_name, cfg, ready_only=True)
             if existing is not None:
                 return existing
 
@@ -1415,10 +1421,11 @@ class ModelManager:
                 )
             if not active:
                 return False
-            self.active.pop(active_name, None)
-            await asyncio.to_thread(active.stop)
+            try:
+                await self._stop_active_model(active_name, active)
+            finally:
+                self._publish_routes()
             logger.info(f"Stopped {active_name}")
-            self._publish_routes()
             return True
 
     def get_active(self, model_name):
