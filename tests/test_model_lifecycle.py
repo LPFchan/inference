@@ -1,6 +1,7 @@
 """Readiness and cleanup ownership regressions without backend operations."""
 
 import asyncio
+import threading
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -208,3 +209,149 @@ def test_preset_reports_partial_failure_and_retains_failed_stop(lifecycle):
     assert manager.get_active("owner") is active
     assert manager.get_status("owner") == "failed"
     assert manager.gpu_mask == set()
+
+
+@pytest.mark.parametrize("cleanup_fails", [False, True])
+def test_starters_wait_for_running_unload(lifecycle, monkeypatch, cleanup_fails):
+    manager = lifecycle.manager
+    owner = mm.ActiveModel("owner", lifecycle.configs["owner"], 8001, mm.GpuPlacement((0,)))
+    owner.status = "loaded"
+    owner.process = Mock()
+    owner.process.poll.return_value = None
+    manager.active["owner"] = owner
+    manager._publish_routes()
+    assert "owner" in lifecycle.publish.call_args.args[0]
+
+    async def scenario():
+        loop = asyncio.get_running_loop()
+        stopping = asyncio.Event()
+        release = threading.Event()
+        launches = []
+
+        def stop():
+            loop.call_soon_threadsafe(stopping.set)
+            assert release.wait(timeout=3), "stop barrier timed out"
+            if cleanup_fails:
+                raise RuntimeError("cleanup failed")
+            owner.process = None
+
+        def start(active):
+            launches.append(active)
+            active.process = Mock()
+            active.process.poll.return_value = None
+
+        owner.stop = Mock(side_effect=stop)
+        monkeypatch.setattr(mm.ActiveModel, "start", start)
+        monkeypatch.setattr(mm.ActiveModel, "wait_ready", AsyncMock())
+        monkeypatch.setattr(mm.ActiveModel, "stop", lambda active: setattr(active, "process", None))
+        lifecycle.allocate.side_effect = lambda *args: (
+            mm.GpuPlacement((0,)),
+            [(name, active) for name, active in manager.active.items() if active.is_running()],
+        )
+        unload = asyncio.create_task(manager.stop_model("owner"))
+        starters = []
+        try:
+            await asyncio.wait_for(stopping.wait(), 2)
+            assert owner.is_running()
+            starters = [asyncio.create_task(manager.start_model(name)) for name in ("owner", "alias")]
+            await asyncio.sleep(0)
+            assert all(not task.done() for task in starters)
+            assert owner.status == manager.get_status("alias") == "unloaded"
+            assert lifecycle.publish.call_args.args[0] == {}
+            assert manager.active["owner"] is owner
+        finally:
+            release.set()
+            results = await asyncio.gather(unload, *starters, return_exceptions=True)
+
+        assert not owner._unloading
+        if cleanup_fails:
+            assert all(isinstance(result, RuntimeError) for result in results)
+            assert all("cleanup failed" in str(result) for result in results)
+            assert manager.active["owner"] is owner
+            assert owner.status == "failed"
+            assert owner.is_running()
+            assert launches == []
+            assert lifecycle.publish.call_args.args[0] == {}
+        else:
+            assert results[0] is True
+            assert results[1] is results[2] is launches[0]
+            assert results[1] is not owner
+            assert results[1].status == "loaded"
+            assert manager.active == {"owner": results[1]}
+            assert lifecycle.publish.call_args.args[0] == manager._build_route_table()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("cleanup_fails", [False, True])
+@pytest.mark.parametrize("probe_finishes_during_stop", [False, True])
+def test_remote_refresh_cannot_readvertise_unloading_model(
+    lifecycle, cleanup_fails, probe_finishes_during_stop
+):
+    manager = lifecycle.manager
+    cfg = {"backend": "vllm-remote", "remote-url": "http://backend.invalid"}
+    lifecycle.configs["owner"] = cfg
+    lifecycle.registry.list_all.return_value = ["owner"]
+    owner = mm.ActiveModel("owner", cfg, None, None)
+    owner.status = "loaded"
+    owner.remote_running = True
+    manager.active["owner"] = owner
+    manager._publish_routes()
+
+    async def scenario():
+        loop = asyncio.get_running_loop()
+        probing = asyncio.Event()
+        release_probe = asyncio.Event()
+        stopping = asyncio.Event()
+        release_stop = threading.Event()
+
+        async def probe():
+            probing.set()
+            await release_probe.wait()
+            return True
+
+        def stop():
+            loop.call_soon_threadsafe(stopping.set)
+            assert release_stop.wait(timeout=3), "stop barrier timed out"
+            if cleanup_fails:
+                raise RuntimeError("cleanup failed")
+            owner.remote_running = False
+
+        owner.probe_remote_health = AsyncMock(side_effect=probe)
+        owner.stop = Mock(side_effect=stop)
+        refresh = asyncio.create_task(manager.refresh_remote_statuses())
+        unload = None
+        try:
+            await asyncio.wait_for(probing.wait(), 2)
+            unload = asyncio.create_task(manager.stop_model("owner"))
+            await asyncio.wait_for(stopping.wait(), 2)
+            assert owner.is_running()
+            assert owner.status == "unloaded"
+            assert lifecycle.publish.call_args.args[0] == {}
+            assert await manager.refresh_remote_statuses() == {}
+            assert owner.probe_remote_health.await_count == 1
+
+            if probe_finishes_during_stop:
+                release_probe.set()
+                assert await refresh == {}
+                assert owner.status == "unloaded"
+                assert lifecycle.publish.call_args.args[0] == {}
+            release_stop.set()
+            if cleanup_fails:
+                with pytest.raises(RuntimeError, match="cleanup failed"):
+                    await unload
+            else:
+                assert await unload
+            release_probe.set()
+            assert await refresh == {}
+            assert manager.active == ({"owner": owner} if cleanup_fails else {})
+            assert owner.status == ("failed" if cleanup_fails else "unloaded")
+            assert owner.remote_running == cleanup_fails
+            assert not owner._unloading
+            assert lifecycle.publish.call_args.args[0] == {}
+        finally:
+            release_stop.set()
+            release_probe.set()
+            await asyncio.gather(refresh, *([unload] if unload else []), return_exceptions=True)
+
+    asyncio.run(scenario())

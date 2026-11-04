@@ -368,6 +368,8 @@ class ActiveModel:
         self.started = datetime.now(timezone.utc)
         self.backend_model_id = None
         self.status = config.MODEL_STATUS_LOADING
+        self._unloading = False
+        self._unload_token = None
         self.backend_type = cfg.get("backend", BACKEND_LLAMA)
         self.remote_running = False
         # A remote agent may stop other residents to fit this one; only
@@ -1028,12 +1030,20 @@ class ModelManager:
 
     async def _stop_active_model(self, name: str, active: ActiveModel, drop_on_success: bool = True):
         """Stop a tracked model, but retain failed cleanup in manager state."""
+        # Keep ownership while making the backend unavailable to clients.
+        active._unloading = True
+        active._unload_token = object()
+        active.status = config.MODEL_STATUS_UNLOADED
+        self._publish_routes()
         try:
             await asyncio.to_thread(active.stop)
         except Exception as e:
             active.status = config.MODEL_STATUS_FAILED
             self.active[name] = active
             raise RuntimeError(f"failed to stop {name}: {e}") from e
+        finally:
+            active._unloading = False
+            self._publish_routes()
         if drop_on_success and self.active.get(name) is active:
             self.active.pop(name, None)
 
@@ -1360,25 +1370,29 @@ class ModelManager:
             if cfg.get("backend") != BACKEND_VLLM_REMOTE:
                 continue
             active = self.active.get(name)
+            if active is not None and active._unloading:
+                continue
             if (
                 active is not None
                 and active.status == config.MODEL_STATUS_LOADING
                 and not active.remote_running
             ):
                 continue
-            candidates.append(
-                (name, active or ActiveModel(name, cfg, port=None, gpu=None))
-            )
+            active = active or ActiveModel(name, cfg, port=None, gpu=None)
+            candidates.append((name, active, active._unload_token))
         if not candidates:
             return {}
 
         results = await asyncio.gather(
-            *(active.probe_remote_health() for _, active in candidates),
+            *(active.probe_remote_health() for _, active, _ in candidates),
             return_exceptions=True,
         )
         refreshed = {}
         changed = False
-        for (name, active), result in zip(candidates, results):
+        for (name, active, unload_token), result in zip(candidates, results):
+            # Discard probes that overlap cleanup, even if it has finished.
+            if active._unloading or active._unload_token is not unload_token:
+                continue
             if isinstance(result, BaseException) or result is None:
                 continue
             current = self.active.get(name)
@@ -1421,10 +1435,7 @@ class ModelManager:
                 )
             if not active:
                 return False
-            try:
-                await self._stop_active_model(active_name, active)
-            finally:
-                self._publish_routes()
+            await self._stop_active_model(active_name, active)
             logger.info(f"Stopped {active_name}")
             return True
 
