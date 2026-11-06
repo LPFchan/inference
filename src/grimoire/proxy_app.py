@@ -26,7 +26,7 @@ from fastapi.responses import RedirectResponse, Response, StreamingResponse
 
 from grimoire import config
 from grimoire.auth import AuthIdentity, authenticate_public
-from grimoire.proxy.client import init_proxy_client, close_proxy_client, get_proxy_client
+from grimoire.proxy.client import init_proxy_client, close_proxy_client, get_proxy_client, send_while_connected
 from grimoire.proxy.llama import _backend_request_headers, _backend_response_headers
 from grimoire.proxy.routes_table import RouteTableReader
 from grimoire.registry import registry
@@ -160,7 +160,7 @@ async def _forward_to_manager(
         params=request.query_params,
         content=body,
     )
-    upstream = await client.send(req, stream=True)
+    upstream = await send_while_connected(client, req, request)
 
     chunks = upstream.aiter_raw()
     if upstream.headers.get("content-type", "").startswith("text/event-stream"):
@@ -223,7 +223,7 @@ async def proxy_v1(request: Request, path: str):
         req = client.build_request("POST", f"{backend_base_url}/v1/{path}",
                                    headers=headers, params=request.query_params, content=body)
     try:
-        upstream = await client.send(req, stream=True)
+        upstream = await send_while_connected(client, req, request)
     except httpx.HTTPError as e:
         logger.error(f"backend {backend['port']} unavailable: {e}")
         raise HTTPException(status_code=502, detail="Model server unavailable")

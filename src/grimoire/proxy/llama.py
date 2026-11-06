@@ -11,7 +11,7 @@ from fastapi.responses import StreamingResponse
 
 from grimoire import config
 from grimoire.chat_template import apply_chat_template_kwargs
-from grimoire.proxy.client import get_proxy_client
+from grimoire.proxy.client import get_proxy_client, send_while_connected
 from grimoire.cache import KVCacheStore
 from grimoire.plugins import plugin_manager
 from grimoire.registry import registry
@@ -198,6 +198,7 @@ async def _proxy_chat(
     conversation_id=None,
     history_conversation_id=None,
     record_usage=True,
+    request=None,
 ):
     """Proxy chat completions while keeping the upstream client open."""
     # Local imports avoid circular dependency with entrypoint.
@@ -267,14 +268,15 @@ async def _proxy_chat(
                 await store.restore_conv(client, slot_url, validated_conversation_id)
                 active._current_conv_id = validated_conversation_id
 
-        upstream = await client.send(
+        upstream = await send_while_connected(
+            client,
             client.build_request(
                 "POST",
                 url,
                 headers=headers,
                 json=payload,
             ),
-            stream=True,
+            request,
         )
     except Exception:
         if slot_guard is not None:

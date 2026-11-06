@@ -7,7 +7,10 @@ reused across requests is ~3x faster for those workloads. Initialized in the
 app lifespan; both the entrypoint proxies and proxy.llama use it.
 """
 
+import asyncio
+
 import httpx
+from fastapi import HTTPException
 
 _client: httpx.AsyncClient | None = None
 
@@ -40,3 +43,34 @@ def get_proxy_client() -> httpx.AsyncClient:
     if _client is None:
         raise RuntimeError("proxy client not initialized")
     return _client
+
+
+async def send_while_connected(client: httpx.AsyncClient, req: httpx.Request, request=None) -> httpx.Response:
+    """Send ``req`` streamed, cancelling it if ``request``'s client leaves first.
+
+    A queued backend can hold its response headers for many minutes. Without
+    this the handler keeps waiting after its client gives up, the backend runs
+    the abandoned request anyway, and every client retry queues another copy.
+    Once headers arrive, StreamingResponse watches for the disconnect itself.
+    """
+    if request is None:
+        return await client.send(req, stream=True)
+    sending = asyncio.ensure_future(client.send(req, stream=True))
+    leaving = asyncio.ensure_future(_client_left(request))
+    try:
+        await asyncio.wait({sending, leaving}, return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        leaving.cancel()
+        if not sending.done():
+            # Cancelling closes the backend connection, which is the backend's
+            # signal to drop the request.
+            sending.cancel()
+            await asyncio.gather(sending, return_exceptions=True)
+    if sending.cancelled():
+        raise HTTPException(status_code=499, detail="Client closed request")
+    return sending.result()
+
+
+async def _client_left(request) -> None:
+    while (await request.receive())["type"] != "http.disconnect":
+        pass
