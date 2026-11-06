@@ -78,6 +78,7 @@ from grimoire.proxy.client import (
     init_proxy_client,
     close_proxy_client,
     get_proxy_client,
+    send_while_connected,
 )
 from grimoire.routes.history import router as history_router
 from grimoire.routes.dashboard import router as dashboard_router
@@ -344,6 +345,7 @@ async def chat_completions(request: Request):
             conversation_id=conversation_id,
             history_conversation_id=history_conversation_id,
             record_usage=request.headers.get("x-grimoire-cache-warm") != "1",
+            request=request,
         )
     except HTTPException:
         raise
@@ -410,7 +412,7 @@ async def chat_responses(request: Request):
             params=request.query_params,
             json=payload,
         )
-        upstream = await client.send(req, stream=True)
+        upstream = await send_while_connected(client, req, request)
     except HTTPException:
         raise
     except LoadRefused as e:
@@ -481,7 +483,7 @@ async def proxy_v1(request: Request, path: str):
                 content=body,
             )
 
-        upstream = await client.send(req, stream=True)
+        upstream = await send_while_connected(client, req, request)
     except HTTPException:
         raise
     except LoadRefused as e:
