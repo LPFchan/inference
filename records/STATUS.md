@@ -385,6 +385,18 @@ Patch chain in `patches/atomic-llama-cpp/`, applied in order by `Dockerfile`:
 
 ## Recent Changes
 
+- 2026-11-06: **DeepSeek-V4.1-Flash-1017 keeps more conversations resident** —
+  five parallel Claude Code subagents (~80K-token prompts each) timed out
+  after 90 minutes: the 1,048,576-position pool held only five or six kept
+  prompts, so every turn re-read its prompt cold, requests outlived the
+  client's timeout, and retries piled up (56 queued, 61 gateway connections
+  open to spark2 against one live client). The pair now serves a
+  524,288-token window over a 2,101,248-position pool with KV sharding
+  (`CONTEXT`, `POOL`, `KV_SHARD=1` in spark2's untracked `scripts/local.sh`),
+  room for about fifteen 85K-token conversations at roughly the old memory:
+  MemAvailable after load 7.4 GiB on spark2 and 8.6 GiB on spark1. Grimoire's
+  `ctx-size` for the model is 524,288. The gateway still keeps an upstream
+  request open after its client leaves.
 - 2026-10-29: **Qwen3-ASR Mac training is operational** — a separate MLX
   workflow prepares speaker/text/audio-disjoint adaptation data with frozen
   FLEURS exclusions, trains decoder LoRA, resumes checkpoints and refines with

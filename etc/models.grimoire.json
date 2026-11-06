@@ -1412,7 +1412,7 @@
         "completion",
         "multimodal"
       ],
-      "ctx-size": 1048576,
+      "ctx-size": 524288,
       "added": "2026-10-25T06:33:28.207460+00:00"
     },
     "qwen3.6-35B-A3B": {
