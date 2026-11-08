@@ -21,6 +21,7 @@ from fastapi.testclient import TestClient
 import grimoire.config as config
 import grimoire.entrypoint as entrypoint
 import grimoire.routes.models as models_routes
+import grimoire.routes.registry as registry_routes
 
 
 class FakeActive:
@@ -214,7 +215,7 @@ class RouterModeContractTests(unittest.TestCase):
 
         for value in (-1, 1, 16384):
             fake_registry = FakeRegistry()
-            with patch.object(models_routes, "registry", fake_registry):
+            with patch.object(registry_routes, "registry", fake_registry):
                 response = self.client.put(
                     "/registry/model/output-limit-validation",
                     json={"file": "model.gguf", "predict": value},
@@ -244,7 +245,7 @@ class RouterModeContractTests(unittest.TestCase):
             "remote-url": "http://mangchi.tail.lost.plus:8001",
         }
         fake_registry = FakeRegistry()
-        with patch.object(models_routes, "registry", fake_registry):
+        with patch.object(registry_routes, "registry", fake_registry):
             response = self.client.put(
                 "/registry/model/remote-route-validation",
                 json=config_data,
@@ -282,7 +283,7 @@ class RouterModeContractTests(unittest.TestCase):
                     return True, "OK"
 
             fake_registry = FakeRegistry()
-            with patch.object(models_routes, "registry", fake_registry):
+            with patch.object(registry_routes, "registry", fake_registry):
                 response = self.client.put(
                     "/registry/model/output-limit-validation",
                     json={"file": "model.gguf", "predict": value},
@@ -313,7 +314,7 @@ class RouterModeContractTests(unittest.TestCase):
                         return True, "OK"
 
                 fake_registry = FakeRegistry()
-                with patch.object(models_routes, "registry", fake_registry):
+                with patch.object(registry_routes, "registry", fake_registry):
                     response = self.client.put(
                         "/registry/model/output-limit-validation",
                         json={"file": "model.gguf", field: value},

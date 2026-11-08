@@ -23,7 +23,7 @@ from fastapi import HTTPException
 import grimoire.config as config
 import grimoire.entrypoint as entrypoint
 import grimoire.model_manager as mm_module
-import grimoire.routes.models as models_routes
+import grimoire.routes.registry as registry_routes
 from grimoire.history import HistoryStore, identity_hash
 from grimoire.registry import ModelRegistry
 
@@ -948,18 +948,18 @@ class DropInBlockerTests(unittest.TestCase):
             def add(self, alias, config):
                 self.added = (alias, config)
         fake_registry = FakeRegistry()
-        old_registry = models_routes.registry
+        old_registry = registry_routes.registry
         try:
-            models_routes.registry = fake_registry
-            models_routes._ingest_tasks["task-mmproj"] = {
+            registry_routes.registry = fake_registry
+            registry_routes._ingest_tasks["task-mmproj"] = {
                 "alias": "derived-vision",
                 "filename": "derived.gguf",
                 "load_settings_from": "gemma-vision",
             }
-            models_routes._register_model("task-mmproj")
+            registry_routes._register_model("task-mmproj")
         finally:
-            models_routes.registry = old_registry
-            models_routes._ingest_tasks.pop("task-mmproj", None)
+            registry_routes.registry = old_registry
+            registry_routes._ingest_tasks.pop("task-mmproj", None)
         alias, config = fake_registry.added
         self.assertEqual(alias, "derived-vision")
         self.assertEqual(config["file"], "gguf/derived.gguf")
