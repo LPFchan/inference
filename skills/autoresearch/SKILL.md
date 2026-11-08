@@ -14,7 +14,7 @@ docs and commits.
 
 ## Slots
 
-- M4 Pro 24 GB: `yeowoolmac-the-rest.tailaa113.ts.net`, `main` tmux session.
+- M4 Pro 24 GB: `yeowoolmac-the-rest.tail.lost.plus`, `main` tmux session.
 - Nemotron backend `plus.lost.inference.stt` stays booted out; no auto-restore.
   Preserve gateway/tunnel, oMLX settings and every existing model/data/result.
 - At most four model workers. Slot 1 is `ROOT/.gpu-loop.lock` (serial drivers);

@@ -385,6 +385,12 @@ Patch chain in `patches/atomic-llama-cpp/`, applied in order by `Dockerfile`:
 
 ## Recent Changes
 
+- 2026-11-08: **Remote backends move to the fleet's Headscale** — the
+  operator's fleet left the `lost.plus` tailnet for `net.lost.plus`, so every
+  remote model now names its host as `<machine>.tail.lost.plus` instead of a
+  `tailaa113.ts.net` name or an old `100.x` address. Live registry updated
+  through `PUT /registry/model`, then `POST /restart`; DeepSeek-V4.1-Flash-1017
+  and qwen3.8-flash-next answered through the gateway afterwards.
 - 2026-11-06: **DeepSeek-V4.1-Flash-1017 keeps more conversations resident** —
   five parallel Claude Code subagents (~80K-token prompts each) timed out
   after 90 minutes: the 1,048,576-position pool held only five or six kept

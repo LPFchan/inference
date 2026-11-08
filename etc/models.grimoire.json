@@ -2,9 +2,9 @@
   "models": {
     "qwen3.8-flash-next": {
       "backend": "vllm-remote",
-      "remote-agent-url": "http://mangchi.tailaa113.ts.net:9700",
+      "remote-agent-url": "http://mangchi.tail.lost.plus:9700",
       "remote-model-id": "qwen3.8-flash-next",
-      "remote-url": "http://mangchi.tailaa113.ts.net:8002",
+      "remote-url": "http://mangchi.tail.lost.plus:8002",
       "backend-model-id": "qwen3.8-flash-next",
       "family": "qwen",
       "capabilities": [
@@ -21,9 +21,9 @@
     },
     "qwen3.8-27b-grugthink": {
       "backend": "vllm-remote",
-      "remote-agent-url": "http://100.94.227.60:9700",
+      "remote-agent-url": "http://spark1.tail.lost.plus:9700",
       "remote-model-id": "qwen3.8-27b-grugthink",
-      "remote-url": "http://100.94.227.60:8003",
+      "remote-url": "http://spark1.tail.lost.plus:8003",
       "backend-model-id": "qwen3.8-27b-grugthink",
       "family": "qwen",
       "capabilities": [
@@ -40,9 +40,9 @@
     },
     "qwen3.8-27b-vanilla": {
       "backend": "vllm-remote",
-      "remote-agent-url": "http://100.94.227.60:9700",
+      "remote-agent-url": "http://spark1.tail.lost.plus:9700",
       "remote-model-id": "qwen3.8-27b-grugthink",
-      "remote-url": "http://100.94.227.60:8003",
+      "remote-url": "http://spark1.tail.lost.plus:8003",
       "backend-model-id": "qwen3.8-27b-vanilla",
       "family": "qwen",
       "capabilities": [
@@ -1406,7 +1406,7 @@
     },
     "DeepSeek-V4.1-Flash-1017": {
       "backend": "vllm-remote",
-      "remote-url": "http://100.120.192.122:8888",
+      "remote-url": "http://spark2.tail.lost.plus:8888",
       "backend-model-id": "DeepSeek-V4.1-Flash-1017",
       "capabilities": [
         "completion",
@@ -1417,7 +1417,7 @@
     },
     "qwen3.6-35B-A3B": {
       "backend": "vllm-remote",
-      "remote-url": "http://100.122.130.86:8000",
+      "remote-url": "http://yeowoolmac-the-rest.tail.lost.plus:8000",
       "backend-model-id": "Qwen3.6-35B-A3B-heretic-oQ3",
       "capabilities": [
         "completion",

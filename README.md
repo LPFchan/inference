@@ -65,9 +65,9 @@ Seed at `/etc/grimoire/models.json`, persisted to `/var/lib/grimoire/models.json
     },
     "qwen3.8-flash-next": {
       "backend": "vllm-remote",
-      "remote-agent-url": "http://mangchi.tailaa113.ts.net:9700",
+      "remote-agent-url": "http://mangchi.tail.lost.plus:9700",
       "remote-model-id": "qwen3.8-flash-next",
-      "remote-url": "http://mangchi.tailaa113.ts.net:8002",
+      "remote-url": "http://mangchi.tail.lost.plus:8002",
       "backend-model-id": "qwen3.8-flash-next",
       "ctx-size": 393216,
       "startup-timeout": 900
