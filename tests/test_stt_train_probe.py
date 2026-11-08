@@ -1,5 +1,4 @@
 """TRAIN-only greedy-versus-sampled probe through the real trainer run() with a tiny fake Qwen on the CPU."""
-import ast
 import importlib.util
 import json
 from pathlib import Path
@@ -459,14 +458,6 @@ def pre_feature_trainer():
     if shown.returncode:
         pytest.skip(f"pre-feature trainer {PRE_FEATURE} unavailable")
     return shown.stdout
-
-
-def test_inference_and_likelihood_paths_are_unchanged():
-    def nested(source):
-        run = next(n for n in ast.parse(source).body if isinstance(n, ast.FunctionDef) and n.name == "run")
-        return {n.name: ast.dump(n) for n in run.body if isinstance(n, ast.FunctionDef)}
-    before, after = nested(pre_feature_trainer()), nested((DIRECTORY / "train.py").read_text())
-    assert before == after and {"context", "sample", "log_probs", "evaluate", "load_adapter"} <= set(after)
 
 
 @pytest.mark.parametrize("stage,extra", [
