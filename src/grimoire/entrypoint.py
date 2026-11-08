@@ -83,6 +83,7 @@ from grimoire.proxy.client import (
 from grimoire.routes.history import router as history_router
 from grimoire.routes.dashboard import router as dashboard_router
 from grimoire.routes.models import router as models_router
+from grimoire.routes.registry import router as registry_router
 from grimoire.routes.plugins import router as plugins_router
 from grimoire.routes.settings import router as settings_router
 from grimoire.routes.presets import router as presets_router
@@ -203,6 +204,7 @@ app = FastAPI(title="Grimoire Gateway", version="0.1.0", lifespan=lifespan)
 app.include_router(history_router)
 app.include_router(dashboard_router)
 app.include_router(models_router)
+app.include_router(registry_router)
 app.include_router(plugins_router)
 app.include_router(settings_router)
 app.include_router(presets_router)
