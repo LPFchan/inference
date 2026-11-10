@@ -18,7 +18,7 @@ Skip entirely:
     SKIP_E2E=1 python -m pytest tests/
 
 Model overrides:
-    GRIMOIRE_LLAMA_SMOKE_MODEL=qwen-3.6-27B python -m pytest tests/test_e2e_smoke.py::LlamaCppSmokeTests -v
+    GRIMOIRE_LLAMA_SMOKE_MODEL=gemma-4-mtp-31B python -m pytest tests/test_e2e_smoke.py::LlamaCppSmokeTests -v
 
 Long-prompt overrides:
 """
@@ -41,7 +41,7 @@ from tests._monitor import SystemMonitor
 SKIP_E2E = os.environ.get("SKIP_E2E", "0") == "1"
 BASE_URL = os.environ.get("GRIMOIRE_SMOKE_URL", "http://localhost:9001")
 API_KEY = os.environ.get("GRIMOIRE_API_KEY", "")
-LLAMA_SMOKE_MODEL = os.environ.get("GRIMOIRE_LLAMA_SMOKE_MODEL", "qwen3.8-27B-low")
+LLAMA_SMOKE_MODEL = os.environ.get("GRIMOIRE_LLAMA_SMOKE_MODEL", "gemma-4-mtp-31B")
 VISION_SMOKE_MODEL = os.environ.get(
     "GRIMOIRE_VISION_SMOKE_MODEL", "qwen3.8-flash-next"
 )
