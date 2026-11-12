@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import io
 
@@ -117,3 +118,67 @@ def test_workflow_wires_each_reference_into_conditioning():
     assert cond["images.image_1"] == ["103", 0] and cond["images.image_2"] == ["203", 0]
     assert g["201"]["inputs"]["image"] == "b.png"
     assert "TextGenerateV2" not in {n["class_type"] for n in g.values()}
+
+
+def test_raw_request_is_the_last_user_message_verbatim():
+    a, b = _png(30, 20), _png(20, 30)
+    messages = [
+        {"role": "user", "content": "an earlier caption"},
+        {"role": "assistant", "content": f"![x]({_data_url(_png())})"},
+        {"role": "user", "content": [
+            {"type": "image_url", "image_url": {"url": _data_url(a)}},
+            {"type": "text", "text": "  <Picture 2> worn by the fox in <Picture 1>  "},
+            {"type": "image_url", "image_url": {"url": _data_url(b)}},
+        ]},
+    ]
+    pictures, caption = srv.read_raw_request(messages)
+    assert pictures == [a, b]
+    assert caption == "<Picture 2> worn by the fox in <Picture 1>"
+
+
+def test_raw_request_needs_a_caption():
+    with pytest.raises(srv.GenerationError):
+        srv.read_raw_request([{"role": "user", "content": [
+            {"type": "image_url", "image_url": {"url": _data_url(_png())}}]}])
+
+
+def test_parse_size_accepts_pixels_or_ratio():
+    assert srv.parse_size("1536x1024") == 1.5
+    assert srv.parse_size("21:9") == 21 / 9
+    assert srv.parse_size(None) is None and srv.parse_size("auto") is None
+    with pytest.raises(srv.GenerationError):
+        srv.parse_size("wide")
+
+
+def test_raw_model_uses_the_caption_and_main_reference_shape(monkeypatch):
+    seen = {}
+
+    async def fake_upload(client, raw):
+        return f"pic{len(raw)}"
+
+    async def fake_render(client, workflow):
+        seen["workflow"] = workflow
+        return b"jpeg"
+
+    async def no_writer(*args):
+        raise AssertionError("the raw model must not call the writer")
+
+    monkeypatch.setattr(srv, "upload_picture", fake_upload)
+    monkeypatch.setattr(srv, "render", fake_render)
+    monkeypatch.setattr(srv, "stream_writer", no_writer)
+
+    async def emit(text):
+        pass
+
+    tall = _png(20, 40)
+    messages = [{"role": "user", "content": [
+        {"type": "image_url", "image_url": {"url": _data_url(tall)}},
+        {"type": "text", "text": "a fox in snow"},
+    ]}]
+    content = asyncio.run(srv.generate(srv.RAW_MODEL, messages, None, emit))
+    assert content.startswith("![MiniMax-H3-Image](data:image/jpeg;base64,")
+    cond = seen["workflow"]["4"]["inputs"]
+    assert cond["prompt"] == "a fox in snow"
+    assert (cond["width"], cond["height"]) == srv.output_size(0.5)
+    assert cond["images.image_1"] == ["103", 0]
+    assert seen["workflow"]["101"]["inputs"]["image"] == f"pic{len(tall)}"

@@ -1,7 +1,15 @@
-"""MiniMax-H3-Image served as an OpenAI-compatible chat model.
+"""MiniMax-H3-Image served as OpenAI-compatible chat models.
 
-Runs on Mangchi next to ComfyUI and is registered in Grimoire as an external
-`vllm-remote` model. One chat turn produces one image:
+Runs on Mangchi next to ComfyUI and is registered in Grimoire as external
+`vllm-remote` models. One chat turn produces one image.
+
+MiniMax-H3-Image is the raw model: the last user message's text is the H3
+caption, word for word, and its attachments are the reference pictures, so
+another model or agent can write captions itself. An optional `size` field
+("1536x1024" or "16:9") sets the shape; otherwise the main reference's shape,
+or square.
+
+MiniMax-H3-Image-PE puts a prompt writer in front:
 
 1. Every image in the conversation (user attachments and earlier outputs) is
    numbered <Picture N> in order.
@@ -35,7 +43,8 @@ from PIL import Image, ImageOps
 
 logger = logging.getLogger(__name__)
 
-MODEL_ID = "MiniMax-H3-Image"
+RAW_MODEL = "MiniMax-H3-Image"
+PE_MODEL = "MiniMax-H3-Image-PE"
 COMFY_URL = os.environ.get("H3_COMFY_URL", "http://127.0.0.1:8188").rstrip("/")
 WRITER_URL = os.environ.get("H3_WRITER_URL", "http://spark2.tail.lost.plus:8888").rstrip("/")
 WRITER_MODEL = os.environ.get("H3_WRITER_MODEL", "DeepSeek-V4.1-Flash-1017")
@@ -146,6 +155,40 @@ def read_conversation(messages):
     attached = f" [attached {', '.join(labels)}]" if labels else ""
     lines.append(f"\nCurrent request: {text}{attached}")
     return pictures, "\n".join(lines)
+
+
+def read_raw_request(messages):
+    """The last user message as (pictures, caption) for the raw model."""
+    for message in reversed(messages):
+        if message.get("role") == "user":
+            text, pictures = [], []
+            for kind, value in _parts(message.get("content")):
+                (text if kind == "text" else pictures).append(value)
+            caption = "".join(text).strip()
+            if not caption:
+                break
+            if len(pictures) > MAX_PICTURES:
+                raise GenerationError(f"Attach at most {MAX_PICTURES} pictures.")
+            return pictures, caption
+    raise GenerationError("Send the caption to render.")
+
+
+def parse_size(value):
+    """`size` as "WxH" or "W:H" -> aspect, or None when absent or "auto"."""
+    if value in (None, "", "auto"):
+        return None
+    try:
+        w, h = (int(x) for x in re.split(r"[x:]", str(value).lower()))
+        if w <= 0 or h <= 0:
+            raise ValueError
+    except ValueError:
+        raise GenerationError('size must look like "1536x1024" or "16:9".')
+    return w / h
+
+
+def picture_aspect(raw):
+    w, h = ImageOps.exif_transpose(Image.open(io.BytesIO(raw))).size
+    return w / h
 
 
 # --- writer -------------------------------------------------------------------
@@ -345,28 +388,38 @@ async def render(client, workflow):
 
 # --- request flow -----------------------------------------------------------
 
-async def generate(messages, emit_reasoning):
+async def generate(model, messages, size, emit_reasoning):
     """Run one turn; return the assistant's Markdown content."""
     async with httpx.AsyncClient(timeout=httpx.Timeout(60)) as client:
-        pictures, instruction = read_conversation(messages)
-        answer = await stream_writer(client, writer_messages(pictures, instruction), emit_reasoning)
-        caption, aspect = parse_writer_answer(answer)
+        if model == PE_MODEL:
+            pictures, instruction = read_conversation(messages)
+            answer = await stream_writer(client, writer_messages(pictures, instruction), emit_reasoning)
+            caption, aspect = parse_writer_answer(answer)
+            caption, named = select_pictures(caption, len(pictures))
+            await emit_reasoning(f"\n\n---\n**Prompt:** {caption}\n\n")
+        else:
+            pictures, caption = read_raw_request(messages)
+            aspect = parse_size(size)
+            caption, named = select_pictures(caption, len(pictures))
+            if not named:  # a caption that names no picture uses them all, as attached
+                named = list(range(1, len(pictures) + 1))
+            if aspect is None:
+                aspect = picture_aspect(pictures[named[0] - 1]) if named else 1.0
 
-        caption, named = select_pictures(caption, len(pictures))
         width, height = output_size(aspect)
-        await emit_reasoning(f"\n\n---\n**Prompt:** {caption}\n\nRendering {width}×{height}"
+        await emit_reasoning(f"Rendering {width}×{height}"
                              f"{f' from {len(named)} reference(s)' if named else ''}…\n")
 
         names = [await upload_picture(client, pictures[n - 1]) for n in named]
         started = time.monotonic()
         jpeg = await render(client, build_workflow(caption, width, height, names, random.randrange(2**48)))
         await emit_reasoning(f"Done in {time.monotonic() - started:.0f} s.\n")
-    return f"![{MODEL_ID}](data:image/jpeg;base64,{base64.b64encode(jpeg).decode()})"
+    return f"![{model}](data:image/jpeg;base64,{base64.b64encode(jpeg).decode()})"
 
 
-def _chunk(completion_id, created, delta, finish=None):
+def _chunk(model, completion_id, created, delta, finish=None):
     return "data: " + json.dumps({
-        "id": completion_id, "object": "chat.completion.chunk", "created": created, "model": MODEL_ID,
+        "id": completion_id, "object": "chat.completion.chunk", "created": created, "model": model,
         "choices": [{"index": 0, "delta": delta, "finish_reason": finish}],
     }) + "\n\n"
 
@@ -383,13 +436,18 @@ async def health():
 
 @app.get("/v1/models")
 async def models():
-    return {"object": "list", "data": [{"id": MODEL_ID, "object": "model", "owned_by": "mangchi"}]}
+    return {"object": "list", "data": [{"id": m, "object": "model", "owned_by": "mangchi"}
+                                       for m in (RAW_MODEL, PE_MODEL)]}
 
 
 @app.post("/v1/chat/completions")
 async def chat_completions(request: Request):
     payload = await request.json()
+    model = payload.get("model")
+    if model not in (RAW_MODEL, PE_MODEL):
+        raise HTTPException(404, f"Unknown model {model!r}; use {RAW_MODEL} or {PE_MODEL}.")
     messages = payload.get("messages") or []
+    size = payload.get("size")
     completion_id = f"chatcmpl-{uuid.uuid4().hex}"
     created = int(time.time())
 
@@ -399,11 +457,11 @@ async def chat_completions(request: Request):
         async def collect(text):
             thoughts.append(text)
         try:
-            content = await generate(messages, collect)
+            content = await generate(model, messages, size, collect)
         except GenerationError as e:
             content = str(e)
         return JSONResponse({
-            "id": completion_id, "object": "chat.completion", "created": created, "model": MODEL_ID,
+            "id": completion_id, "object": "chat.completion", "created": created, "model": model,
             "choices": [{"index": 0, "finish_reason": "stop", "message": {
                 "role": "assistant", "content": content, "reasoning_content": "".join(thoughts)}}],
             "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
@@ -413,21 +471,21 @@ async def chat_completions(request: Request):
         queue = asyncio.Queue()
 
         async def emit(text):
-            await queue.put(_chunk(completion_id, created, {"reasoning_content": text}))
+            await queue.put(_chunk(model, completion_id, created, {"reasoning_content": text}))
 
         async def run():
             try:
-                content = await generate(messages, emit)
+                content = await generate(model, messages, size, emit)
             except GenerationError as e:
                 content = str(e)
             except Exception:
                 logger.exception("image generation failed")
                 content = "Image generation failed; see the image service log."
-            await queue.put(_chunk(completion_id, created, {"content": content}))
-            await queue.put(_chunk(completion_id, created, {}, "stop"))
+            await queue.put(_chunk(model, completion_id, created, {"content": content}))
+            await queue.put(_chunk(model, completion_id, created, {}, "stop"))
             await queue.put(None)
 
-        yield _chunk(completion_id, created, {"role": "assistant"})
+        yield _chunk(model, completion_id, created, {"role": "assistant"})
         task = asyncio.create_task(run())
         try:
             while True:

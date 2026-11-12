@@ -1,15 +1,23 @@
 # Mangchi image generation
 
-`MiniMax-H3-Image` on chat.lost.plus is a Grimoire `vllm-remote` entry with no
-residency agent. It points at the `mangchi-image` service in
-`docker-compose.mangchi.yml` (port 9710), which runs
-`src/grimoire/image_server.py`:
+`MiniMax-H3-Image` and `MiniMax-H3-Image-PE` on chat.lost.plus are Grimoire
+`vllm-remote` entries with no residency agent. Both point at the
+`mangchi-image` service in `docker-compose.mangchi.yml` (port 9710), which runs
+`src/grimoire/image_server.py` and tells them apart by `model`:
 
-1. The writer model (`H3_WRITER_MODEL`, default DeepSeek-V4.1-Flash on spark2)
-   expands the conversation into an H3 caption with MiniMax's official
-   prompt-expansion prompts in `templates/minimax-h3-image-pe/`.
-2. ComfyUI (`comfyui.service`, port 8188) renders the caption at about 4 MP
-   with the conversation's pictures that the caption names.
+- `MiniMax-H3-Image` (raw): the last user message's text is the H3 caption,
+  word for word, and its attachments are the references. An optional `size`
+  field (`"1536x1024"` or `"16:9"`) sets the shape; otherwise the main
+  reference's shape, or square. Meant for a stronger model or agent that
+  writes the caption itself.
+- `MiniMax-H3-Image-PE`: the writer model (`H3_WRITER_MODEL`, default
+  DeepSeek-V4.1-Flash on spark2) first expands the whole conversation into an
+  H3 caption with MiniMax's official prompt-expansion prompts in
+  `templates/minimax-h3-image-pe/`.
+
+ComfyUI (`comfyui.service`, port 8188) renders at about 4 MP with the pictures
+the caption names as `<Picture N>`, in first-mention order; a raw caption that
+names none uses every attachment in order.
 
 ComfyUI needs these files under `~/comfyui/models/`:
 
