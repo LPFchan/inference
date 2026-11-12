@@ -141,3 +141,17 @@ def test_skill_md_is_public():
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/markdown")
     assert response.text.startswith("---\nname: chat\n")
+
+
+def test_h3_reference_carries_the_official_prompts():
+    from grimoire import proxy_app
+
+    client = TestClient(proxy_app.app)
+    response = client.get("/references/minimax-h3-image.md")
+    prompts = proxy_app._HERE / "minimax_h3_pe"
+
+    assert response.status_code == 200
+    assert (prompts / "edit_task_prompt.txt").read_text().rstrip("\n") in response.text
+    assert "input_text: <USER_REQUEST>" in response.text
+    assert '{"expanded_caption": "...", "aspect_ratio": "W:H"}' in response.text
+    assert client.get("/references/other.md").status_code == 404

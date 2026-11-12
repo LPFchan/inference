@@ -47,24 +47,40 @@ fetched.
 
 ## Generate images
 
-`MiniMax-H3-Image` makes images through the same chat endpoint. Describe the
-picture in plain language. To edit or combine pictures, attach them as
-`image_url` data URLs and refer to them in the message ("put the fox from the
-first image into the second"). A ratio in the message, such as "21:9" or
-"portrait", sets the output shape; otherwise the main reference's shape or the
-model's own choice is used. Outputs are about 4 megapixels.
+Two models make images through the same chat endpoint. Both take reference
+pictures as `image_url` data URLs and answer with about 4 megapixels.
+
+`MiniMax-H3-Image-PE` takes plain language. A prompt writer reads the whole
+conversation and turns it into a detailed caption first. Refer to attachments
+naturally ("put the fox from the first image into the second"). A ratio in the
+message, such as "21:9" or "portrait", sets the shape; otherwise the main
+reference's shape or the writer's choice. For a follow-up edit, send the
+earlier assistant message back in `messages` unchanged; its image counts as a
+picture to edit.
+
+`MiniMax-H3-Image` is the raw model: you write the caption. The last user
+message's text goes to the image model word for word, and only that message's
+attachments are used. Name them `<Picture 1>`, `<Picture 2>`, ... in attach
+order; the picture the caption names first is the main canvas the result is
+built on, and pictures the caption never names are left out. A caption that
+names none uses every attachment, in order. Write a long, concrete caption:
+subject, composition, lighting, style, any text to render in quotes. Set the
+shape with a top-level `size` field, `"1536x1024"` or `"16:9"`; without it,
+the main picture's shape, or square. To write captions the way MiniMax's own
+prompt writer does, or to have another model write them, follow
+https://chat.lost.plus/references/minimax-h3-image.md; it holds the official
+prompts and how to turn their answer into a raw request.
 
 The answer's `content` is a Markdown image whose URL is
 `data:image/jpeg;base64,...`; decode that base64 to get the JPEG. With
-`stream: true`, `reasoning_content` carries the expanded prompt and progress.
-A generation takes from under a minute to several minutes, so use streaming or
-a long timeout. For a follow-up edit, send the earlier assistant message back
-in `messages` unchanged; its image counts as a picture to edit.
+`stream: true`, `reasoning_content` carries progress (and, for `-PE`, the
+expanded caption). A generation takes from under a minute to several minutes,
+so use streaming or a long timeout.
 
 ```sh
 curl -fsS https://chat.lost.plus/v1/chat/completions \
   -H "Authorization: Bearer $CHAT_TOKEN" -H "Content-Type: application/json" \
-  -d '{"model":"MiniMax-H3-Image","messages":[{"role":"user","content":"a red fox asleep in fresh snow, 3:2"}]}' \
+  -d '{"model":"MiniMax-H3-Image","size":"3:2","messages":[{"role":"user","content":"A red fox curled asleep in fresh powder snow at dawn, soft pink light, shallow depth of field, photographed with a telephoto lens."}]}' \
   | jq -r '.choices[0].message.content' \
   | sed -E 's/.*base64,([^)]*)\).*/\1/' | base64 -d > fox.jpg
 ```

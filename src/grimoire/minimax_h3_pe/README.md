@@ -2,7 +2,8 @@
 
 Unmodified prompts from
 [MiniMaxAI/MiniMax-H3-Image-PE](https://huggingface.co/MiniMaxAI/MiniMax-H3-Image-PE)
-(`prompt/`), used by `src/grimoire/image_server.py`. The SHA-256 hashes match
+(`prompt/`), used by `src/grimoire/image_server.py` and published to agents at
+https://chat.lost.plus/references/minimax-h3-image.md (`proxy_app.py`). The SHA-256 hashes match
 the upstream `prompt/manifest.json`.
 
 | File | Upstream | SHA-256 |
