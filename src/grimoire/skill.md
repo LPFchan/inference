@@ -66,7 +66,10 @@ built on, and pictures the caption never names are left out. A caption that
 names none uses every attachment, in order. Write a long, concrete caption:
 subject, composition, lighting, style, any text to render in quotes. Set the
 shape with a top-level `size` field, `"1536x1024"` or `"16:9"`; without it,
-the main picture's shape, or square.
+the main picture's shape, or square. To write captions the way MiniMax's own
+prompt writer does, or to have another model write them, follow
+https://chat.lost.plus/references/minimax-h3-image.md; it holds the official
+prompts and how to turn their answer into a raw request.
 
 The answer's `content` is a Markdown image whose URL is
 `data:image/jpeg;base64,...`; decode that base64 to get the JPEG. With

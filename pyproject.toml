@@ -33,7 +33,7 @@ grimoire-launcher = "grimoire.launcher:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-grimoire = ["skill.md"]
+grimoire = ["skill.md", "references/*.md", "minimax_h3_pe/*.txt"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

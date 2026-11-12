@@ -15,7 +15,7 @@ MiniMax-H3-Image-PE puts a prompt writer in front:
    numbered <Picture N> in order.
 2. A vision chat model (the writer) turns the conversation into an H3 caption
    with MiniMax's official prompt-expansion prompts
-   (templates/minimax-h3-image-pe/). This replaces ComfyUI's built-in enhancer.
+   (src/grimoire/minimax_h3_pe/). This replaces ComfyUI's built-in enhancer.
 3. ComfyUI renders the caption at about 4 MP, conditioned on the pictures the
    caption names.
 4. The reply streams the writer's reasoning and the final caption as
@@ -48,8 +48,7 @@ PE_MODEL = "MiniMax-H3-Image-PE"
 COMFY_URL = os.environ.get("H3_COMFY_URL", "http://127.0.0.1:8188").rstrip("/")
 WRITER_URL = os.environ.get("H3_WRITER_URL", "http://spark2.tail.lost.plus:8888").rstrip("/")
 WRITER_MODEL = os.environ.get("H3_WRITER_MODEL", "DeepSeek-V4.1-Flash-1017")
-PROMPT_DIR = Path(os.environ.get(
-    "H3_PROMPT_DIR", Path(__file__).resolve().parents[2] / "templates" / "minimax-h3-image-pe"))
+PROMPT_DIR = Path(__file__).resolve().parent / "minimax_h3_pe"
 
 OUTPUT_PIXELS = 4 * 1024 * 1024    # ComfyUI's "4 megapixels"
 MAX_PICTURES = 16                   # H3's reference limit

@@ -245,13 +245,35 @@ async def health():
     return {"status": "healthy", "pid": os.getpid()}
 
 
-# The agent skill that fleet's built-in `chat` pointer fetches; public like /health.
-SKILL_MD = (Path(__file__).parent / "skill.md").read_text()
+# The agent skill that fleet's built-in `chat` pointer fetches, and the
+# references it links to; public like /health.
+_HERE = Path(__file__).parent
+SKILL_MD = (_HERE / "skill.md").read_text()
+
+
+def _h3_reference():
+    """The caption-writing guide with MiniMax's official prompts filled in."""
+    prompt = lambda name: (_HERE / "minimax_h3_pe" / name).read_text(encoding="utf-8").rstrip("\n")
+    return (_HERE / "references" / "minimax-h3-image.md").read_text(encoding="utf-8").format(
+        t2i_system=prompt("t2i_system_prompt.txt"),
+        t2i_task=prompt("t2i_task_prompt.txt").format("<USER_REQUEST>"),
+        edit_task=prompt("edit_task_prompt.txt"),
+    )
+
+
+SKILL_REFERENCES = {"minimax-h3-image.md": _h3_reference()}
 
 
 @app.get("/skill.md")
 async def skill_md():
     return Response(SKILL_MD, media_type="text/markdown; charset=utf-8")
+
+
+@app.get("/references/{name}")
+async def skill_reference(name: str):
+    if name not in SKILL_REFERENCES:
+        raise HTTPException(status_code=404, detail="Not found")
+    return Response(SKILL_REFERENCES[name], media_type="text/markdown; charset=utf-8")
 
 
 def _return_to(request: Request) -> str:

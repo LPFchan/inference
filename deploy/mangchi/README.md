@@ -13,7 +13,7 @@
 - `MiniMax-H3-Image-PE`: the writer model (`H3_WRITER_MODEL`, default
   DeepSeek-V4.1-Flash on spark2) first expands the whole conversation into an
   H3 caption with MiniMax's official prompt-expansion prompts in
-  `templates/minimax-h3-image-pe/`.
+  `src/grimoire/minimax_h3_pe/`.
 
 ComfyUI (`comfyui.service`, port 8188) renders at about 4 MP with the pictures
 the caption names as `<Picture N>`, in first-mention order; a raw caption that
