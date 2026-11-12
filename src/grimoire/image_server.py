@@ -87,10 +87,12 @@ def _parts(content):
         if part.get("type") == "text":
             yield from _parts(part.get("text") or "")
         elif part.get("type") == "image_url":
-            url = (part.get("image_url") or {}).get("url", "")
-            raw = _decode_data_url(url)
-            if raw:
-                yield "image", raw
+            raw = _decode_data_url((part.get("image_url") or {}).get("url", ""))
+            if raw is None:
+                # Fetching links would let any user make Mangchi request
+                # arbitrary addresses on the tailnet; ask for an upload instead.
+                raise GenerationError("Attach images as uploaded files; image links are not supported.")
+            yield "image", raw
 
 
 def read_conversation(messages):

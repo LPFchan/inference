@@ -61,6 +61,13 @@ def test_only_the_newest_sixteen_pictures_are_kept_and_renumbered(monkeypatch):
     assert "two [attached <Picture 2>]" in instruction
 
 
+def test_image_links_are_rejected_instead_of_dropped():
+    with pytest.raises(srv.GenerationError, match="uploaded"):
+        srv.read_conversation([{"role": "user", "content": [
+            {"type": "text", "text": "make this darker"},
+            {"type": "image_url", "image_url": {"url": "https://example.com/a.png"}}]}])
+
+
 def test_conversation_without_a_user_turn_is_rejected():
     with pytest.raises(srv.GenerationError):
         srv.read_conversation([{"role": "system", "content": "hi"}])
