@@ -131,3 +131,13 @@ def test_cors_proxy_does_not_relay_browser_redirects(monkeypatch):
     assert response.status_code == 502
     assert "location" not in response.headers
     assert response.json() == {"error": "MCP proxy targets must not redirect browser requests"}
+
+
+def test_skill_md_is_public():
+    from grimoire import proxy_app
+
+    response = TestClient(proxy_app.app).get("/skill.md")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/markdown")
+    assert response.text.startswith("---\nname: chat\n")

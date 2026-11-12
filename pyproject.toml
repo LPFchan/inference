@@ -32,6 +32,9 @@ grimoire-launcher = "grimoire.launcher:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+grimoire = ["skill.md"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]

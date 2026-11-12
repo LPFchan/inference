@@ -18,6 +18,7 @@ import json
 import logging
 import os
 import urllib.parse
+from pathlib import Path
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
@@ -242,6 +243,15 @@ async def proxy_v1(request: Request, path: str):
 @app.get("/health")
 async def health():
     return {"status": "healthy", "pid": os.getpid()}
+
+
+# The agent skill that fleet's built-in `chat` pointer fetches; public like /health.
+SKILL_MD = (Path(__file__).parent / "skill.md").read_text()
+
+
+@app.get("/skill.md")
+async def skill_md():
+    return Response(SKILL_MD, media_type="text/markdown; charset=utf-8")
 
 
 def _return_to(request: Request) -> str:
