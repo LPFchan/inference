@@ -978,6 +978,17 @@
       ],
       "ctx-size": 524288,
       "added": "2026-10-25T06:33:28.207460+00:00"
+    },
+    "MiniMax-H3-Image": {
+      "backend": "vllm-remote",
+      "remote-url": "http://mangchi.tail.lost.plus:9710",
+      "backend-model-id": "MiniMax-H3-Image",
+      "capabilities": [
+        "completion",
+        "multimodal"
+      ],
+      "ctx-size": 524288,
+      "added": "2026-11-12T05:40:00+00:00"
     }
   },
   "fixed": {

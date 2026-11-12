@@ -44,3 +44,26 @@ services:
       # Sibling-container control: the agent shells out to docker on the host.
       - /usr/bin/docker:/usr/bin/docker:ro
       - /var/run/docker.sock:/var/run/docker.sock
+
+  # MiniMax-H3-Image as a chat model (deploy/mangchi/README.md). Grimoire
+  # reaches :9710 directly; the service reaches ComfyUI on 127.0.0.1:8188 and
+  # the prompt writer on spark2. It needs only the repo, and reuses the agent's
+  # image for FastAPI, httpx and Pillow.
+  mangchi-image:
+    image: ghcr.io/nvidia-ai-iot/vllm:latest-jetson-thor
+    container_name: mangchi-image
+    restart: unless-stopped
+    network_mode: host
+    command:
+      - /opt/venv/bin/python
+      - -m
+      - uvicorn
+      - grimoire.image_server:app
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "9710"
+      - --app-dir
+      - /app/src
+    volumes:
+      - .:/app:ro
