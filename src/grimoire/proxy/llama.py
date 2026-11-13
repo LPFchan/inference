@@ -31,6 +31,13 @@ def _active_backend_url(active, path):
     return f"http://127.0.0.1:{active.port}/{path.lstrip('/')}"
 
 
+def _remote_headers(active, request, caller):
+    builder = getattr(active, "remote_headers", None)
+    if builder is None:
+        return {}
+    return builder(request.headers if request is not None else None, caller)
+
+
 def _slot_lock(active):
     lock = getattr(active, "_kv_slot_lock", None)
     if lock is None:
@@ -223,7 +230,7 @@ async def _proxy_chat(
     backend_model_id = await active.get_backend_model_id()
     payload["model"] = backend_model_id
     url = _active_backend_url(active, "v1/chat/completions")
-    headers = {}
+    headers = _remote_headers(active, request, user_hash)
     validated_conversation_id = conversation_id if isinstance(conversation_id, str) else None
     if validated_conversation_id:
         validated_conversation_id = "\0".join(

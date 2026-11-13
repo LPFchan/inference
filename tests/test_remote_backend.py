@@ -393,3 +393,65 @@ def test_remote_agent_refusal_surfaces_its_reason():
     finally:
         _Client.response = None
     assert not active.is_running()
+
+
+HOSTED = {
+    "backend": "vllm-remote",
+    "remote-url": "https://opencode.ai/zen/go",
+    "remote-api-key-env": "TEST_HOSTED_KEY",
+    "remote-session-header": "x-opencode-session",
+    "backend-model-id": "deepseek-v4.1-flash",
+    "capabilities": ["completion"],
+    "ctx-size": 32768,
+}
+
+
+def test_registry_accepts_hosted_remote_with_base_path(tmp_path):
+    path = tmp_path / "models.json"
+    path.write_text(json.dumps({"models": {"hosted": HOSTED}, "fixed": {}}))
+    registry = ModelRegistry(path=str(path), seed_path=str(tmp_path / "missing.json"))
+    assert registry.validate("hosted") == (True, "OK")
+
+    path.write_text(json.dumps({"models": {"hosted": dict(HOSTED, **{"remote-api-key-env": ""})}, "fixed": {}}))
+    registry.reload()
+    valid, reason = registry.validate("hosted")
+    assert not valid
+    assert "remote-api-key-env" in reason
+
+
+def test_hosted_remote_headers_carry_key_and_stable_session(monkeypatch):
+    monkeypatch.setenv("TEST_HOSTED_KEY", "secret")
+    active = ActiveModel("alias", dict(HOSTED), port=None, gpu=None)
+    assert active.backend_url("v1/chat/completions") == "https://opencode.ai/zen/go/v1/chat/completions"
+
+    headers = active.remote_headers({"user-agent": "hermes/1.0"}, "caller-a")
+    assert headers["authorization"] == "Bearer secret"
+    assert headers["user-agent"] == "hermes/1.0"
+    assert headers["x-opencode-session"] == active.remote_headers({}, "caller-a")["x-opencode-session"]
+    assert headers["x-opencode-session"] != active.remote_headers({}, "caller-b")["x-opencode-session"]
+    assert active.remote_headers({"x-opencode-session": "own"}, "caller-a")["x-opencode-session"] == "own"
+    assert active.remote_headers()["user-agent"] == "grimoire/1.0"
+
+    monkeypatch.delenv("TEST_HOSTED_KEY")
+    with pytest.raises(RuntimeError, match="TEST_HOSTED_KEY"):
+        active.remote_headers()
+    assert ActiveModel("alias", dict(EXTERNAL), port=None, gpu=None).remote_headers() == {}
+
+
+def test_hosted_remote_health_probe_lists_models_with_key(monkeypatch):
+    monkeypatch.setenv("TEST_HOSTED_KEY", "secret")
+    active = ActiveModel("alias", dict(HOSTED), port=None, gpu=None)
+    models_url = "https://opencode.ai/zen/go/v1/models"
+    seen = []
+
+    class _KeyedClient(_AsyncClient):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            seen.append(kwargs.get("headers"))
+
+    _AsyncClient.calls = []
+    _AsyncClient.responses = {models_url: _AsyncResponse(status_code=200)}
+    with patch.object(mm.httpx, "AsyncClient", _KeyedClient):
+        assert asyncio.run(active.probe_remote_health()) is True
+    assert _AsyncClient.calls == [models_url]
+    assert seen[0]["authorization"] == "Bearer secret"

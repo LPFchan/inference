@@ -54,7 +54,8 @@ def _get_backend(cfg: dict) -> str:
     return cfg.get("backend", "llama")
 
 
-def _valid_remote_base_url(value: object) -> bool:
+def _valid_remote_base_url(value: object, allow_path: bool = False) -> bool:
+    """A credential-free HTTP(S) origin; with ``allow_path``, a hosted API's base path too."""
     if not isinstance(value, str) or not value:
         return False
     parsed = urlsplit(value)
@@ -63,7 +64,7 @@ def _valid_remote_base_url(value: object) -> bool:
         and bool(parsed.hostname)
         and parsed.username is None
         and parsed.password is None
-        and parsed.path in {"", "/"}
+        and (allow_path or parsed.path in {"", "/"})
         and not parsed.query
         and not parsed.fragment
     )
@@ -445,8 +446,11 @@ class ModelRegistry:
                 if cfg.get(field):
                     return False, f"'{field}' is no longer supported"
         elif backend == BACKEND_VLLM_REMOTE:
-            if not _valid_remote_base_url(cfg.get("remote-url")):
-                return False, "'remote-url' must be a credential-free HTTP(S) origin"
+            if not _valid_remote_base_url(cfg.get("remote-url"), allow_path=True):
+                return False, "'remote-url' must be a credential-free HTTP(S) URL"
+            for field in ("remote-api-key-env", "remote-session-header"):
+                if field in cfg and (not isinstance(cfg[field], str) or not cfg[field]):
+                    return False, f"'{field}' must be a non-empty string"
             # Without a residency agent the remote is kept running externally.
             if cfg.get("remote-agent-url") is not None:
                 if not _valid_remote_base_url(cfg["remote-agent-url"]):
