@@ -13,6 +13,8 @@ from grimoire.auth import is_admin, require_api, require_admin
 from grimoire.config import (
     DEFAULT_CTX_SIZE,
     DEFAULT_GENERATION_PARAMS,
+    MODEL_STATUS_LOADED,
+    MODEL_STATUS_UNLOADED,
 )
 from grimoire.ingest import download_model_file, model_filename_from_url
 from grimoire.registry import (
@@ -154,7 +156,12 @@ async def get_v1_models(request: Request, refresh_remote: bool = False):
         name = item["id"]
         cfg = registry.get(name) or {}
         item["active"] = manager.get_active(name) is not None
-        item["status"] = {"value": manager.get_status(name)}
+        status = manager.get_status(name)
+        # A fallback is always up, so the model answers even while its own
+        # backend is down and nothing is loaded for it.
+        if status == MODEL_STATUS_UNLOADED and cfg.get("fallback"):
+            status = MODEL_STATUS_LOADED
+        item["status"] = {"value": status}
         item["in_cache"] = True
         # llama backends carry `file`.
         item["path"] = cfg.get("file") or cfg.get("target") or ""

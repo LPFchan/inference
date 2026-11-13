@@ -131,6 +131,19 @@ class RouterModeContractTests(unittest.TestCase):
             self.assertIn("reasoning", entry)
             self.assertIsInstance(entry["reasoning"], dict)
 
+    def test_v1_models_lists_unloaded_model_with_fallback_as_loaded(self):
+        name = "fallback-listed-model"
+        cfg = {
+            "backend": "vllm-remote",
+            "remote-url": "http://spark2.invalid:8888",
+            "fallback": {"remote-url": "https://opencode.ai/zen/go"},
+        }
+        real_get = entrypoint.registry.get
+        with patch.object(entrypoint.registry, "list_metadata", return_value=[{"id": name}]), \
+             patch.object(entrypoint.registry, "get", side_effect=lambda n: cfg if n == name else real_get(n)):
+            response = self.client.get("/v1/models", headers=self.auth)
+        self.assertEqual(response.json()["data"][0]["status"]["value"], entrypoint.MODEL_STATUS_LOADED)
+
     def test_v1_models_marks_active_model_as_loaded(self):
         registry_aliases = entrypoint.registry.list_all()
         if not registry_aliases:
