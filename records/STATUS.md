@@ -403,6 +403,11 @@ Patch chain in `patches/atomic-llama-cpp/`, applied in order by `Dockerfile`:
   opencode-go fallback (its `deepseek-v4.1-flash` is the stock checkpoint).
   The service was stopped afterwards to free the Sparks for research, so both
   names serve from opencode-go until it starts again.
+- 2026-11-13: **`/restart` can no longer hang** — a `POST /restart` sat 13
+  minutes (18:37-18:50 GMT+9) in uvicorn's graceful shutdown behind an open
+  stream, leaving chat down until the container was restarted. The manager
+  now waits at most 10 s for open requests (PR #56). A second SIGTERM never
+  forces uvicorn out; only a second SIGINT does.
 - 2026-11-13: **DeepSeek-V4.1-Flash-1017 falls back to opencode-go** — the
   entry still serves from spark2, and its `fallback` (PR #52) overlays
   opencode-go (`https://opencode.ai/zen/go`, `deepseek-v4.1-flash`, the same
