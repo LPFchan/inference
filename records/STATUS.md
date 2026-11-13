@@ -385,6 +385,16 @@ Patch chain in `patches/atomic-llama-cpp/`, applied in order by `Dockerfile`:
 
 ## Recent Changes
 
+- 2026-11-13: **DeepSeek-V4.1-Flash-1017 forwards to opencode-go** — the
+  Sparks are freed for research for a few days while a friend's Hermes bot
+  keeps calling the alias. The live registry entry now points at
+  `https://opencode.ai/zen/go` (`deepseek-v4.1-flash`, the same 10-17
+  checkpoint) with `remote-api-key-env: OPENCODE_GO_API_KEY` (PR #51, hotfix
+  `946c3a9` for gzip bodies). The key is a copy in the gateway `.env`; the
+  tracked seed still names spark2. To return, `PUT` the entry back to
+  `http://spark2.tail.lost.plus:8888` with backend id
+  `DeepSeek-V4.1-Flash-1017` and drop the two hosted fields from
+  `state/models.json` (`PUT` merges and cannot remove fields).
 - 2026-11-08: **Remote backends move to the fleet's Headscale** — the
   operator's fleet left the `lost.plus` tailnet for `net.lost.plus`, so every
   remote model now names its host as `<machine>.tail.lost.plus` instead of a
