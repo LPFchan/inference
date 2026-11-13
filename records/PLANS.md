@@ -221,6 +221,81 @@ single-spark-vllm-tp1/patch/ (ple_mmap.py preadv reader, ple_layer.diff
 staged integration). Reduced draft vocabulary (65,536-row head projection,
 target still verifies full vocab) is an independent +15-20% decode option.
 
+## DeepSeek-V4.1-Flash-1017: recipe upgrade, then stock + abliterated from one set of weights
+
+Evidence: [RSH-20261113-001](research/RSH-20261113-001-dsv41-keys-overlay-rank1.md).
+The recipe checkout lives on spark2
+(`~/DeepSeek-v4.1-Flash-1017-2x-DGX-Sparks`). The inference repo does not
+vendor it, so our engine patch and its direction file live here under
+`etc/spark/dsv41/`. They are copied into the recipe's `zig/patches/` (an
+untracked file there survives `git pull`), and the recipe's `prepare.sh` bakes
+them into the image.
+
+### A. Upgrade `27741e1` -> recipe `main`
+
+1. Record the rollback: commit `27741e1`, image
+   `tensorfold-dsv41:exl3-tp2-928adbd0e57d`, `scripts/local.sh`. Keep the old
+   image until B ships.
+2. `git pull` on spark2 and read the new `scripts/config.sh` switches. The new
+   defaults (`GRAPH_CAP=128`, `TF_DS_LOAD_PREFETCH` on) are taken as they are.
+   The opt-ins are measured after the baseline passes, one at a time:
+   `TF_FILL_CHUNKS` + `TF_FILL_CUT_IN`, `TF_DS_T25_DRAFT_CAL`, `STEP_AHEAD`.
+   `DROP_REASONING_HISTORY` stays off unless an agent loop shows the drift.
+3. Downtime window: stop, `./scripts/prepare.sh` (the image build; spark2 has
+   ~4 GB free while serving, so it is not built alongside the running model),
+   `./start.sh`. The checkpoint, `INPUTS_REF` and overlay pin are unchanged, so
+   check whether the existing rank caches are reused before planning around a
+   rebuild.
+4. Gate, through chat.lost.plus: refusal probe, arithmetic determinism, tool
+   call (streamed now), image input, the live vision smoke
+   (`tests/`, as in `5c74bb3`), decode tok/s against 53 prose / 72 code, and a
+   short request sent during a 100K-token prompt.
+5. Check that clients tolerate the `fbbc971` behaviour change: a call to a tool
+   the request did not offer now comes back as `tool_calls`.
+6. Rollback: `git checkout 27741e1`, old image, `./start.sh restart`.
+
+### B. Keys switch patch (`0090-keys-switch.patch`)
+
+Per request, rows flagged abliterated get `y -= 3.5 * r * (r . y)` on
+`wo_b`'s fp32 output in layers 10-35. Unflagged rows are the stock model, bit
+for bit.
+
+1. Direction file: `etc/spark/dsv41/keys_dir_1017.safetensors` (fp32 5120,
+   lambda 3.5, layers 10-35), plus the script that recomputes it from the
+   overlay's FP8 sidecar and the stock FP8 shards.
+2. Weights: serve the stock rank caches (`ABLIT=0`). spark1 has 59 GB free
+   against a ~106 GB rank cache, so the abliterated cache there is deleted
+   before the stock one is built. Fallback that needs no rebuild: keep the
+   abliterated weights and flag stock rows instead, with the inverse
+   `y -= 1.4 * r * (r . y)`. Vanilla then carries the overlay's EXL3
+   re-rounding.
+3. Engine patch:
+   - Load: `TF_DS_KEYS_DIR`, `TF_DS_KEYS_LAMBDA`, `TF_DS_KEYS_LAYERS`. `r` is
+     uploaded once on each rank.
+   - Kernel: `keys_project` in `kernels/cuda/dsv41_ops.cu`. Per row with its
+     mask byte set: a dot product, then an axpy. The mask lives in a fixed
+     device buffer written before each launch or graph replay, so CUDA graphs
+     keep working.
+   - Call sites: after `wo_b` in `round.zig` (decode) and `prompt.zig`
+     (prompt pass), on each rank's partial before the reduce. Leave
+     `draft.zig` alone (its block is stock in the overlay).
+   - Flag path: the server maps a second served name to the flag. The stream
+     carries it to its slot, and rank 0 sends it in the slot-open wire frame
+     (`lanes.zig` `Wire`). Both ranks keep a slot -> flag table and build each
+     round's row mask from it.
+   - Prompt cache, spill store and shared cuts: the flag is part of the key
+     (`core/prompt_cache.zig` `find`/`keep`, `imprint.keyOf`), so a state never
+     resumes across variants.
+4. Gates:
+   - Flag off: replies identical to the unpatched image on `tools/exact.py`'s
+     39 prompts.
+   - Flag on: refusal probe passes, and arithmetic, tool and image checks hold.
+   - Temperature 0: a mixed concurrent batch (stock + abliterated) gives each
+     request the same tokens as running it alone.
+   - Decode speed: within noise of the unpatched image.
+5. Gateway: a second Grimoire `vllm-remote` entry pointing at the same backend
+   with the abliterated served name.
+
 ## Backlog (Future Interest)
 
 
