@@ -492,6 +492,12 @@ class ActiveModel:
                     response = await client.get(url)
                     if response.status_code == 200:
                         return
+                except httpx.ConnectError as e:
+                    # Nothing is listening. A model with a fallback should use it
+                    # now rather than wait for a backend that may never start.
+                    if self.cfg.get("fallback"):
+                        raise
+                    last_error = e
                 except httpx.HTTPError as e:
                     last_error = e
                 await asyncio.sleep(1)

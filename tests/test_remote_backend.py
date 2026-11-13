@@ -544,3 +544,15 @@ def test_unreachable_model_without_fallback_and_other_errors_raise():
         with pytest.raises(mm.httpx.ReadError):
             asyncio.run(ep._with_fallback("primary", request, broken))
     assert manager.started == ["lonely", "primary"]
+
+
+def test_refused_model_with_fallback_does_not_wait_for_startup():
+    active = ActiveModel("alias", dict(EXTERNAL, fallback=OPENCODE), port=None, gpu=None)
+    active.remote_running = True
+    health_url = "http://mangchi.tail.lost.plus:8001/health"
+    _AsyncClient.calls = []
+    _AsyncClient.responses = {health_url: mm.httpx.ConnectError("refused")}
+    with patch.object(mm.httpx, "AsyncClient", _AsyncClient):
+        with pytest.raises(mm.httpx.ConnectError):
+            asyncio.run(active.wait_ready(timeout=30))
+    assert _AsyncClient.calls == [health_url]
