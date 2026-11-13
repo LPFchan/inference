@@ -427,6 +427,7 @@ def test_hosted_remote_headers_carry_key_and_stable_session(monkeypatch):
     headers = active.remote_headers({"user-agent": "hermes/1.0"}, "caller-a")
     assert headers["authorization"] == "Bearer secret"
     assert headers["user-agent"] == "hermes/1.0"
+    assert headers["accept-encoding"] == "identity"
     assert headers["x-opencode-session"] == active.remote_headers({}, "caller-a")["x-opencode-session"]
     assert headers["x-opencode-session"] != active.remote_headers({}, "caller-b")["x-opencode-session"]
     assert active.remote_headers({"x-opencode-session": "own"}, "caller-a")["x-opencode-session"] == "own"

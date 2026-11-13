@@ -419,6 +419,8 @@ class ActiveModel:
         headers = {
             "authorization": f"Bearer {key}",
             "user-agent": client_headers.get("user-agent") or "grimoire/1.0",
+            # Bodies are relayed raw without Content-Encoding, so ask for them uncompressed.
+            "accept-encoding": "identity",
         }
         session_header = self.cfg.get("remote-session-header")
         if session_header:
