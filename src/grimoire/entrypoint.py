@@ -737,7 +737,12 @@ def main():
         proxy_workers, args.host, args.port, manager_host, manager_port,
     )
     try:
-        uvicorn.run(app, host=manager_host, port=manager_port, log_level="info")
+        # Without a limit, shutdown (and so /restart) waits forever on any
+        # open stream, such as a browser's MCP connection through /cors-proxy.
+        uvicorn.run(
+            app, host=manager_host, port=manager_port, log_level="info",
+            timeout_graceful_shutdown=10,
+        )
     finally:
         proxy.terminate()
         try:
