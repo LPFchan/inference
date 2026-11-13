@@ -389,9 +389,9 @@ Patch chain in `patches/atomic-llama-cpp/`, applied in order by `Dockerfile`:
   entry still serves from spark2, and its `fallback` (PR #52) overlays
   opencode-go (`https://opencode.ai/zen/go`, `deepseek-v4.1-flash`, the same
   10-17 checkpoint, key `OPENCODE_GO_API_KEY` from PR #51) whenever spark2
-  refuses or times out; `startup-timeout: 10` bounds the wait, and the
+  refuses or times out; `startup-timeout: 2` bounds the wait, and the
   fallback then serves directly for 60 s. Verified with spark2's
-  `dsv41-tensorfold.service` stopped: first call 14 s, then direct; text,
+  `dsv41-tensorfold.service` stopped: the spark check adds about 3 s once a minute; text,
   image and streaming answered through chat.lost.plus. The key is a copy in
   the gateway `.env` (systemd does not read `~/.zshenv`).
 - 2026-11-08: **Remote backends move to the fleet's Headscale** — the
