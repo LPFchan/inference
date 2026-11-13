@@ -3,6 +3,7 @@
 import asyncio
 import copy
 import ctypes
+import hashlib
 import json
 import logging
 import math
@@ -397,6 +398,37 @@ class ActiveModel:
         return f"{self.backend_base_url}/{path.lstrip('/')}" if path else self.backend_base_url
 
     @property
+    def hosted_remote(self):
+        """True when the remote is a hosted API that needs a key, not our own vLLM."""
+        return self.backend_type == BACKEND_VLLM_REMOTE and bool(self.cfg.get("remote-api-key-env"))
+
+    @property
+    def health_path(self):
+        # Hosted APIs have no /health; an authenticated model list proves the key works.
+        return "v1/models" if self.hosted_remote else "health"
+
+    def remote_headers(self, client_headers=None, caller=None):
+        """Headers a hosted remote needs: its key, a client name, a stable session id."""
+        if not self.hosted_remote:
+            return {}
+        env = self.cfg["remote-api-key-env"]
+        key = os.environ.get(env)
+        if not key:
+            raise RuntimeError(f"{self.name}: ${env} is not set")
+        client_headers = client_headers or {}
+        headers = {
+            "authorization": f"Bearer {key}",
+            "user-agent": client_headers.get("user-agent") or "grimoire/1.0",
+        }
+        session_header = self.cfg.get("remote-session-header")
+        if session_header:
+            # Keep the caller's own session id; otherwise one id per caller.
+            headers[session_header] = client_headers.get(session_header) or hashlib.sha256(
+                f"{self.name}\0{caller or 'anonymous'}".encode()
+            ).hexdigest()[:32]
+        return headers
+
+    @property
     def supports_kv_slots(self):
         return self.backend_type == BACKEND_LLAMA
 
@@ -446,10 +478,10 @@ class ActiveModel:
     async def wait_ready(self, timeout=config.DEFAULT_STARTUP_TIMEOUT):
         """Wait until the backend is ready."""
         deadline = asyncio.get_running_loop().time() + timeout
-        url = self.backend_url("health")
+        url = self.backend_url(self.health_path)
         last_error = None
 
-        async with httpx.AsyncClient(timeout=2.0) as client:
+        async with httpx.AsyncClient(timeout=2.0, headers=self.remote_headers()) as client:
             while asyncio.get_running_loop().time() < deadline:
                 if not self.is_running():
                     code = self.process.returncode if self.process else "unknown"
@@ -495,9 +527,10 @@ class ActiveModel:
         if self.remote_agent_url is None:
             try:
                 async with httpx.AsyncClient(
-                    timeout=config.DEFAULT_REMOTE_HEALTH_TIMEOUT
+                    timeout=config.DEFAULT_REMOTE_HEALTH_TIMEOUT,
+                    headers=self.remote_headers(),
                 ) as client:
-                    backend_response = await client.get(self.backend_url("health"))
+                    backend_response = await client.get(self.backend_url(self.health_path))
             except httpx.ConnectError:
                 return False
             except httpx.HTTPError:

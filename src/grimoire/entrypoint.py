@@ -28,7 +28,7 @@ from fastapi.staticfiles import StaticFiles
 
 from grimoire import config
 from grimoire.chat_template import apply_chat_template_kwargs
-from grimoire.auth import is_admin, require_api, require_admin
+from grimoire.auth import account_hash, is_admin, require_api, require_admin
 from grimoire.config import (
     LLAMA_SERVER_BIN,
     DEFAULT_CTX_SIZE,
@@ -398,6 +398,9 @@ async def chat_responses(request: Request):
         active = await manager.start_model(model_name, evict=is_admin(request))
         client = get_proxy_client()
         headers = _backend_request_headers(request.headers)
+        # The public proxy authenticated this request; key the session by its caller.
+        caller = request.headers.get(config.INTERNAL_AUTH_SUB_HEADER)
+        headers.update(active.remote_headers(request.headers, account_hash(caller) if caller else None))
 
         payload = copy.deepcopy(payload)
         requested_cfg = registry.get(model_name) or active.cfg
@@ -436,7 +439,7 @@ async def chat_responses(request: Request):
 @app.api_route("/v1/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"])
 async def proxy_v1(request: Request, path: str):
     """Proxy other OpenAI-compatible routes to the requested or active backend."""
-    require_api(request)
+    _, user_hash = require_api(request)
     payload = None
     body = await request.body()
     if body and request.headers.get("content-type", "").split(";")[0] == "application/json":
@@ -458,6 +461,7 @@ async def proxy_v1(request: Request, path: str):
         active = await manager.start_model(model_name, evict=is_admin(request))
         client = get_proxy_client()
         headers = _backend_request_headers(request.headers)
+        headers.update(active.remote_headers(request.headers, user_hash))
 
         if isinstance(payload, dict):
             payload = copy.deepcopy(payload)

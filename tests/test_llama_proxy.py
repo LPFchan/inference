@@ -174,6 +174,38 @@ class LlamaProxyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(request["model"], active.name)
         self.assertEqual(request["messages"][0]["content"], content)
 
+    async def test_hosted_remote_chat_carries_key_to_base_path(self):
+        from grimoire.model_manager import ActiveModel
+
+        cfg = {
+            "backend": "vllm-remote",
+            "remote-url": "https://opencode.ai/zen/go",
+            "remote-api-key-env": "TEST_HOSTED_KEY",
+            "remote-session-header": "x-opencode-session",
+            "backend-model-id": "deepseek-v4.1-flash",
+            "ctx-size": 32768,
+        }
+        active = ActiveModel("DeepSeek-V4.1-Flash-1017", cfg, port=None, gpu=None)
+        payload = {"messages": [{"role": "user", "content": "hi"}], "stream": False}
+
+        with patch.dict("os.environ", {"TEST_HOSTED_KEY": "secret"}), \
+             patch.object(llama_proxy.registry, "resolve", return_value=active.name), \
+             patch.object(llama_proxy.registry, "get", return_value=cfg), \
+             patch.object(llama_proxy.registry, "get_family_defaults", return_value={}), \
+             patch.object(llama_proxy.plugin_manager, "before_request", side_effect=lambda p, *a: p), \
+             patch.object(llama_proxy.plugin_manager, "before_backend_request", side_effect=lambda p, *a: p), \
+             patch.object(llama_proxy.plugin_manager, "wrap_response_stream", side_effect=lambda s, *a: s), \
+             patch.object(llama_proxy, "get_proxy_client", _FakeClient):
+            response = await llama_proxy._proxy_chat(active.name, payload, active, user_hash="u1")
+            async for _ in response.body_iterator:
+                pass
+
+        request = _FakeClient.instances[-1].requests[0][0]
+        self.assertEqual(request["url"], "https://opencode.ai/zen/go/v1/chat/completions")
+        self.assertEqual(request["json"]["model"], "deepseek-v4.1-flash")
+        self.assertEqual(request["headers"]["authorization"], "Bearer secret")
+        self.assertTrue(request["headers"]["x-opencode-session"])
+
     async def test_conversation_cache_key_is_scoped_by_process_and_user(self):
         active = _FakeActive()
         active.prefill_config = None
