@@ -399,6 +399,10 @@ Patch chain in `patches/atomic-llama-cpp/`, applied in order by `Dockerfile`:
   names, arithmetic). Image and tool calls work on both names. Decode: prose
   46-56 and code 81-95 tok/s, against 53 and 72 before. Rollback: the old
   checkout, image `exl3-tp2-928adbd0e57d` and the unit backup (PLANS).
+  Grimoire lists `DeepSeek-V4.1-Flash-1017-Stock` too, with the same
+  opencode-go fallback (its `deepseek-v4.1-flash` is the stock checkpoint).
+  The service was stopped afterwards to free the Sparks for research, so both
+  names serve from opencode-go until it starts again.
 - 2026-11-13: **DeepSeek-V4.1-Flash-1017 falls back to opencode-go** — the
   entry still serves from spark2, and its `fallback` (PR #52) overlays
   opencode-go (`https://opencode.ai/zen/go`, `deepseek-v4.1-flash`, the same

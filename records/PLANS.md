@@ -229,9 +229,7 @@ Shipped 2026-11-13 (STATUS). What is left:
    `TF_FILL_CHUNKS` + `TF_FILL_CUT_IN`, `TF_DS_T25_DRAFT_CAL`, `STEP_AHEAD`.
    `DROP_REASONING_HISTORY` stays off unless an agent loop shows the drift.
 2. A short request sent during a 100K-token prompt (the cut-in patches).
-3. Gateway: a Grimoire entry for `DeepSeek-V4.1-Flash-1017-Stock` if a client
-   wants the stock model (operator decision).
-4. Drop the rollback once the new setup has served a week: checkout
+3. Drop the rollback once the new setup has served a week: checkout
    `~/DeepSeek-v4.1-Flash-1017-2x-DGX-Sparks` (`27741e1`), image
    `tensorfold-dsv41:exl3-tp2-928adbd0e57d`, the abliterated rank caches, and
    `~/dsv41-tensorfold.service.bak-27741e1`.

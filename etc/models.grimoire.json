@@ -977,7 +977,32 @@
         "multimodal"
       ],
       "ctx-size": 524288,
-      "added": "2026-10-25T06:33:28.207460+00:00"
+      "added": "2026-10-25T06:33:28.207460+00:00",
+      "startup-timeout": 2,
+      "fallback": {
+        "remote-url": "https://opencode.ai/zen/go",
+        "remote-api-key-env": "OPENCODE_GO_API_KEY",
+        "remote-session-header": "x-opencode-session",
+        "backend-model-id": "deepseek-v4.1-flash"
+      }
+    },
+    "DeepSeek-V4.1-Flash-1017-Stock": {
+      "backend": "vllm-remote",
+      "remote-url": "http://spark2.tail.lost.plus:8888",
+      "backend-model-id": "DeepSeek-V4.1-Flash-1017-Stock",
+      "capabilities": [
+        "completion",
+        "multimodal"
+      ],
+      "ctx-size": 524288,
+      "startup-timeout": 2,
+      "fallback": {
+        "remote-url": "https://opencode.ai/zen/go",
+        "remote-api-key-env": "OPENCODE_GO_API_KEY",
+        "remote-session-header": "x-opencode-session",
+        "backend-model-id": "deepseek-v4.1-flash"
+      },
+      "added": "2026-11-13T08:47:45.477965+00:00"
     },
     "MiniMax-H3-Image": {
       "backend": "vllm-remote",
