@@ -468,6 +468,12 @@ class ModelRegistry:
         else:
             return False, f"Unknown backend '{backend}'"
 
+        fallback = cfg.get("fallback")
+        if fallback is not None and (
+            not isinstance(fallback, str) or fallback == model_name or not self.get(fallback)
+        ):
+            return False, "'fallback' must name another registered model"
+
         fixed_gpu = self.get_fixed_gpu(model_name)
         if fixed_gpu is not None:
             if isinstance(fixed_gpu, bool) or not isinstance(fixed_gpu, int) or fixed_gpu < 0:

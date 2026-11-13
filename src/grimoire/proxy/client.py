@@ -12,6 +12,8 @@ import asyncio
 import httpx
 from fastapi import HTTPException
 
+from grimoire import config
+
 _client: httpx.AsyncClient | None = None
 
 
@@ -20,7 +22,9 @@ def init_proxy_client() -> httpx.AsyncClient:
     global _client
     if _client is None:
         _client = httpx.AsyncClient(
-            timeout=None,
+            # No read limit (prefill and generation run long), but give up
+            # connecting quickly so an offline remote host fails over.
+            timeout=httpx.Timeout(None, connect=config.DEFAULT_REMOTE_CONNECT_TIMEOUT),
             limits=httpx.Limits(
                 max_connections=256,
                 max_keepalive_connections=128,

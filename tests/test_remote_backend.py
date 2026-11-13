@@ -456,3 +456,84 @@ def test_hosted_remote_health_probe_lists_models_with_key(monkeypatch):
         assert asyncio.run(active.probe_remote_health()) is True
     assert _AsyncClient.calls == [models_url]
     assert seen[0]["authorization"] == "Bearer secret"
+
+
+def test_registry_fallback_must_name_another_model(tmp_path):
+    path = tmp_path / "models.json"
+    models = {"primary": dict(EXTERNAL, fallback="hosted"), "hosted": HOSTED}
+    path.write_text(json.dumps({"models": models, "fixed": {}}))
+    registry = ModelRegistry(path=str(path), seed_path=str(tmp_path / "missing.json"))
+    assert registry.validate("primary") == (True, "OK")
+
+    for bad in ("primary", "missing", 3):
+        models["primary"]["fallback"] = bad
+        path.write_text(json.dumps({"models": models, "fixed": {}}))
+        registry.reload()
+        assert registry.validate("primary")[1] == "'fallback' must name another registered model"
+
+
+class _FallbackManager:
+    def __init__(self):
+        self.started = []
+
+    async def start_model(self, name, evict=True):
+        self.started.append(name)
+        return name
+
+
+class _FallbackRegistry:
+    def __init__(self, models):
+        self.models = models
+
+    def get(self, name):
+        return self.models.get(name)
+
+
+@pytest.mark.parametrize("error", [
+    mm.httpx.ConnectError("refused"),
+    mm.httpx.ConnectTimeout("offline"),
+    TimeoutError("not ready"),
+])
+def test_unreachable_model_runs_on_its_fallback(error):
+    import grimoire.entrypoint as ep
+
+    manager = _FallbackManager()
+    registry = _FallbackRegistry({"primary": {"fallback": "hosted"}, "hosted": {}})
+
+    async def attempt(active):
+        if active == "primary":
+            raise error
+        return f"served by {active}"
+
+    request = type("Req", (), {"headers": {}})()
+    with patch.object(ep, "manager", manager), patch.object(ep, "registry", registry), \
+         patch.object(ep, "_fallback_until", {}), patch.object(ep.time, "monotonic", return_value=1000.0):
+        assert asyncio.run(ep._with_fallback("primary", request, attempt)) == "served by hosted"
+        # Inside the hold the fallback serves directly; after it the primary is tried again.
+        assert asyncio.run(ep._with_fallback("primary", request, attempt)) == "served by hosted"
+        assert manager.started == ["primary", "hosted", "hosted"]
+        ep.time.monotonic.return_value = 1000.0 + ep.FALLBACK_HOLD_SECONDS
+        asyncio.run(ep._with_fallback("primary", request, attempt))
+    assert manager.started == ["primary", "hosted", "hosted", "primary", "hosted"]
+
+
+def test_unreachable_model_without_fallback_and_other_errors_raise():
+    import grimoire.entrypoint as ep
+
+    manager = _FallbackManager()
+    registry = _FallbackRegistry({"lonely": {}, "primary": {"fallback": "hosted"}})
+    request = type("Req", (), {"headers": {}})()
+
+    async def unreachable(active):
+        raise mm.httpx.ConnectError("refused")
+
+    async def broken(active):
+        raise mm.httpx.ReadError("dropped mid-reply")
+
+    with patch.object(ep, "manager", manager), patch.object(ep, "registry", registry), \
+         patch.object(ep, "_fallback_until", {}):
+        with pytest.raises(mm.httpx.ConnectError):
+            asyncio.run(ep._with_fallback("lonely", request, unreachable))
+        with pytest.raises(mm.httpx.ReadError):
+            asyncio.run(ep._with_fallback("primary", request, broken))
+    assert manager.started == ["lonely", "primary"]
