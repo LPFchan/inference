@@ -458,18 +458,23 @@ def test_hosted_remote_health_probe_lists_models_with_key(monkeypatch):
     assert seen[0]["authorization"] == "Bearer secret"
 
 
-def test_registry_fallback_must_name_another_model(tmp_path):
+OPENCODE = {key: HOSTED[key] for key in (
+    "remote-url", "remote-api-key-env", "remote-session-header", "backend-model-id",
+)}
+
+
+def test_registry_fallback_overlays_an_agentless_remote(tmp_path):
     path = tmp_path / "models.json"
-    models = {"primary": dict(EXTERNAL, fallback="hosted"), "hosted": HOSTED}
-    path.write_text(json.dumps({"models": models, "fixed": {}}))
+    entry = dict(EXTERNAL, fallback=OPENCODE)
+    path.write_text(json.dumps({"models": {"primary": entry}, "fixed": {}}))
     registry = ModelRegistry(path=str(path), seed_path=str(tmp_path / "missing.json"))
     assert registry.validate("primary") == (True, "OK")
 
-    for bad in ("primary", "missing", 3):
-        models["primary"]["fallback"] = bad
-        path.write_text(json.dumps({"models": models, "fixed": {}}))
+    for bad in ("other-model", {"remote-url": "not a url"}, dict(OPENCODE, **{"remote-agent-url": "http://a:9700"})):
+        path.write_text(json.dumps({"models": {"primary": dict(entry, fallback=bad)}, "fixed": {}}))
         registry.reload()
-        assert registry.validate("primary")[1] == "'fallback' must name another registered model"
+        valid, reason = registry.validate("primary")
+        assert not valid and "'fallback'" in reason
 
 
 class _FallbackManager:
@@ -478,7 +483,7 @@ class _FallbackManager:
 
     async def start_model(self, name, evict=True):
         self.started.append(name)
-        return name
+        return ActiveModel(name, dict(EXTERNAL), port=None, gpu=None)
 
 
 class _FallbackRegistry:
@@ -498,30 +503,32 @@ def test_unreachable_model_runs_on_its_fallback(error):
     import grimoire.entrypoint as ep
 
     manager = _FallbackManager()
-    registry = _FallbackRegistry({"primary": {"fallback": "hosted"}, "hosted": {}})
+    registry = _FallbackRegistry({"primary": dict(EXTERNAL, fallback=OPENCODE)})
 
     async def attempt(active):
-        if active == "primary":
+        if active.cfg["remote-url"] == EXTERNAL["remote-url"]:
             raise error
-        return f"served by {active}"
+        assert active.name == "primary" and "fallback" not in active.cfg
+        return active.backend_url("v1/chat/completions")
 
+    hosted_url = "https://opencode.ai/zen/go/v1/chat/completions"
     request = type("Req", (), {"headers": {}})()
     with patch.object(ep, "manager", manager), patch.object(ep, "registry", registry), \
          patch.object(ep, "_fallback_until", {}), patch.object(ep.time, "monotonic", return_value=1000.0):
-        assert asyncio.run(ep._with_fallback("primary", request, attempt)) == "served by hosted"
-        # Inside the hold the fallback serves directly; after it the primary is tried again.
-        assert asyncio.run(ep._with_fallback("primary", request, attempt)) == "served by hosted"
-        assert manager.started == ["primary", "hosted", "hosted"]
+        assert asyncio.run(ep._with_fallback("primary", request, attempt)) == hosted_url
+        # Inside the hold the fallback serves directly; after it the model is tried again.
+        assert asyncio.run(ep._with_fallback("primary", request, attempt)) == hosted_url
+        assert manager.started == ["primary"]
         ep.time.monotonic.return_value = 1000.0 + ep.FALLBACK_HOLD_SECONDS
-        asyncio.run(ep._with_fallback("primary", request, attempt))
-    assert manager.started == ["primary", "hosted", "hosted", "primary", "hosted"]
+        assert asyncio.run(ep._with_fallback("primary", request, attempt)) == hosted_url
+    assert manager.started == ["primary", "primary"]
 
 
 def test_unreachable_model_without_fallback_and_other_errors_raise():
     import grimoire.entrypoint as ep
 
     manager = _FallbackManager()
-    registry = _FallbackRegistry({"lonely": {}, "primary": {"fallback": "hosted"}})
+    registry = _FallbackRegistry({"lonely": dict(EXTERNAL), "primary": dict(EXTERNAL, fallback=OPENCODE)})
     request = type("Req", (), {"headers": {}})()
 
     async def unreachable(active):

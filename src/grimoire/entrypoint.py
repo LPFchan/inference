@@ -324,17 +324,22 @@ _fallback_until: dict[str, float] = {}
 
 
 async def _with_fallback(model_name, request, attempt):
-    """Run ``attempt(active)`` on the model, or on its ``fallback`` when it cannot be reached."""
-    fallback = (registry.get(model_name) or {}).get("fallback")
+    """Run ``attempt(active)`` on the model, or on its ``fallback`` backend when it cannot be reached."""
+    cfg = registry.get(model_name) or {}
+    fallback = cfg.get("fallback")
     if not fallback or time.monotonic() >= _fallback_until.get(model_name, 0):
         try:
             return await attempt(await manager.start_model(model_name, evict=is_admin(request)))
         except _UNREACHABLE as e:
             if not fallback:
                 raise
-            logger.warning("%s is unreachable (%s); using %s", model_name, repr(e), fallback)
+            logger.warning("%s is unreachable (%s); using its fallback backend", model_name, repr(e))
             _fallback_until[model_name] = time.monotonic() + FALLBACK_HOLD_SECONDS
-    return await attempt(await manager.start_model(fallback, evict=is_admin(request)))
+    # The fallback is an API that is always up, so there is nothing to load or
+    # track: overlay its fields on the entry and send.
+    backend = {key: value for key, value in cfg.items() if key != "fallback"}
+    backend.update(fallback)
+    return await attempt(ActiveModel(model_name, backend, port=None, gpu=None))
 
 
 @app.post("/v1/chat/completions")

@@ -469,10 +469,17 @@ class ModelRegistry:
             return False, f"Unknown backend '{backend}'"
 
         fallback = cfg.get("fallback")
-        if fallback is not None and (
-            not isinstance(fallback, str) or fallback == model_name or not self.get(fallback)
-        ):
-            return False, "'fallback' must name another registered model"
+        if fallback is not None:
+            # The fallback overlays an always-up remote on this entry: no agent, no load.
+            backend_cfg = {key: value for key, value in cfg.items() if key != "fallback"}
+            backend_cfg.update(fallback if isinstance(fallback, dict) else {})
+            if (
+                not isinstance(fallback, dict)
+                or _get_backend(backend_cfg) != BACKEND_VLLM_REMOTE
+                or backend_cfg.get("remote-agent-url") is not None
+                or not _valid_remote_base_url(backend_cfg.get("remote-url"), allow_path=True)
+            ):
+                return False, "'fallback' must give an agentless remote's fields, such as 'remote-url'"
 
         fixed_gpu = self.get_fixed_gpu(model_name)
         if fixed_gpu is not None:
