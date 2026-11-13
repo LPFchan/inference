@@ -1,0 +1,521 @@
+diff --git a/zig/kernels/cuda/dsv41_ops.cu b/zig/kernels/cuda/dsv41_ops.cu
+index 8503b89..3946453 100644
+--- a/zig/kernels/cuda/dsv41_ops.cu
++++ b/zig/kernels/cuda/dsv41_ops.cu
+@@ -511,3 +511,24 @@ extern "C" __global__ void tf_ds_vspan_kernel(const unsigned char* types, const
+         out[i] = ty == 1 ? rows[(long long)row_of[t] * dim + c] : ty == 0 ? start[c] : ty == 2 ? newline[c] : end[c];
+     }
+ }
++
++// TF_DS_KEYS (keys.zig): a rank-1 projection on a row of wo_b's fp32 output, y -= lambda * dir * (dir . y), for each row
++// whose mask entry is nonzero (mask null: every row). One block a row; the dot is summed in a fixed order (each thread's
++// strided partial, then a shared-memory tree), so a row's result does not depend on the other rows of the launch.
++extern "C" __global__ void __launch_bounds__(256) tf_ds_keys_kernel(float* y, unsigned long long ldy, const float* dir,
++                                                                   const long long* mask, int hidden, float lambda) {
++    const int row = blockIdx.x;
++    if (mask != nullptr && mask[row] == 0) return;
++    float* yr = y + (unsigned long long)row * ldy;
++    __shared__ float part[256];
++    float s = 0.f;
++    for (int c = threadIdx.x; c < hidden; c += blockDim.x) s += dir[c] * yr[c];
++    part[threadIdx.x] = s;
++    __syncthreads();
++    for (int w = blockDim.x / 2; w > 0; w >>= 1) {
++        if (threadIdx.x < w) part[threadIdx.x] += part[threadIdx.x + w];
++        __syncthreads();
++    }
++    const float k = lambda * part[0];
++    for (int c = threadIdx.x; c < hidden; c += blockDim.x) yr[c] -= k * dir[c];
++}
+diff --git a/zig/src/core/engine_api.zig b/zig/src/core/engine_api.zig
+index 0bd41ab..6e53e03 100644
+--- a/zig/src/core/engine_api.zig
++++ b/zig/src/core/engine_api.zig
+@@ -91,6 +91,8 @@ pub const Request = struct {
+     structure: ?Structure = null,
+     /// Stop a short exact cycle while the think block is open.
+     loop_guard: bool = false,
++    /// TF_DS_KEYS: the served model's per-request edit (the server's TENSORFOLD_KEYS_MODEL); its cache_key is tagged.
++    keys: bool = false,
+ 
+     /// What the prompt cache matches and keeps under: `cache_key`, or the prompt when it has none.
+     pub fn cacheKey(r: *const Request) []const u32 {
+diff --git a/zig/src/core/lane_host.zig b/zig/src/core/lane_host.zig
+index 5245739..4adb65f 100644
+--- a/zig/src/core/lane_host.zig
++++ b/zig/src/core/lane_host.zig
+@@ -657,6 +657,7 @@ pub const LaneHost = struct {
+             .think_close = r.think_close,
+             .think_end = if (r.think_end) |t| t else -1,
+             .loop_guard = r.loop_guard,
++            .keys = r.keys,
+             .call = if (r.call) |c| .{
+                 .opener = c.opener,
+                 .think_open = if (c.think_open) |t| t else -1,
+@@ -797,7 +798,7 @@ pub const LaneHost = struct {
+     fn loneFits(h: *LaneHost, job: *Job) bool {
+         const r = job.request;
+         const lone = h.lone orelse return false;
+-        if ((r.sampling != null and !lone.sampled) or !r.drafts or r.think_budget > 0 or r.loop_guard or r.call != null or r.structure != null) return false;
++        if ((r.sampling != null and !lone.sampled) or !r.drafts or r.think_budget > 0 or r.loop_guard or r.keys or r.call != null or r.structure != null) return false;
+         h.lock();
+         defer h.unlock();
+         return h.admitted.items.len == 1 and h.queued.items.len == 0 and h.cancels.items.len == 0 and h.core.activeCount() == 0 and h.waitingCount() == 0;
+diff --git a/zig/src/core/lanes/stream.zig b/zig/src/core/lanes/stream.zig
+index 134debd..962d12b 100644
+--- a/zig/src/core/lanes/stream.zig
++++ b/zig/src/core/lanes/stream.zig
+@@ -137,6 +137,7 @@ pub const Spec = struct {
+     think_end: i64 = -1,
+     think_open: ?bool = null, // null: open when a budget is set (the server's rule)
+     loop_guard: bool = false,
++    keys: bool = false, // TF_DS_KEYS: the family's per-request edit (dsv41 keys.zig); false: the model as served
+     chunks: []const u32 = &.{}, // where prefill chunks start after 0 (Python's PrefillPlan); empty: the backend's step
+     reuse: Reuse = .{},
+     images: []const Image = &.{}, // in prompt order; the caller's until the stream is released
+@@ -175,6 +176,7 @@ pub const Stream = struct {
+     think_end: i64,
+     think_open: bool,
+     loop_guard: bool,
++    keys: bool = false,
+     loop_period: ?u32 = null,
+     chunks: []const u32,
+     reuse: Reuse = .{},
+@@ -244,6 +246,7 @@ pub const Stream = struct {
+             .think_end = spec.think_end,
+             .think_open = spec.think_open orelse (spec.think_budget > 0 or (spec.loop_guard and spec.think_end >= 0)),
+             .loop_guard = spec.loop_guard,
++            .keys = spec.keys,
+             .chunks = spec.chunks,
+             .reuse = spec.reuse,
+             .images = spec.images,
+diff --git a/zig/src/families/dsv41/dsv41.zig b/zig/src/families/dsv41/dsv41.zig
+index 27c9fb2..4c2f19d 100644
+--- a/zig/src/families/dsv41/dsv41.zig
++++ b/zig/src/families/dsv41/dsv41.zig
+@@ -59,6 +59,7 @@ pub const rank_wire = @import("rank_wire.zig");
+ pub const fingerprint = @import("fingerprint.zig");
+ pub const rank_identity = @import("rank_identity.zig");
+ pub const shard_ring = @import("shard_ring.zig");
++pub const keys = @import("keys.zig");
+ 
+ test {
+     // every declaration of every file, so functions no test calls are still compiled
+@@ -87,6 +88,7 @@ test {
+     refAll(tri_hc);
+     refAll(exl3_prefill);
+     refAll(ops);
++    refAll(keys);
+     refAll(exl3_experts);
+     refAll(exl3_experts_rec);
+     refAll(prompt);
+diff --git a/zig/src/families/dsv41/keys.zig b/zig/src/families/dsv41/keys.zig
+new file mode 100644
+index 0000000..b082729
+--- /dev/null
++++ b/zig/src/families/dsv41/keys.zig
+@@ -0,0 +1,76 @@
++//! TF_DS_KEYS: an abliteration chosen per request on the stock weights. drowzeys' Keys overlay for
++//! DeepSeek-V4.1-Flash-1017 is the rank-1 edit wo_b' = (I - lambda d d^T) wo_b on layers 10-35 (one unit direction d of
++//! the hidden size, lambda 3.5). Applied to wo_b's fp32 output instead, y -= lambda * d * (d . y), it is the same model
++//! for the rows of a stream that asked for it and leaves every other row as stock. The correction is linear, so each TP
++//! rank applies it to its own partial before the ranks' sum.
++//!
++//!   TF_DS_KEYS_DIR=path      a safetensors file with `direction` (f32 [hidden]); unset: off, the engine as before
++//!   TF_DS_KEYS_LAMBDA=3.5    the edit's strength
++//!   TF_DS_KEYS_LAYERS=10-35  the layers it applies to, both ends included
++//!
++//! Every rank needs the same three settings. Rank 0 sends each stream's flag in its fill_begin frame; a follower without
++//! TF_DS_KEYS_DIR refuses a set flag (error.KeysOff) rather than edit half the sum.
++const std = @import("std");
++const max_streams = @import("draft.zig").max_streams;
++
++pub const Keys = struct {
++    dir: u64, // f32 [hidden] on the device
++    lambda: f32,
++    lo: usize,
++    hi: usize,
++    slot_on: [max_streams]bool = @splat(false), // each slot's stream asked for it (set at its fill_begin)
++    fill_on: bool = false, // the filling stream's (Model.fillBegin)
++
++    pub fn covers(k: *const Keys, li: usize) bool {
++        return li >= k.lo and li <= k.hi;
++    }
++};
++
++pub const Settings = struct { path: []const u8, lambda: f32, lo: usize, hi: usize };
++
++/// The settings from the environment; null when TF_DS_KEYS_DIR is unset or empty.
++pub fn settings(layers: usize) !?Settings {
++    const path = env("TF_DS_KEYS_DIR") orelse return null;
++    if (path.len == 0) return null;
++    const lambda = if (env("TF_DS_KEYS_LAMBDA")) |v| try std.fmt.parseFloat(f32, std.mem.trim(u8, v, " ")) else 3.5;
++    if (!(lambda > 0 and lambda < 100)) return error.BadKeysLambda;
++    var lo: usize = 10;
++    var hi: usize = 35;
++    if (env("TF_DS_KEYS_LAYERS")) |v| {
++        const r = try parseRange(v);
++        lo = r[0];
++        hi = r[1];
++    }
++    if (hi >= layers) return error.BadKeysLayers;
++    return .{ .path = path, .lambda = lambda, .lo = lo, .hi = hi };
++}
++
++/// "lo-hi" (both included), lo <= hi.
++pub fn parseRange(text: []const u8) ![2]usize {
++    const t = std.mem.trim(u8, text, " ");
++    const dash = std.mem.indexOfScalar(u8, t, '-') orelse return error.BadKeysLayers;
++    const lo = std.fmt.parseInt(usize, t[0..dash], 10) catch return error.BadKeysLayers;
++    const hi = std.fmt.parseInt(usize, t[dash + 1 ..], 10) catch return error.BadKeysLayers;
++    if (lo > hi) return error.BadKeysLayers;
++    return .{ lo, hi };
++}
++
++fn env(name: [:0]const u8) ?[]const u8 {
++    return std.mem.span(std.c.getenv(name) orelse return null);
++}
++
++test "layer ranges" {
++    try std.testing.expectEqual([2]usize{ 10, 35 }, try parseRange("10-35"));
++    try std.testing.expectEqual([2]usize{ 7, 7 }, try parseRange(" 7-7 "));
++    try std.testing.expectError(error.BadKeysLayers, parseRange("35-10"));
++    try std.testing.expectError(error.BadKeysLayers, parseRange("10"));
++    try std.testing.expectError(error.BadKeysLayers, parseRange("a-3"));
++}
++
++test "covers" {
++    const k: Keys = .{ .dir = 0, .lambda = 3.5, .lo = 10, .hi = 35 };
++    try std.testing.expect(!k.covers(9));
++    try std.testing.expect(k.covers(10));
++    try std.testing.expect(k.covers(35));
++    try std.testing.expect(!k.covers(36));
++}
+diff --git a/zig/src/families/dsv41/lanes.zig b/zig/src/families/dsv41/lanes.zig
+index 40006aa..7351adb 100644
+--- a/zig/src/families/dsv41/lanes.zig
++++ b/zig/src/families/dsv41/lanes.zig
+@@ -886,6 +886,7 @@ pub const Lanes = struct {
+         const ids = s.prompt();
+         const len = ids.len;
+         if (len == 0) return error.EmptyPrompt;
++        if (s.keys and m.keys == null) return error.KeysOff; // (TF_DS_KEYS_DIR unset: refused before any placement)
+         const size = std.mem.alignForward(usize, len + s.max_new + m.eng.round_rows + 2, model.chunk_rows);
+         if (size > m.request_cap) return error.PromptTooLong; // (the pool's, unless TF_DS_POOL or TF_DS_KV_SHARD part it)
+         // TF_DS_KV_SHARD: parts.zig's planner places the extent inside one part (placeParts: part-local placeSoft and
+@@ -990,10 +991,12 @@ pub const Lanes = struct {
+             // Request.images) and its keyed ids derive from them (format.mediaIds), so no check here could fail;
+             // checkPictureSeq is the tests' oracle for that sequence.
+         }
++        try m.setKeys(slot, s.keys);
+         if (try self.begin(.fill_begin)) {
+             try self.wire.int(gpa, u32, @intCast(slot));
+             try self.wire.int(gpa, u64, base);
+             try self.wire.ids(gpa, seq.items);
++            try self.wire.int(gpa, u8, @intFromBool(s.keys)); // TF_DS_KEYS: the stream's flag
+             try self.flush();
+         }
+         try m.fillBegin(slot, base);
+@@ -1892,6 +1895,8 @@ pub fn followPair(gpa: std.mem.Allocator, m: *Model, spill: ?*SpillFollower, fx:
+                 if (slot >= max_streams) return error.BadSlot;
+                 img_rows.clearRetainingCapacity();
+                 try r.ids(gpa, &seqs[slot]);
++                // TF_DS_KEYS: before fillBegin reads it (a flag here without TF_DS_KEYS_DIR: error.KeysOff, not a half edit)
++                try m.setKeys(slot, try r.int(u8) != 0);
+                 fill_base = @intCast(base);
+                 if (spill) |sd| sd.bumpSlot(slot);
+                 if (m.fillBegin(slot, @intCast(base))) {
+diff --git a/zig/src/families/dsv41/model.zig b/zig/src/families/dsv41/model.zig
+index aa68d3d..df5f42a 100644
+--- a/zig/src/families/dsv41/model.zig
++++ b/zig/src/families/dsv41/model.zig
+@@ -22,6 +22,7 @@ const exl3_prefill = @import("exl3_prefill.zig");
+ const exl3_linear = @import("exl3_linear.zig");
+ const exl3_experts = @import("exl3_experts.zig");
+ const ops_mod = @import("ops.zig");
++const keys_mod = @import("keys.zig");
+ const exact = @import("exact.zig");
+ const cublas = @import("cublas.zig");
+ const comm_mod = @import("comm.zig");
+@@ -165,6 +166,7 @@ pub const Model = struct {
+     request_cap: usize = 0,
+     window_cap: usize = 0,
+     kvs: ?shard_ops.KvShard = null,
++    keys: ?keys_mod.Keys = null, // TF_DS_KEYS (keys.zig): m.eng.keys points here
+ 
+     /// Loads rank o.rank's weights from the lane's rank cache, links the ranks (rank 0 listens on o.port), opens NCCL
+     /// and sets up every buffer. Needs `ctx` current on this thread.
+@@ -221,6 +223,7 @@ pub const Model = struct {
+         m.two = null;
+         m.rdma_rings = null;
+         m.kvs = null;
++        m.keys = null;
+         const d = ctx.d;
+         m.cfg = try Config.read(a, io, o.model_dir);
+         const c = &m.cfg;
+@@ -427,6 +430,15 @@ pub const Model = struct {
+             m.loadVisionBias(path) catch |err| if (o.vision_bias != null or err != error.FileNotFound) return err;
+         }
+ 
++        // TF_DS_KEYS: the per-request rank-1 edit's direction on the device (keys.zig); unset, the engine as before
++        if (try keys_mod.settings(m.w.layers.len)) |ks| {
++            if (m.two != null) return error.KeysNotOn2D; // (prompt2d's and round2d's wo_b split its columns)
++            const dir = try m.loadKeysDir(ks.path);
++            m.keys = .{ .dir = dir, .lambda = ks.lambda, .lo = ks.lo, .hi = ks.hi };
++            m.eng.keys = &m.keys.?;
++            std.log.info("keys: on (rank {d}): lambda {d}, layers {d}-{d}, {s}", .{ o.rank, ks.lambda, ks.lo, ks.hi, ks.path });
++        }
++
+         m.host_pos = try a.alloc(i64, chunk_rows);
+         m.ids64 = try a.alloc(i64, chunk_rows);
+         m.vocab = sp.world * (if (m.two) |t| t.hw[0] + t.hw[1] else m.w.head.n); // 2D: both pairs' vocabulary parts
+@@ -1079,6 +1091,31 @@ pub const Model = struct {
+         if (!std.mem.eql(u8, ref_snap, b.bytes[blk..][0..small])) return error.SpillLayoutMismatch;
+     }
+ 
++    /// TF_DS_KEYS_DIR's `direction` (f32 [hidden], a unit vector) on the device.
++    fn loadKeysDir(m: *Model, path: []const u8) !u64 {
++        const core = @import("core");
++        var f = try core.safetensors.File.open(m.gpa, m.io, path);
++        defer f.close(m.io);
++        const t = f.get("direction") orelse return error.MissingKeysDirection;
++        if (!t.is(.f32, &.{m.cfg.hidden})) return error.BadKeysDirection;
++        const tmp = try m.gpa.alloc(f32, m.cfg.hidden); // (a copy out of the file mapping first: see vit.zig)
++        defer m.gpa.free(tmp);
++        @memcpy(std.mem.sliceAsBytes(tmp), t.bytes);
++        var norm: f64 = 0;
++        for (tmp) |v| norm += @as(f64, v) * v;
++        if (@abs(norm - 1) > 1e-3) return error.BadKeysDirection; // (the edit assumes a unit vector)
++        const dst = try m.arena.take(t.bytes.len);
++        try m.ctx.d.check(m.ctx.d.api.cuMemcpyHtoD_v2(dst, tmp.ptr, t.bytes.len), "cuMemcpyHtoD");
++        return dst;
++    }
++
++    /// TF_DS_KEYS: whether the stream opening on `slot` asked for the edit (rank 0 at fillOpen, a follower at the
++    /// fill_begin frame, before fillBegin). Refused when asked for on an engine without TF_DS_KEYS_DIR.
++    pub fn setKeys(m: *Model, slot: usize, on: bool) !void {
++        if (slot >= m.streams) return error.BadSlot;
++        if (m.keys) |*k| k.slot_on[slot] = on else if (on) return error.KeysOff;
++    }
++
+     /// Each layer's gate_bias_vl (f32 [experts], the checkpoint's extra file) on the device: Gate.forward's bias at
+     /// image-span positions.
+     fn loadVisionBias(m: *Model, path: []const u8) !void {
+@@ -1126,6 +1163,7 @@ pub const Model = struct {
+         m.view = try m.caches.view(&m.eng, slot, base);
+         for (m.rings, m.ring_view) |r, *v| v.* = r + slot * m.eng.ringBytes();
+         m.fill_slot = slot;
++        if (m.keys) |*k| k.fill_on = k.slot_on[slot]; // (a resumed pass keeps its stream's flag)
+     }
+ 
+     /// TF_DS_KV_SHARD: the filling prompt's view (fillBegin's, at `base`) with its borrowed twins (`on`; `local`: this
+diff --git a/zig/src/families/dsv41/ops.zig b/zig/src/families/dsv41/ops.zig
+index a82baee..21a5b31 100644
+--- a/zig/src/families/dsv41/ops.zig
++++ b/zig/src/families/dsv41/ops.zig
+@@ -37,6 +37,7 @@ pub const Ops = struct {
+     copy16: cuda.Function,
+     argmax_rows: cuda.Function,
+     gpu_clock: cuda.Function,
++    keys_fn: cuda.Function,
+ 
+     /// The three images (cuda.kernels.torch_pointwise, torch_movement and dsv41_ops, or the fatbins' bytes).
+     pub fn load(d: *const cuda.Driver, pointwise: []const u8, movement: []const u8, family: []const u8) !Ops {
+@@ -68,6 +69,7 @@ pub const Ops = struct {
+             .copy16 = try fm.function("tf_ds_copy_rows16_kernel"),
+             .argmax_rows = try fm.function("tf_ds_argmax_rows_kernel"),
+             .gpu_clock = try fm.function("tf_ds_clock_kernel"),
++            .keys_fn = try fm.function("tf_ds_keys_kernel"),
+         };
+     }
+ 
+@@ -92,6 +94,20 @@ pub const Ops = struct {
+         try go(o.to_f32, s, blocks(count, 256), 256, &a);
+     }
+ 
++    /// TF_DS_KEYS (keys.zig): y -= lambda * dir * (dir . y) on each of `rows` fp32 rows of y (row stride ldy) of `hidden`
++    /// values, where mask (int64 [rows]; 0: every row) is nonzero. dir: fp32 [hidden], a unit vector.
++    pub fn keysEdit(o: *const Ops, s: cuda.Stream, y: u64, ldy: usize, rows: usize, hidden: usize, dir: u64, mask: u64, lambda: f32) !void {
++        if (rows == 0) return;
++        var a: cuda.Args = .{};
++        a.add(y);
++        a.add(@as(u64, ldy));
++        a.add(dir);
++        a.add(mask);
++        a.add(@as(c_int, @intCast(hidden)));
++        a.add(lambda);
++        try go(o.keys_fn, s, rows, 256, &a);
++    }
++
+     /// `.float()` of `count` fp16 values (exact).
+     pub fn f16ToF32(o: *const Ops, s: cuda.Stream, in: u64, out: u64, count: usize) !void {
+         if (count == 0) return;
+diff --git a/zig/src/families/dsv41/prompt.zig b/zig/src/families/dsv41/prompt.zig
+index d77e94b..f8b3cb0 100644
+--- a/zig/src/families/dsv41/prompt.zig
++++ b/zig/src/families/dsv41/prompt.zig
+@@ -11,6 +11,7 @@
+ //! Not yet: ring mode (verify windows), a pool that leaves blocks out, a chunk starting inside a compressor group;
+ //! those return error.NotPortedYet.
+ const std = @import("std");
++const keys_mod = @import("keys.zig");
+ const cuda = @import("cuda");
+ const Config = @import("config.zig").Config;
+ const weights = @import("weights.zig");
+@@ -136,6 +137,7 @@ pub const Engine = struct {
+     two: ?*const prompt2d.Two = null, // a node of the four-node 2D split (prompt2d.zig); `world` stays TP2's
+     ring: ?*rdma.Ring = null, // TP2: the decode-size all-gathers over the RDMA ring (the served lane's), else NCCL
+     kv: ?*shard_ops.KvShard = null, // TF_DS_KV_SHARD: the parts, the decode mode, the fetch kernels (null: replicated)
++    keys: ?*keys_mod.Keys = null, // TF_DS_KEYS (keys.zig): the per-request rank-1 edit on wo_b's output (null: off)
+ 
+     /// A decode-size all-gather of `count` fp32 a rank into `dst`, rank after rank: the RDMA ring when the engine has
+     /// one and the slice fits a slot (whole float4s), else NCCL. The same bytes either way.
+@@ -1051,6 +1053,8 @@ pub fn attention(e: *const Engine, ch: *Chunk, cs: *const Caches, sh: *Shared, l
+     }
+     if (e.two) |t| return t.woB(e, ch, lay); // 2D: the column partner's groups first, then this pair's columns
+     try mm(e, ch, lay.wo_b, ch.u, uw, ch.pa, .fp32, c.hidden);
++    // TF_DS_KEYS: the filling stream's edit on every row of the chunk (its own partial, before the ranks' sum)
++    if (e.keys) |kd| if (kd.fill_on and kd.covers(li)) try e.ops.keysEdit(e.s, ch.pa, c.hidden, ch.n, c.hidden, kd.dir, 0, kd.lambda);
+ }
+ 
+ /// TF_DS_KV_SHARD's prompt attention (GLM 0118's sparse fetch, its final form: the chunk's history rows sent once):
+diff --git a/zig/src/families/dsv41/round.zig b/zig/src/families/dsv41/round.zig
+index 95c72d1..c77f9fd 100644
+--- a/zig/src/families/dsv41/round.zig
++++ b/zig/src/families/dsv41/round.zig
+@@ -107,7 +107,7 @@ const sglue_n = shard.sglue_n;
+ pub const Window = struct { row: usize, n: usize, seq: []const i32 };
+ 
+ /// The index tensors rounds.py's _ix makes from a round's inputs, by row (int64 [R] each, gi [R, 2]).
+-const Glue = enum(u8) { wslot, wbase, cbase1, ctarget1, gpos1, vis1, cbase2, ctarget2, gpos2, vis2, rslot, gi };
++const Glue = enum(u8) { wslot, wbase, cbase1, ctarget1, gpos1, vis1, cbase2, ctarget2, gpos2, vis2, rslot, keys, gi }; // keys: TF_DS_KEYS' row mask (keys.zig)
+ const glue_n = @as(usize, @backingInt(Glue.gi)) + 2; // gi (the last) takes two
+ 
+ /// A round's buffers for up to max_rows rows (Python allocates them a round; their contents never carry over).
+@@ -710,6 +710,8 @@ fn setGlue(e: *const Engine, rd: *Round, rows: Rows) !void {
+         at(&hg, .vis2, i).* = @divFloor(p + 1, 2);
+         // rslot = slot * RAW + pos % RAW; gi = rbase + (groups * 2 + [0, 1]) % RAW, rbase = slot * RAW
+         at(&hg, .rslot, i).* = slot * raw + @mod(p, raw);
++        // TF_DS_KEYS: the row's stream asked for the edit (its slot's flag, set at its fill_begin on every rank)
++        at(&hg, .keys, i).* = if (e.keys) |kd| @intFromBool(kd.slot_on[@intCast(slot)]) else 0;
+         const gi0 = @as(usize, @backingInt(Glue.gi)) * max_rows;
+         hg[gi0 + 2 * i] = slot * raw + @mod(groups * 2, raw);
+         hg[gi0 + 2 * i + 1] = slot * raw + @mod(groups * 2 + 1, raw);
+@@ -1061,6 +1063,8 @@ fn attention(e: *const Engine, rd: *Round, ch: *const Chunk, cs: *const Caches,
+     try rd.mark(e, .a_x);
+     var cb_call = [_]exl3_linear.Call{.{ .layer = lay.wo_b, .x = 0, .ldx = 0, .x_dtype = .bf16, .xh = rd.xb, .y = rd.pa, .ldy = @intCast(lay.wo_b.n), .y_dtype = .f32, .counters = 0 }};
+     try prompt.groupedRotated(e, ch, R, &cb_call);
++    // TF_DS_KEYS: the edit on the rows whose mask is set (the glue's, uploaded each round: the same launch in a graph)
++    if (e.keys) |kd| if (kd.covers(li)) try e.ops.keysEdit(e.s, rd.pa, lay.wo_b.n, R, c.hidden, kd.dir, rd.g(.keys), kd.lambda);
+     // the prefetch behind wo_b: the ffn mix's weights, the router, the shared expert's gate
+     try rd.prefetch(e, &.{ .{ lay.hc_ffn[0], hcFnBytes(c) }, .{ lay.gate_w, @as(u64, c.experts) * c.hidden * 2 }, lay.experts.shared_gate, lay.experts.shared_up, lay.experts.shared_down }, prefetch_budget / 2);
+ }
+diff --git a/zig/src/families/dsv41/spill_tier.zig b/zig/src/families/dsv41/spill_tier.zig
+index 6254b31..70cc3ca 100644
+--- a/zig/src/families/dsv41/spill_tier.zig
++++ b/zig/src/families/dsv41/spill_tier.zig
+@@ -1216,6 +1216,9 @@ pub fn Leader(comptime Dev: type) type {
+             const bt = self.side.bt;
+             const at = kept.at;
+             if (at == 0 or at % bt != 0 or at < self.min_tokens or kept.key.len < at) return null;
++            // TF_DS_KEYS: the keys model's states (server chat.keys_tag on a text first id) stay off disk: a follower
++            // keys its points from its own ids, which carry no tag (with pictures, pointPictures refuses them)
++            if (!kept.images and kept.media.len == 0 and kept.key[0] >= format.picture_ids) return null;
+             // pictures: recorded with their spans and full digests (those before the cut), the keyed ids checked to
+             // derive from them and the prompt's model ids kept beside them; any disagreement keeps nothing on disk
+             var pics: Pictures = .{};
+diff --git a/zig/src/server/chat.zig b/zig/src/server/chat.zig
+index 5f04ed2..850039b 100644
+--- a/zig/src/server/chat.zig
++++ b/zig/src/server/chat.zig
+@@ -135,6 +135,9 @@ const Mailbox = struct {
+ const nowNs = clock.nowNs;
+ const seconds = clock.seconds;
+ 
++/// The keys model's cache-key tag (Request.keys).
++pub const keys_tag: u32 = 0x8000_0000;
++
+ /// Python's ``bool(fields.get(key))`` on the sampling fields.
+ fn flag(f: Value, key: []const u8) ?bool {
+     const v = f.get(key) orelse return null;
+@@ -214,6 +217,17 @@ pub fn prepare(srv: *Server, cx: *Cx, input: Input, gone: anytype) Failure!Prepa
+         .tools_json = if (input.tools.len > 0) try json.stringify(a, .{ .array = @constCast(input.tools) }, .{ .ascii = false }) else "",
+     };
+     try srv.checkFeatures(cx, f, input.tools.len > 0, thinking, rendered.ids, input.tools, &request);
++    if (flag(f, "tf_keys") orelse false) {
++        // the keys model's states are its own: its cache key's first token is tagged (bit 31: no token id has it), so
++        // the prompt cache and its joins never resume one variant's state for the other. A picture prompt with no key
++        // (TF_DS_IMAGE_CACHE=0) stays without one: cacheKey() would hand back the prompt, placeholders and all
++        request.keys = true;
++        if (request.images.len == 0 or request.cache_key.len > 0) {
++            const key = try a.dupe(u32, request.cacheKey());
++            if (key.len > 0) key[0] |= keys_tag;
++            request.cache_key = key;
++        }
++    }
+     if (thinking) {
+         const budget_field = f.get("thinking_budget");
+         const budget: i64 = if (budget_field != null and budget_field.?.truthy()) budget_field.?.int64() orelse 0 else srv.config.thinking_budget;
+diff --git a/zig/src/server/openai.zig b/zig/src/server/openai.zig
+index f9baed3..237665b 100644
+--- a/zig/src/server/openai.zig
++++ b/zig/src/server/openai.zig
+@@ -114,6 +114,13 @@ pub fn replyModel(srv: *const Server, body: Value) []const u8 {
+     return srv.config.served_name;
+ }
+ 
++/// Whether the request names the keys model (Config.keys_model, TENSORFOLD_KEYS_MODEL).
++pub fn keysAsked(srv: *const Server, body: Value) bool {
++    if (srv.config.keys_model.len == 0) return false;
++    const m = body.get("model") orelse return false;
++    return m == .string and std.mem.eql(u8, m.string, srv.config.keys_model);
++}
++
+ const Plan = struct {
+     input: chat.Input,
+     stream: bool,
+@@ -160,6 +167,7 @@ fn plan(srv: *Server, cx: *Cx, is_chat: bool, raw: Value) errors.Refused!Plan {
+     const thinking = try fields.thinkingFields(cx, body, srv.effort_levels);
+     if (thinking.effort) |e| try sampling.put(cx.a, "reasoning_effort", .{ .string = e });
+     if (thinking.enable) |on| try sampling.put(cx.a, "enable_thinking", .{ .bool = on });
++    if (keysAsked(srv, body)) try sampling.put(cx.a, "tf_keys", .{ .bool = true });
+     input.fields = .{ .object = sampling };
+     var policy: tool_stream.Policy = .{};
+     if (body.field("parallel_tool_calls")) |p| {
+diff --git a/zig/src/server/serve.zig b/zig/src/server/serve.zig
+index 1e2ad99..4608fb9 100644
+--- a/zig/src/server/serve.zig
++++ b/zig/src/server/serve.zig
+@@ -101,7 +101,9 @@ pub fn run(gpa: Allocator, io: std.Io, args: cli.Args, s: Setup) u8 {
+     };
+     if (!store.enabled() and !auth.loopback(args.host)) log.line("warning: non-loopback server has no API key; requests are open", .{});
+     var ids: std.ArrayList([]const u8) = .empty;
+-    for ([_][]const []const u8{ &.{s.served}, args.alias }) |group| for (group) |raw| {
++    // TENSORFOLD_KEYS_MODEL: a model id of its own for the engine's per-request edit (dsv41 TF_DS_KEYS)
++    const keys_model = std.mem.trim(u8, env(s, "TENSORFOLD_KEYS_MODEL") orelse "", " \t\r\n");
++    for ([_][]const []const u8{ &.{s.served}, args.alias, &.{keys_model} }) |group| for (group) |raw| {
+         const id = std.mem.trim(u8, raw, " \t\r\n");
+         if (id.len == 0) continue;
+         for (ids.items) |seen| {
+@@ -115,6 +117,7 @@ pub fn run(gpa: Allocator, io: std.Io, args: cli.Args, s: Setup) u8 {
+     const config: server_mod.Config = .{
+         .served_name = s.served,
+         .model_ids = ids.items,
++        .keys_model = keys_model,
+         .default_max_tokens = args.max_tokens,
+         .enable_thinking = args.thinking,
+         .reasoning_effort = args.reasoning_effort,
+diff --git a/zig/src/server/server.zig b/zig/src/server/server.zig
+index f16704d..db2e1cd 100644
+--- a/zig/src/server/server.zig
++++ b/zig/src/server/server.zig
+@@ -34,6 +34,9 @@ pub const Config = struct {
+     served_name: []const u8,
+     /// The served name first, then aliases, without repeats.
+     model_ids: []const []const u8,
++    /// TENSORFOLD_KEYS_MODEL: the model id whose requests take the engine's per-request edit (TF_DS_KEYS; listed in
++    /// model_ids); empty: none.
++    keys_model: []const u8 = "",
+     default_max_tokens: i64 = 4096,
+     enable_thinking: bool = true,
+     reasoning_effort: ?[]const u8 = null,
