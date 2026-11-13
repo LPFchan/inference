@@ -385,6 +385,20 @@ Patch chain in `patches/atomic-llama-cpp/`, applied in order by `Dockerfile`:
 
 ## Recent Changes
 
+- 2026-11-13: **DeepSeek-V4.1-Flash-1017 serves stock and abliterated from one
+  set of weights** — spark2 runs recipe `c7f2b85` (`~/dsv41-next`, the
+  `dsv41-tensorfold.service` working directory) with
+  `etc/spark/dsv41/0090-keys-switch.patch`, image
+  `tensorfold-dsv41:exl3-tp2-a7b168cee03b`, on the stock rank caches
+  (`ABLIT=0`). `DeepSeek-V4.1-Flash-1017` stays abliterated: the engine applies
+  drowzeys' Keys edit per request as a rank-1 projection after `wo_b` in layers
+  10-35 (RSH-20261113-001). `DeepSeek-V4.1-Flash-1017-Stock` is the stock model
+  on the same port. spark1 reads its rank cache from spark2 over a read-only
+  NFS mount (`/mnt/spark2-hf`, fstab). `scripts/spark/dsv41_keys_gate.py`
+  passed (refusal both ways, mixed batch equals solo, no cache resume across
+  names, arithmetic). Image and tool calls work on both names. Decode: prose
+  46-56 and code 81-95 tok/s, against 53 and 72 before. Rollback: the old
+  checkout, image `exl3-tp2-928adbd0e57d` and the unit backup (PLANS).
 - 2026-11-13: **DeepSeek-V4.1-Flash-1017 falls back to opencode-go** — the
   entry still serves from spark2, and its `fallback` (PR #52) overlays
   opencode-go (`https://opencode.ai/zen/go`, `deepseek-v4.1-flash`, the same
