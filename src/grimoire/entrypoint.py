@@ -315,6 +315,33 @@ async def _record_response_stream(
                 pass
 
 
+# A request never reached the backend: safe to send again elsewhere.
+_UNREACHABLE = (httpx.ConnectError, httpx.ConnectTimeout, TimeoutError)
+# After a model proves unreachable, its fallback serves directly for this long,
+# so each request does not wait out another failed connection or startup.
+FALLBACK_HOLD_SECONDS = 60
+_fallback_until: dict[str, float] = {}
+
+
+async def _with_fallback(model_name, request, attempt):
+    """Run ``attempt(active)`` on the model, or on its ``fallback`` backend when it cannot be reached."""
+    cfg = registry.get(model_name) or {}
+    fallback = cfg.get("fallback")
+    if not fallback or time.monotonic() >= _fallback_until.get(model_name, 0):
+        try:
+            return await attempt(await manager.start_model(model_name, evict=is_admin(request)))
+        except _UNREACHABLE as e:
+            if not fallback:
+                raise
+            logger.warning("%s is unreachable (%s); using its fallback backend", model_name, repr(e))
+            _fallback_until[model_name] = time.monotonic() + FALLBACK_HOLD_SECONDS
+    # The fallback is an API that is always up, so there is nothing to load or
+    # track: overlay its fields on the entry and send.
+    backend = {key: value for key, value in cfg.items() if key != "fallback"}
+    backend.update(fallback)
+    return await attempt(ActiveModel(model_name, backend, port=None, gpu=None))
+
+
 @app.post("/v1/chat/completions")
 async def chat_completions(request: Request):
     """Route chat completions to the correct active model."""
@@ -333,13 +360,12 @@ async def chat_completions(request: Request):
         )
 
     try:
-        active = await manager.start_model(model_name, evict=is_admin(request))
         history_conversation_id = _history_conversation_id(request, payload)
         history_conversation_id = _validated_history_conversation_id(
             user_hash, history_conversation_id
         )
         conversation_id = _kv_conversation_id(request, history_conversation_id)
-        return await _proxy_chat(
+        return await _with_fallback(model_name, request, lambda active: _proxy_chat(
             requested_model,
             payload,
             active,
@@ -348,7 +374,7 @@ async def chat_completions(request: Request):
             history_conversation_id=history_conversation_id,
             record_usage=request.headers.get("x-grimoire-cache-warm") != "1",
             request=request,
-        )
+        ))
     except HTTPException:
         raise
     except KeyError as e:
@@ -394,30 +420,32 @@ async def chat_responses(request: Request):
         payload.pop("max_output_tokens", None)
         payload.pop("max_tokens", None)
 
-    try:
-        active = await manager.start_model(model_name, evict=is_admin(request))
+    async def attempt(active):
         client = get_proxy_client()
         headers = _backend_request_headers(request.headers)
         # The public proxy authenticated this request; key the session by its caller.
         caller = request.headers.get(config.INTERNAL_AUTH_SUB_HEADER)
         headers.update(active.remote_headers(request.headers, account_hash(caller) if caller else None))
 
-        payload = copy.deepcopy(payload)
+        forwarded = copy.deepcopy(payload)
         requested_cfg = registry.get(model_name) or active.cfg
-        payload = apply_chat_template_kwargs(
-            payload,
+        forwarded = apply_chat_template_kwargs(
+            forwarded,
             requested_cfg,
             registry.get_family_defaults(requested_cfg.get("family")),
         )
-        payload["model"] = await active.get_backend_model_id()
+        forwarded["model"] = await active.get_backend_model_id()
         req = client.build_request(
             "POST",
             _active_backend_url(active, "v1/responses"),
             headers=headers,
             params=request.query_params,
-            json=payload,
+            json=forwarded,
         )
-        upstream = await send_while_connected(client, req, request)
+        return await send_while_connected(client, req, request)
+
+    try:
+        upstream = await _with_fallback(model_name, request, attempt)
     except HTTPException:
         raise
     except LoadRefused as e:
@@ -457,28 +485,27 @@ async def proxy_v1(request: Request, path: str):
     if not model_name:
         raise HTTPException(status_code=404, detail="No target model resolved for proxy request")
 
-    try:
-        active = await manager.start_model(model_name, evict=is_admin(request))
+    async def attempt(active):
         client = get_proxy_client()
         headers = _backend_request_headers(request.headers)
         headers.update(active.remote_headers(request.headers, user_hash))
 
         if isinstance(payload, dict):
-            payload = copy.deepcopy(payload)
-            if isinstance(payload.get("messages"), list):
+            forwarded = copy.deepcopy(payload)
+            if isinstance(forwarded.get("messages"), list):
                 requested_cfg = registry.get(model_name) or active.cfg
-                payload = apply_chat_template_kwargs(
-                    payload,
+                forwarded = apply_chat_template_kwargs(
+                    forwarded,
                     requested_cfg,
                     registry.get_family_defaults(requested_cfg.get("family")),
                 )
-            payload["model"] = await active.get_backend_model_id()
+            forwarded["model"] = await active.get_backend_model_id()
             req = client.build_request(
                 request.method,
                 _active_backend_url(active, f"v1/{path}"),
                 headers=headers,
                 params=request.query_params,
-                json=payload,
+                json=forwarded,
             )
         else:
             req = client.build_request(
@@ -488,8 +515,10 @@ async def proxy_v1(request: Request, path: str):
                 params=request.query_params,
                 content=body,
             )
+        return await send_while_connected(client, req, request)
 
-        upstream = await send_while_connected(client, req, request)
+    try:
+        upstream = await _with_fallback(model_name, request, attempt)
     except HTTPException:
         raise
     except LoadRefused as e:
