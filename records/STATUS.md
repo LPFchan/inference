@@ -416,7 +416,8 @@ Patch chain in `patches/atomic-llama-cpp/`, applied in order by `Dockerfile`:
   fallback then serves directly for 60 s. Verified with spark2's
   `dsv41-tensorfold.service` stopped: the switch adds no measurable time; text,
   image and streaming answered through chat.lost.plus. The key is a copy in
-  the gateway `.env` (systemd does not read `~/.zshenv`).
+  the gateway `.env` (systemd does not read `~/.zshenv`). The spark2 unit is
+  stopped and disabled during the operator's research; re-enable it to return.
 - 2026-11-08: **Remote backends move to the fleet's Headscale** — the
   operator's fleet left the `lost.plus` tailnet for `net.lost.plus`, so every
   remote model now names its host as `<machine>.tail.lost.plus` instead of a
