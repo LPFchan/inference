@@ -2,7 +2,7 @@
 
 **Snapshot:** 2026-10-29
 **Posture:** The Grimoire gateway serves local llama.cpp models and admits remote vLLM models through Mangchi's residency agent. The local engine remains TheTom's turboquant fork with turbo4 KV. Mangchi model artifacts are managed separately from the gateway.
-**Focus:** Serve Qwen3.8 Flash-Next and the grugthink 27B as Mangchi's registered remote models (one resident at a time) and continue Flash-Next's its decode, prefix-cache, and CUDA-graph optimization program.
+**Focus:** Serve Qwen3.8 Flash-Next as Mangchi's registered remote model and continue Flash-Next's its decode, prefix-cache, and CUDA-graph optimization program.
 
 ## Autoresearch — Qwen3-ASR
 
@@ -385,6 +385,13 @@ Patch chain in `patches/atomic-llama-cpp/`, applied in order by `Dockerfile`:
 
 ## Recent Changes
 
+- 2026-11-14: **Grugthink 27B retired** — `qwen3.8-27b-grugthink` and
+  `qwen3.8-27b-vanilla` are removed from Grimoire's registry. spark1's
+  `spark-agent` (their only server), its `spark-vllm:pin-5fd5dd5` image, the
+  Qwen3.8-27B NVFP4 base and the grugthink adapters are deleted from spark1;
+  `docker-compose.spark.yml` and `etc/spark-agent.json` are gone. The agent had
+  been stopped since the DeepSeek pair took both Sparks' memory.
+
 - 2026-11-13: **DeepSeek-V4.1-Flash-1017 serves stock and abliterated from one
   set of weights** — spark2 runs recipe `c7f2b85` (`~/dsv41-next`, the
   `dsv41-tensorfold.service` working directory) with
@@ -502,12 +509,12 @@ Patch chain in `patches/atomic-llama-cpp/`, applied in order by `Dockerfile`:
   head and API (`100.120.192.122:8888`); spark1 is the worker over the CX7 link
   (`192.168.100.0/24` and `192.168.101.0/24`, both rails, MTU 9000; NetworkManager
   `cx7-a`/`cx7-b`). spark2 exports its Hugging Face cache read-only to spark1 over
-  NFS; Engram's tables and rank 1's weight file sit on spark1's own disk. The
+  NFS; Engram's tables sit on spark1's own disk and rank 1's weight file is read
+  from that export. The
   recipe's systemd user unit `dsv41-tensorfold.service` on spark2 keeps both
   ranks up, so Grimoire's `DeepSeek-V4.1-Flash-1017` is a `vllm-remote` entry
   without a residency agent: unloading it in Grimoire does not stop the pair.
-  It needs nearly all memory on both Sparks, so spark1's `spark-agent` is
-  stopped and the grugthink 27B entries cannot load while it runs. Chat,
+  It needs nearly all memory on both Sparks. Chat,
   streaming, thinking off and image input pass through chat.lost.plus.
 
 - 2026-10-20: **Speech benchmark complete** — eight pipelines each have 2,624
