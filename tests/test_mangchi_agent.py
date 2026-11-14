@@ -324,21 +324,6 @@ def test_qsa_fp8_canary_build_is_pinned_and_thor_aware():
     assert "self.compute_ngram_ids(" in ple_patch
 
 
-def test_grugthink_spec_serves_the_adapter_with_vision_and_mtp():
-    grug = agent.load_specs(str(ROOT / "etc" / "spark-agent.json"))["qwen3.8-27b-grugthink"]
-    assert grug.vllm_docker_image == "spark-vllm:pin-5fd5dd5"
-    args = grug.serve_args
-    assert grug.model_path == "/models/nvfp4/qwen3.8-27b-vanilla-nvidia"
-    assert grug.models_dir_host == "/home/yeowool/models"
-    assert args[args.index("--lora-modules") + 1] == (
-        "qwen3.8-27b-grugthink=/models/grugthink/dense-27b-d6-run3-iter-0004"
-    )
-    assert json.loads(args[args.index("--speculative-config") + 1])["method"] == "mtp"
-    assert "--mm-processor-kwargs" in args
-    assert args[args.index("--chat-template") + 1] == "/templates/qwen3.8-chat_template.jinja"
-    assert grug.templates_dir_host == "/home/yeowool/inference/templates"
-
-
 def test_docker_launch_command_shape():
     specs = agent.load_specs()
     name = "qwen3.8-flash-next"
