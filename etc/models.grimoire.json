@@ -987,6 +987,19 @@
       ],
       "ctx-size": 524288,
       "added": "2026-11-13T00:00:00+00:00"
+    },
+    "GLM-5.3": {
+      "backend": "vllm-remote",
+      "remote-url": "https://opencode.ai/zen/go",
+      "remote-api-key-env": "OPENCODE_GO_API_KEY",
+      "remote-session-header": "x-opencode-session",
+      "backend-model-id": "glm-5.3",
+      "capabilities": [
+        "completion"
+      ],
+      "ctx-size": 1000000,
+      "added": "2026-11-17T19:28:44.431240+00:00",
+      "family": "glm"
     }
   },
   "fixed": {
@@ -1008,6 +1021,14 @@
         "low"
       ],
       "vllm-default-effort": "medium"
+    },
+    "glm": {
+      "vllm-reasoning-efforts": [
+        "low",
+        "high",
+        "max"
+      ],
+      "vllm-default-effort": "high"
     }
   }
 }

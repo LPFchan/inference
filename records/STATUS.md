@@ -385,6 +385,11 @@ Patch chain in `patches/atomic-llama-cpp/`, applied in order by `Dockerfile`:
 
 ## Recent Changes
 
+- 2026-11-18: **GLM-5.3 listed on Grimoire** — `GLM-5.3` is a hosted
+  `vllm-remote` entry that always serves from opencode-go (`glm-5.3`, billed
+  to the Go plan), 1M context, text only. A new `glm` family declares
+  opencode-go's reasoning levels (low, high, max; default high).
+
 - 2026-11-14: **Grugthink 27B retired** — `qwen3.8-27b-grugthink` and
   `qwen3.8-27b-vanilla` are removed from Grimoire's registry. spark1's
   `spark-agent` (their only server), its `spark-vllm:pin-5fd5dd5` image, the
