@@ -982,6 +982,16 @@
       "ctx-size": 1000000,
       "added": "2026-11-17T19:28:44.431240+00:00",
       "family": "glm"
+    },
+    "Inkling-2-Small": {
+      "backend": "vllm-remote",
+      "remote-url": "http://spark2.tail.lost.plus:8889",
+      "backend-model-id": "Inkling-2-Small",
+      "capabilities": [
+        "completion"
+      ],
+      "ctx-size": 131072,
+      "added": "2026-11-17T20:36:43.644416+00:00"
     }
   },
   "fixed": {

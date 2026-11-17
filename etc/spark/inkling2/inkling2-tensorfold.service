@@ -1,0 +1,19 @@
+# systemd user unit on spark2: ~/.config/systemd/user/inkling2-tensorfold.service (see README.md)
+[Unit]
+Description=Inkling 2 Small on two Sparks (kortexa TensorFold, TP 2)
+Conflicts=dsv41-tensorfold.service
+StartLimitIntervalSec=30min
+StartLimitBurst=3
+
+[Service]
+Type=simple
+WorkingDirectory=/home/yeowool/inkling-2-small
+Environment=API_HOST=0.0.0.0 API_PORT=8889
+ExecStart=/usr/bin/bash scripts/pair.sh
+ExecStopPost=/usr/bin/bash scripts/pair.sh stop
+Restart=on-failure
+RestartSec=60s
+TimeoutStopSec=60s
+
+[Install]
+WantedBy=default.target

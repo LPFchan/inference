@@ -1,0 +1,3445 @@
+From ab85a9bf58392c5c08b6c055247d51880eb07aee Mon Sep 17 00:00:00 2001
+From: LPFchan <me@lost.plus>
+Date: Tue, 17 Nov 2026 22:24:16 +0900
+Subject: [PATCH 01/17] Quantize Inkling's BF16 attention and head projections
+ to NVFP4 at load (TF_INKLING_FP4)
+
+TF_INKLING_FP4=attn keeps Q, K, V, R, gate and O as NVFP4 lane weights; =all adds the output head.
+Router, sink and conv projections stay BF16. Each tensor is quantized on the device at load: one
+fp32 scale, an e4m3 scale per 16 inputs picked by squared error among five candidates, then packed
+by modelopt_pack. Decode rows take the qmmf lane, prompt rows the NVFP4 prompt GEMM.
+
+Spark pair, greedy decode: 16.3 -> 22.3 tok/s with all; load time unchanged; 8K needle passes.
+---
+ zig/kernels/cuda/inkling2.cu           |  1 +
+ zig/kernels/cuda/inkling2_fp4.cuh      | 50 ++++++++++++++++++
+ zig/src/families/inkling2/forward.zig  |  6 +++
+ zig/src/families/inkling2/fp4.zig      | 72 ++++++++++++++++++++++++++
+ zig/src/families/inkling2/inkling2.zig |  1 +
+ zig/src/families/inkling2/kernels.zig  |  6 ++-
+ zig/src/families/inkling2/native.zig   | 12 ++++-
+ zig/src/families/inkling2/weights.zig  | 40 ++++++++++----
+ zig/src/platform/environment.zig       |  1 +
+ 9 files changed, 178 insertions(+), 11 deletions(-)
+ create mode 100644 zig/kernels/cuda/inkling2_fp4.cuh
+ create mode 100644 zig/src/families/inkling2/fp4.zig
+
+diff --git a/zig/kernels/cuda/inkling2.cu b/zig/kernels/cuda/inkling2.cu
+index 4a4077ca..0df52847 100644
+--- a/zig/kernels/cuda/inkling2.cu
++++ b/zig/kernels/cuda/inkling2.cu
+@@ -8,3 +8,4 @@
+ #include "inkling2_attention_decode.cuh"
+ #include "inkling2_exl3.cuh"
+ #include "inkling2_rows.cuh"
++#include "inkling2_fp4.cuh"
+diff --git a/zig/kernels/cuda/inkling2_fp4.cuh b/zig/kernels/cuda/inkling2_fp4.cuh
+new file mode 100644
+index 00000000..52a25ed8
+--- /dev/null
++++ b/zig/kernels/cuda/inkling2_fp4.cuh
+@@ -0,0 +1,50 @@
++// NVFP4 for the BF16 projections at load: one fp32 tensor scale, an e4m3 scale a 16 inputs chosen by squared error.
++#pragma once
++#include "inkling2_common.cuh"
++using namespace inkling2;
++
++// The tensor's |w| max as fp32 bits (positive floats order as unsigned ints); *amax starts at 0.
++extern "C" __global__ void tf_ik_fp4_amax(const bf16* w, long long count, unsigned* amax) {
++    float m = 0.f;
++    for (long long i = blockIdx.x * (long long)blockDim.x + threadIdx.x; i < count; i += (long long)gridDim.x * blockDim.x)
++        m = fmaxf(m, fabsf(f(w[i])));
++    for (int o = 16; o; o >>= 1) m = fmaxf(m, __shfl_xor_sync(0xffffffffu, m, o));
++    if ((threadIdx.x & 31) == 0) atomicMax(amax, __float_as_uint(m));
++}
++
++// One thread a group: codes [n, k/2] (low nibble first) and e4m3 scales [n, k/16]; w ~ e2m1 * scale * (amax / 2688).
++// The scale is the group max's own e4m3 or one of the four below it (clipping the largest inputs), whichever errs least.
++extern "C" __global__ void tf_ik_fp4_quant(const bf16* w, uint2* codes, unsigned char* scales, const unsigned* amax, long long groups) {
++    const long long g = blockIdx.x * (long long)blockDim.x + threadIdx.x;
++    if (g >= groups) return;
++    const float global = fmaxf(__uint_as_float(*amax), 1e-30f) / 2688.f;
++    float x[16], m = 0.f;
++#pragma unroll
++    for (int j = 0; j < 16; ++j) {
++        x[j] = f(w[g * 16 + j]);
++        m = fmaxf(m, fabsf(x[j]));
++    }
++    const int base = __nv_fp8_e4m3(m / 6.f / global).__x;
++    int pick = base;
++    float best = INFINITY;
++    for (int c = max(base - 4, 1); c <= min(base + 1, 126); ++c) {
++        __nv_fp8_e4m3 s;
++        s.__x = (unsigned char)c;
++        const float scale = (float)s * global, inv = 1.f / scale;
++        float e = 0.f;
++#pragma unroll
++        for (int j = 0; j < 16; ++j) {
++            const float d = x[j] - (float)__nv_fp4_e2m1(x[j] * inv) * scale;
++            e += d * d;
++        }
++        if (e < best) best = e, pick = c;
++    }
++    __nv_fp8_e4m3 s;
++    s.__x = (unsigned char)pick;
++    const float inv = pick ? 1.f / ((float)s * global) : 0.f;
++    unsigned word[2] = {0, 0};
++#pragma unroll
++    for (int j = 0; j < 16; ++j) word[j / 8] |= (unsigned)(__nv_fp4_e2m1(x[j] * inv).__x & 0xF) << (4 * (j % 8));
++    codes[g] = make_uint2(word[0], word[1]);
++    scales[g] = (unsigned char)pick;
++}
+diff --git a/zig/src/families/inkling2/forward.zig b/zig/src/families/inkling2/forward.zig
+index 2416506b..7557a98d 100644
+--- a/zig/src/families/inkling2/forward.zig
++++ b/zig/src/families/inkling2/forward.zig
+@@ -43,6 +43,12 @@ pub const Forward = struct {
+     }
+ 
+     pub fn product(f: *Forward, l: wt.Linear, x: u64, out: u64, rows: usize, kind: cuda.cublaslt.DataType) !void {
++        if (l.q) |q| {
++            const o: cuda.qmmf.Out = if (kind == .f32) .f32 else .bf16;
++            // the lane gives a row the same bits at every row count up to 16, so verified drafts match plain decode
++            if (rows <= 16) return f.k.lane.?.matmulOut(f.stream, x, q.k, rows, q, out, o, 0);
++            return f.k.prompt.?.matmulOut(f.stream, x, q.k, rows, q, out, o);
++        }
+         if (f.verifying and rows > 1) {
+             if (@import("dense.zig").serves(121, f.lt.api.cublasLtGetVersion(), 1, l.n, l.k, kind)) {
+                 var args: cuda.Args = .{};
+diff --git a/zig/src/families/inkling2/fp4.zig b/zig/src/families/inkling2/fp4.zig
+new file mode 100644
+index 00000000..958ff591
+--- /dev/null
++++ b/zig/src/families/inkling2/fp4.zig
+@@ -0,0 +1,72 @@
++//! TF_INKLING_FP4: Inkling's BF16 attention (and head) projections as NVFP4 lane weights, quantized on the device at load.
++const std = @import("std");
++const cuda = @import("cuda");
++const kern = @import("kernels.zig");
++const wt = @import("weights.zig");
++
++/// off; attn: Q, K, V, R, gate and O; all: those and the output head. Router, sink and conv projections stay BF16.
++pub const Set = enum(u8) { off, attn, all };
++
++const attn = [_][]const u8{ "attn.wq_du.weight", "attn.wk_dv.weight", "attn.wv_dv.weight", "attn.wr_du.weight", "attn.wo_ud.weight", "attn.gate_attn.weight" };
++const head = "model.llm.unembed.weight";
++
++pub fn wants(set: Set, name: []const u8) bool {
++    if (set == .off) return false;
++    if (set == .all and std.mem.eql(u8, name, head)) return true;
++    for (attn) |s| if (std.mem.endsWith(u8, name, s)) return true;
++    return false;
++}
++
++pub const Quant = struct {
++    k: *const kern.Kernels,
++    packer: cuda.modelopt.Packer,
++    stream: cuda.Stream,
++    amax: cuda.DeviceBuffer,
++    set: Set,
++
++    pub fn init(d: *const cuda.Driver, k: *const kern.Kernels, set: Set) !Quant {
++        var packer = try cuda.modelopt.Packer.load(d);
++        errdefer packer.unload();
++        var stream = try cuda.Stream.init(d, false);
++        errdefer stream.deinit();
++        return .{ .k = k, .packer = packer, .stream = stream, .amax = try cuda.DeviceBuffer.alloc(d, 4), .set = set };
++    }
++
++    pub fn deinit(q: *Quant) void {
++        q.amax.free();
++        q.stream.deinit();
++        q.packer.unload();
++    }
++
++    /// bf16 [n, k] at `src` as a packed `.nvfp4` lane weight whose words and scale tiles `w` owns.
++    pub fn pack(q: *const Quant, w: *wt.Weights, src: u64, n: usize, k: usize) !cuda.qmmf.Weight {
++        if (k % 64 != 0) return error.InklingTensorShape;
++        const groups = n * k / 16;
++        var codes = try cuda.DeviceBuffer.alloc(w.d, groups * 8);
++        defer codes.free();
++        var scales = try cuda.DeviceBuffer.alloc(w.d, groups);
++        defer scales.free();
++        try q.amax.fill32(0, q.stream.handle);
++        try q.k.go(.fp4_amax, q.stream, .{ .x = 1024 }, 256, .{ src, @as(i64, @intCast(n * k)), q.amax.ptr });
++        try q.k.go(.fp4_quant, q.stream, .{ .x = kern.ceil(groups, 256) }, 256, .{ src, codes.ptr, scales.ptr, q.amax.ptr, @as(i64, @intCast(groups)) });
++        const npad = cuda.nvfp4.padded(n);
++        const words = try w.alloc(npad / 64 * (k / 64) * 512 * 4);
++        const tiles = try w.alloc(npad * (k / 16));
++        try q.packer.fp4Lane(q.stream, codes.ptr, scales.ptr, words, tiles, n, k);
++        try q.stream.synchronize();
++        var bits: [4]u8 = undefined;
++        try q.amax.download(0, &bits);
++        const amax: f32 = @bitCast(std.mem.readInt(u32, &bits, .little));
++        return cuda.nvfp4.weight(words, tiles, @max(amax, 1e-30) / 2688.0, n, k);
++    }
++};
++
++test "TF_INKLING_FP4 picks attention projections and, with all, the head" {
++    try std.testing.expect(wants(.attn, "model.llm.layers.3.attn.wq_du.weight"));
++    try std.testing.expect(wants(.attn, "model.llm.layers.47.attn.wo_ud.weight"));
++    try std.testing.expect(!wants(.attn, "model.llm.layers.3.attn.attn_sink_proj.weight"));
++    try std.testing.expect(!wants(.attn, "model.llm.layers.3.mlp.gate.weight"));
++    try std.testing.expect(!wants(.attn, head));
++    try std.testing.expect(wants(.all, head));
++    try std.testing.expect(!wants(.off, "model.llm.layers.3.attn.wq_du.weight"));
++}
+diff --git a/zig/src/families/inkling2/inkling2.zig b/zig/src/families/inkling2/inkling2.zig
+index 87679d39..b7b7f0f6 100644
+--- a/zig/src/families/inkling2/inkling2.zig
++++ b/zig/src/families/inkling2/inkling2.zig
+@@ -11,6 +11,7 @@ test {
+     _ = @import("draft_config.zig");
+     _ = @import("draft_commit.zig");
+     _ = @import("embedding.zig");
++    _ = @import("fp4.zig");
+     _ = kernels;
+     _ = native;
+     _ = @import("link.zig");
+diff --git a/zig/src/families/inkling2/kernels.zig b/zig/src/families/inkling2/kernels.zig
+index e0c2880d..0bab6d2b 100644
+--- a/zig/src/families/inkling2/kernels.zig
++++ b/zig/src/families/inkling2/kernels.zig
+@@ -2,7 +2,7 @@
+ const std = @import("std");
+ const cuda = @import("cuda");
+ 
+-pub const Op = enum { mix, finish, rank_sum, logits, quant, swiglu, route, moe_sum, conv, conv_commit, prep, relative, attention, attention_decode, rotate, unrotate, embed, norm, top1 };
++pub const Op = enum { mix, finish, rank_sum, logits, quant, swiglu, route, moe_sum, conv, conv_commit, prep, relative, attention, attention_decode, rotate, unrotate, embed, norm, top1, fp4_amax, fp4_quant };
+ 
+ pub const Mix = extern struct {
+     partial: u64,
+@@ -66,6 +66,8 @@ pub const Kernels = struct {
+     functions: std.EnumArray(Op, cuda.Function),
+     split_decode: bool,
+     dense: ?@import("dense.zig").Dense,
++    lane: ?cuda.qmmf.Lane = null, // NVFP4 decode rows (TF_INKLING_FP4)
++    prompt: ?cuda.nvfp4.Prompt = null, // NVFP4 prompt rows
+ 
+     pub fn load(d: *const cuda.Driver) !Kernels {
+         if (!cuda.kernels.available) return error.BuiltWithoutKernels;
+@@ -85,6 +87,8 @@ pub const Kernels = struct {
+ 
+     pub fn deinit(k: *Kernels) void {
+         if (k.dense) |*dense| dense.deinit();
++        if (k.lane) |*l| l.unload();
++        if (k.prompt) |*p| p.unload();
+         k.x3.unload();
+         k.experts_mod.unload();
+         k.mod.unload();
+diff --git a/zig/src/families/inkling2/native.zig b/zig/src/families/inkling2/native.zig
+index 24bec162..8da5834f 100644
+--- a/zig/src/families/inkling2/native.zig
++++ b/zig/src/families/inkling2/native.zig
+@@ -4,6 +4,7 @@ const cuda = @import("cuda");
+ const lanes = @import("lanes");
+ const core = @import("core");
+ const environment = @import("sys").environment;
++const fp4 = @import("fp4.zig");
+ const cfg = @import("config.zig");
+ const wt = @import("weights.zig");
+ const state = @import("state.zig");
+@@ -115,7 +116,16 @@ fn openPair(gpa: std.mem.Allocator, io: std.Io, ctx: *const cuda.Context, dir: [
+     errdefer own.lt.close();
+     var cache = core.checkpoint.cache.Load.begin(io, true);
+     defer cache.deinit();
+-    own.w = try wt.loadProfile(gpa, io, ctx.d, dir, share, cfg.layers, o.drafts);
++    const set: fp4.Set = @enumFromInt(try environment.read(u8, "TF_INKLING_FP4", 0));
++    var quant: ?fp4.Quant = null;
++    defer if (quant) |*q| q.deinit();
++    if (set != .off) {
++        own.k.lane = try cuda.qmmf.Lane.load(ctx.d, (try ctx.d.currentCapability()) / 10);
++        own.k.prompt = try cuda.nvfp4.Prompt.load(ctx.d);
++        quant = try fp4.Quant.init(ctx.d, &own.k, set);
++        std.log.info("inkling2 rank {d}: NVFP4 {s} projections, quantized at load", .{ share.rank, @tagName(set) });
++    }
++    own.w = try wt.loadProfile(gpa, io, ctx.d, dir, share, cfg.layers, o.drafts, if (quant) |*q| q else null);
+     errdefer own.w.deinit();
+     const kv = try share.kvBytes(o.context) + if (o.drafts) try @import("draft_config.zig").kvBytes(share, o.context) else 0;
+     if (o.room) |r| if ((r.read(r.ctx) orelse 0) < kv + (1 << 30)) return error.InklingKvRoom;
+diff --git a/zig/src/families/inkling2/weights.zig b/zig/src/families/inkling2/weights.zig
+index e59a645b..2b9138a6 100644
+--- a/zig/src/families/inkling2/weights.zig
++++ b/zig/src/families/inkling2/weights.zig
+@@ -3,10 +3,11 @@ const std = @import("std");
+ const cuda = @import("cuda");
+ const core = @import("core");
+ const cfg = @import("config.zig");
++const fp4 = @import("fp4.zig");
+ const Tensor = core.checkpoint.Tensor;
+ const File = core.safetensors.File;
+ 
+-pub const Linear = struct { ptr: u64, k: usize, n: usize };
++pub const Linear = struct { ptr: u64, k: usize, n: usize, q: ?cuda.qmmf.Weight = null };
+ pub const Matrix = struct { ptrs: u64, suh: u64, svh: u64, bits: u64, k: usize, n: usize };
+ pub const Conv = struct { weight: u64, dynamic: ?Linear = null, width: usize };
+ pub const Layer = struct {
+@@ -47,6 +48,7 @@ pub const Weights = struct {
+     output_query: u64 = 0,
+     head: Linear = undefined,
+     bytes: usize = 0,
++    fp4: ?*const fp4.Quant = null,
+ 
+     pub fn deinit(w: *Weights) void {
+         for (w.buffers.items) |*b| b.free();
+@@ -65,6 +67,17 @@ pub const Weights = struct {
+         w.bytes += b.len;
+         return b.ptr;
+     }
++
++    pub fn alloc(w: *Weights, len: usize) !u64 {
++        const b = try cuda.DeviceBuffer.alloc(w.d, len);
++        errdefer {
++            var owned = b;
++            owned.free();
++        }
++        try w.buffers.append(w.gpa, b);
++        w.bytes += b.len;
++        return b.ptr;
++    }
+ };
+ 
+ pub fn get(f: *const File, name: []const u8, dtype: core.checkpoint.DType, shape: []const usize) !Tensor {
+@@ -82,16 +95,25 @@ pub fn open(gpa: std.mem.Allocator, io: std.Io, dir: []const u8, name: []const u
+     return File.open(gpa, io, path);
+ }
+ 
+-/// Cut a BF16 projection by output rows or input columns; the dense bytes themselves never change precision.
++/// Cut a BF16 projection by output rows or input columns; under TF_INKLING_FP4 a chosen one is kept as NVFP4 instead.
+ pub fn linear(w: *Weights, f: *const File, name: []const u8, n: usize, k: usize, rows: [2]usize, cols: [2]usize) !Linear {
+     const t = try get(f, name, .bf16, &.{ n, k });
+     const nn = rows[1] - rows[0];
+     const kk = cols[1] - cols[0];
+     if (rows[0] >= rows[1] or rows[1] > n or cols[0] >= cols[1] or cols[1] > k) return error.InklingTensorShape;
+-    if (kk == k) return .{ .ptr = try w.put(t.bytes[rows[0] * k * 2 .. rows[1] * k * 2]), .k = k, .n = nn };
+-    const bytes = try w.gpa.alloc(u8, nn * kk * 2);
+-    defer w.gpa.free(bytes);
+-    for (0..nn) |r| @memcpy(bytes[r * kk * 2 ..][0 .. kk * 2], t.bytes[((rows[0] + r) * k + cols[0]) * 2 ..][0 .. kk * 2]);
++    var cut: ?[]u8 = null;
++    defer if (cut) |c| w.gpa.free(c);
++    const bytes = if (kk == k) t.bytes[rows[0] * k * 2 .. rows[1] * k * 2] else blk: {
++        const c = try w.gpa.alloc(u8, nn * kk * 2);
++        cut = c;
++        for (0..nn) |r| @memcpy(c[r * kk * 2 ..][0 .. kk * 2], t.bytes[((rows[0] + r) * k + cols[0]) * 2 ..][0 .. kk * 2]);
++        break :blk c;
++    };
++    if (w.fp4) |q| if (fp4.wants(q.set, name)) {
++        var staged = try cuda.DeviceBuffer.fromHost(w.d, bytes);
++        defer staged.free();
++        return .{ .ptr = 0, .k = kk, .n = nn, .q = try q.pack(w, staged.ptr, nn, kk) };
++    };
+     return .{ .ptr = try w.put(bytes), .k = kk, .n = nn };
+ }
+ 
+@@ -223,17 +245,17 @@ fn loadExperts(w: *Weights, io: std.Io, dir: []const u8, layer: usize, comptime
+ 
+ /// `count` is 48 when serving; the independent layer dump tool may load a shorter prefix for a bounded canary.
+ pub fn load(gpa: std.mem.Allocator, io: std.Io, d: *const cuda.Driver, dir: []const u8, share: cfg.Share, count: usize) !Weights {
+-    return loadProfile(gpa, io, d, dir, share, count, false);
++    return loadProfile(gpa, io, d, dir, share, count, false, null);
+ }
+ 
+-pub fn loadProfile(gpa: std.mem.Allocator, io: std.Io, d: *const cuda.Driver, dir: []const u8, share: cfg.Share, count: usize, drafts: bool) !Weights {
++pub fn loadProfile(gpa: std.mem.Allocator, io: std.Io, d: *const cuda.Driver, dir: []const u8, share: cfg.Share, count: usize, drafts: bool, quant: ?*const fp4.Quant) !Weights {
+     if (count == 0 or count > cfg.layers) return error.InklingGeometry;
+     const path = try std.fs.path.join(gpa, &.{ dir, "checkpoint.json" });
+     defer gpa.free(path);
+     const text = try std.Io.Dir.cwd().readFileAlloc(io, path, gpa, .limited(1 << 28));
+     defer gpa.free(text);
+     try cfg.admit(gpa, text);
+-    var w: Weights = .{ .gpa = gpa, .d = d, .share = share };
++    var w: Weights = .{ .gpa = gpa, .d = d, .share = share, .fp4 = quant };
+     errdefer w.deinit();
+     var globals = try open(gpa, io, dir, "dense/global.safetensors");
+     defer globals.closeCopied(io);
+diff --git a/zig/src/platform/environment.zig b/zig/src/platform/environment.zig
+index 2045cb01..171bd7c8 100644
+--- a/zig/src/platform/environment.zig
++++ b/zig/src/platform/environment.zig
+@@ -30,6 +30,7 @@ pub fn isReal(kind: Kind) bool {
+ }
+ 
+ pub const rules = [_]Rule{
++    .{ .name = "TF_INKLING_FP4", .scope = .cuda, .kind = .word, .words = &.{ "off", "attn", "all" }, .forms = "off, attn (Q, K, V, R, gate and O as NVFP4) or all (also the output head)" },
+     .{ .name = "TF_INKLING_VERIFY_CHECK", .scope = .cuda, .kind = .flag, .forms = "0 or 1" },
+     .{ .name = "TF_INKLING_RANK", .scope = .cuda, .kind = .u32, .max = 1, .forms = "rank 0 or 1" },
+     .{ .name = "TF_INKLING_WORLD", .scope = .cuda, .kind = .u32, .only = &.{ 1, 2 }, .forms = "one rank for operator checks or two for serving" },
+-- 
+2.56.1
+
+
+From e893996207418a3e9be28bb35b1baa2e77cf1084 Mon Sep 17 00:00:00 2001
+From: LPFchan <me@lost.plus>
+Date: Tue, 17 Nov 2026 23:19:05 +0900
+Subject: [PATCH 02/17] Inkling decode: latency-bound mix and quant kernels
+ issue all loads at once; NVFP4 drafter projections under FP4=all
+
+tf_ik_mix: one 576-thread CTA a row, each thread one 16-byte chunk of every source, one combined
+reduction (50 -> 14 us). tf_ik_quant: one thread a 16-value group (29 -> 13 us), same per-group math.
+TF_INKLING_FP4=all also packs the DSpark drafter's attention and MLP projections as NVFP4.
+
+Spark pair, greedy: plain 22.3 -> 24.8 tok/s; with DRAFTS=1 code 39 tok/s, prose 26-28 tok/s.
+---
+ zig/kernels/cuda/inkling2_quant.cuh    | 122 ++++++++++++++----------
+ zig/kernels/cuda/inkling2_residual.cuh | 125 ++++++++++++++++++-------
+ zig/src/families/inkling2/draft.zig    |   4 +-
+ zig/src/families/inkling2/forward.zig  |  10 +-
+ zig/src/families/inkling2/fp4.zig      |   8 +-
+ zig/src/families/inkling2/kernels.zig  |   8 ++
+ zig/src/families/inkling2/native.zig   |   2 +-
+ 7 files changed, 189 insertions(+), 90 deletions(-)
+
+diff --git a/zig/kernels/cuda/inkling2_quant.cuh b/zig/kernels/cuda/inkling2_quant.cuh
+index 126984ce..ee5def65 100644
+--- a/zig/kernels/cuda/inkling2_quant.cuh
++++ b/zig/kernels/cuda/inkling2_quant.cuh
+@@ -6,65 +6,93 @@ using namespace inkling2;
+ __device__ inline float ik_e4(float x) { return (float)__nv_fp8_e4m3(x); }
+ __device__ inline float ik_e2(float x) { return (float)__nv_fp4_e2m1(x); }
+ 
+-// A whole row's amax precedes the independent 16-value NVFP4 groups. One CTA owns the row.
++// One thread a 16-value group, all of a row's loads at once; a 32-value MXFP8 group is a thread pair.
++// The NVFP4 row amax precedes the independent groups. One CTA owns the row; blockDim covers width / 16 in whole warps.
+ extern "C" __global__ void tf_ik_quant(const bf16* x, half* y, int width, int nvfp4) {
+-    const int row = blockIdx.x, t = threadIdx.x;
+-    x += (size_t)row * width;
+-    y += (size_t)row * width;
++    const int row = blockIdx.x, t = threadIdx.x, lane = t & 31, warp = t >> 5;
++    const bool on = t < width / 16;
++    if ((int)blockDim.x < width / 16 || blockDim.x % 32) __trap();
++    x += (size_t)row * width + t * 16;
++    y += (size_t)row * width + t * 16;
++    float values[16], m = 0.f;
++    if (on) {
++        const uint4 u0 = reinterpret_cast<const uint4*>(x)[0], u1 = reinterpret_cast<const uint4*>(x)[1];
++        const bf16* h0 = reinterpret_cast<const bf16*>(&u0);
++        const bf16* h1 = reinterpret_cast<const bf16*>(&u1);
++#pragma unroll
++        for (int j = 0; j < 8; ++j) values[j] = f(h0[j]), values[8 + j] = f(h1[j]);
++    } else {
++#pragma unroll
++        for (int j = 0; j < 16; ++j) values[j] = 0.f;
++    }
++#pragma unroll
++    for (int j = 0; j < 16; ++j) {
++        const float v = fabsf(values[j]);
++        m = isnan(v) || isnan(m) ? nanf("") : fmaxf(m, v);
++    }
+     if (!nvfp4) {
+-        for (int g = t; g < width / 32; g += blockDim.x) {
+-            float amax = 0.f;
+-            for (int j = 0; j < 32; ++j) {
+-                const float v = fabsf(f(x[g * 32 + j]));
+-                amax = isnan(v) ? v : fmaxf(amax, v);
+-            }
+-            const float raw = amax * (1.f / 448.f), tiny = 0x1p-127f;
+-            int exponent = (__float_as_uint(raw) + 0x007fffffu) >> 23;
+-            exponent = raw <= tiny ? 0 : min(exponent, 254);
+-            if (isnan(raw)) exponent = 255;
+-            const float scale = exponent == 255 ? nanf("") : fmaxf(__uint_as_float(exponent << 23), tiny);
+-            const float inv = exponent == 255 ? 0.f : exponent == 0 ? 0x1p127f : 1.f / scale;
+-            for (int j = 0; j < 32; ++j) {
+-                float v = f(x[g * 32 + j]) * inv;
++        const float other = __shfl_xor_sync(0xffffffffu, m, 1);
++        const float amax = isnan(m) || isnan(other) ? nanf("") : fmaxf(m, other);
++        const float raw = amax * (1.f / 448.f), tiny = 0x1p-127f;
++        int exponent = (__float_as_uint(raw) + 0x007fffffu) >> 23;
++        exponent = raw <= tiny ? 0 : min(exponent, 254);
++        if (isnan(raw)) exponent = 255;
++        const float scale = exponent == 255 ? nanf("") : fmaxf(__uint_as_float(exponent << 23), tiny);
++        const float inv = exponent == 255 ? 0.f : exponent == 0 ? 0x1p127f : 1.f / scale;
++        if (on)
++#pragma unroll
++            for (int j = 0; j < 16; ++j) {
++                float v = values[j] * inv;
+                 v = isnan(v) ? v : fminf(448.f, fmaxf(-448.f, v));
+-                y[g * 32 + j] = __float2half_rn(f(b(ik_e4(v) * scale)));
++                y[j] = __float2half_rn(f(b(ik_e4(v) * scale)));
+             }
+-        }
+         return;
+     }
+-    float amax = 0.f;
+-    for (int c = t; c < width; c += blockDim.x) {
+-        const float v = fabsf(f(x[c]));
+-        amax = isnan(v) ? v : fmaxf(amax, v);
++    __shared__ float part[32], result;
++    for (int d = 16; d; d >>= 1) {
++        const float o = __shfl_xor_sync(0xffffffffu, m, d);
++        m = isnan(m) || isnan(o) ? nanf("") : fmaxf(m, o);
++    }
++    if (!lane) part[warp] = m;
++    __syncthreads();
++    if (!warp) {
++        float r = lane < (int)blockDim.x / 32 ? part[lane] : 0.f;
++        for (int d = 16; d; d >>= 1) {
++            const float o = __shfl_xor_sync(0xffffffffu, r, d);
++            r = isnan(r) || isnan(o) ? nanf("") : fmaxf(r, o);
++        }
++        if (!lane) result = r;
+     }
+-    amax = maximum(amax);
++    __syncthreads();
++    if (!on) return;
++    const float amax = result;
+     const float encoder = fminf(1536.f / amax, 0x1.fffffep127f);
+     const float decoder = 1.f / encoder, outer = amax * (1.f / 1536.f);
+-    for (int g = t; g < width / 16; g += blockDim.x) {
+-        float values[16], block_max = 0.f;
+-        for (int j = 0; j < 16; ++j) {
+-            values[j] = f(x[g * 16 + j]);
+-            block_max = isnan(values[j]) ? nanf("") : fmaxf(block_max, fabsf(values[j]));
+-        }
+-        const float s6 = ik_e4(fminf(block_max * (encoder * (1.f / 6.f)), 448.f));
+-        const float s4 = ik_e4(fminf(block_max * (encoder * 0.25f), 448.f));
+-        const float inv6 = fminf(1.f / (s6 * decoder), 0x1.fffffep127f);
+-        const float inv4 = fminf(1.f / (s4 * decoder), 0x1.fffffep127f);
+-        float e6[16], e4[16];
+-        for (int j = 0; j < 16; ++j) {
+-            e6[j] = fabsf((ik_e2(values[j] * inv6) * s6) * outer - values[j]);
+-            e4[j] = fabsf((ik_e2(values[j] * inv4) * s4) * outer - values[j]);
+-        }
+-        // The checkpoint sums adjacent pairs, then pairs of pairs. A different order can pick another scale.
+-        for (int n = 8; n; n >>= 1) for (int j = 0; j < n; ++j) {
++    float bm = 0.f;
++#pragma unroll
++    for (int j = 0; j < 16; ++j) bm = isnan(values[j]) ? nanf("") : fmaxf(bm, fabsf(values[j]));
++    const float s6 = ik_e4(fminf(bm * (encoder * (1.f / 6.f)), 448.f));
++    const float s4 = ik_e4(fminf(bm * (encoder * 0.25f), 448.f));
++    const float inv6 = fminf(1.f / (s6 * decoder), 0x1.fffffep127f);
++    const float inv4 = fminf(1.f / (s4 * decoder), 0x1.fffffep127f);
++    float e6[16], e4[16];
++#pragma unroll
++    for (int j = 0; j < 16; ++j) {
++        e6[j] = fabsf((ik_e2(values[j] * inv6) * s6) * outer - values[j]);
++        e4[j] = fabsf((ik_e2(values[j] * inv4) * s4) * outer - values[j]);
++    }
++    // The checkpoint sums adjacent pairs, then pairs of pairs. A different order can pick another scale.
++#pragma unroll
++    for (int n = 8; n; n >>= 1)
++#pragma unroll
++        for (int j = 0; j < n; ++j) {
+             e6[j] = e6[2 * j] + e6[2 * j + 1];
+             e4[j] = e4[2 * j] + e4[2 * j + 1];
+         }
+-        const bool four = e4[0] < e6[0];
+-        const float scale = four ? s4 : s6, inv = four ? inv4 : inv6;
+-        for (int j = 0; j < 16; ++j)
+-            y[g * 16 + j] = __float2half_rn((ik_e2(values[j] * inv) * scale) * outer);
+-    }
++    const bool four = e4[0] < e6[0];
++    const float scale = four ? s4 : s6, inv = four ? inv4 : inv6;
++#pragma unroll
++    for (int j = 0; j < 16; ++j) y[j] = __float2half_rn((ik_e2(values[j] * inv) * scale) * outer);
+ }
+ 
+ // The projection's interleaved gate/up is rounded to BF16 before Inkling's smooth caps and route scale.
+diff --git a/zig/kernels/cuda/inkling2_residual.cuh b/zig/kernels/cuda/inkling2_residual.cuh
+index 51736362..bbbc3261 100644
+--- a/zig/kernels/cuda/inkling2_residual.cuh
++++ b/zig/kernels/cuda/inkling2_residual.cuh
+@@ -19,47 +19,104 @@ __device__ inline float ik_source(const InklingMix a, int row, int s, int c) {
+     return v;
+ }
+ 
+-extern "C" __global__ void tf_ik_mix(InklingMix a) {
+-    const int row = blockIdx.x, q = blockIdx.y, t = threadIdx.x;
+-    const int sources = a.blocks_count + 1 + (a.mode == 1);
+-    __shared__ float inv[10], prob[10];
+-    for (int s = 0; s < sources; ++s) {
++// Up to nine stored blocks plus the running partial (and, at a block boundary, attention): ten sources.
++#define IK_MIX_BLOCKS 9
++#define IK_MIX_THREADS 576 // 4608 / 8: each thread owns one 16-byte column chunk of every source
++
++__device__ inline void ik_load8(const bf16* p, float* o) {
++    const uint4 u = *reinterpret_cast<const uint4*>(p);
++    const bf16* h = reinterpret_cast<const bf16*>(&u);
++#pragma unroll
++    for (int j = 0; j < 8; ++j) o[j] = f(h[j]);
++}
++
++// One CTA a (row, query). Every source's loads issue together, then one reduction carries all norms and dots.
++extern "C" __global__ void __launch_bounds__(IK_MIX_THREADS) tf_ik_mix(InklingMix a) {
++    const int row = blockIdx.x, q = blockIdx.y, t = threadIdx.x, c0 = t * 8;
++    const int lane = t & 31, warp = t >> 5, bc = a.blocks_count;
++    __shared__ float red[IK_MIX_THREADS / 32][2 * (IK_MIX_BLOCKS + 2)];
++    __shared__ float inv[IK_MIX_BLOCKS + 2], prob[IK_MIX_BLOCKS + 2];
++    if (a.width != IK_MIX_THREADS * 8 || blockDim.x != IK_MIX_THREADS || bc > IK_MIX_BLOCKS) __trap();
++    float v[IK_MIX_BLOCKS + 2][8];
++#pragma unroll
++    for (int s = 0; s < IK_MIX_BLOCKS; ++s)
++        if (s < bc) ik_load8(a.blocks + (size_t)s * a.block_stride + (size_t)row * a.width + c0, v[s]);
++    float attn[8] = {};
++    ik_load8(a.partial + (size_t)row * a.width + c0, v[IK_MIX_BLOCKS]);
++    if (a.mode) ik_load8(a.attention + (size_t)row * a.width + c0, attn);
++#pragma unroll
++    for (int j = 0; j < 8; ++j) {
++        if (a.mode == 2) v[IK_MIX_BLOCKS][j] += attn[j];
++        v[IK_MIX_BLOCKS + 1][j] = attn[j];
++    }
++    // source s lives at v[s] for stored blocks, v[9] for the partial, v[10] for mode 1's attention
++    const float qs = rsqrtf((float)a.width);
++    float query[8];
++    {
++        const float4 q0 = *reinterpret_cast<const float4*>(a.query + q * a.width + c0);
++        const float4 q1 = *reinterpret_cast<const float4*>(a.query + q * a.width + c0 + 4);
++        const float qq[8] = {q0.x, q0.y, q0.z, q0.w, q1.x, q1.y, q1.z, q1.w};
++#pragma unroll
++        for (int j = 0; j < 8; ++j) query[j] = qq[j] * qs;
++    }
++#pragma unroll
++    for (int s = 0; s < IK_MIX_BLOCKS + 2; ++s) {
++        const bool live = s < bc || s == IK_MIX_BLOCKS || (s == IK_MIX_BLOCKS + 1 && a.mode == 1);
+         float square = 0.f, dot = 0.f;
+-        for (int c = t; c < a.width; c += blockDim.x) {
+-            const float v = ik_source(a, row, s, c);
+-            square += v * v;
+-            dot += v * (a.query[q * a.width + c] * rsqrtf((float)a.width));
++#pragma unroll
++        for (int j = 0; j < 8; ++j) {
++            square += v[s][j] * v[s][j];
++            dot += v[s][j] * query[j];
+         }
+-        square = sum(square);
+-        dot = sum(dot);
+-        if (!t) {
+-            inv[s] = rsqrtf(square / a.width + 1e-6f);
+-            prob[s] = dot * inv[s];
+-        }
+-        __syncthreads();
++        square = live ? warp_sum(square) : 0.f;
++        dot = live ? warp_sum(dot) : 0.f;
++        if (!lane) red[warp][2 * s] = square, red[warp][2 * s + 1] = dot;
+     }
+-    if (!t) {
+-        float m = -INFINITY, z = 0.f;
+-        for (int s = 0; s < sources; ++s) m = isnan(prob[s]) ? prob[s] : fmaxf(m, prob[s]);
+-        for (int s = 0; s < sources; ++s) z += (prob[s] = expf(prob[s] - m));
+-        for (int s = 0; s < sources; ++s) prob[s] /= z;
++    __syncthreads();
++    if (warp == 0) {
++        for (int s = 0; s < IK_MIX_BLOCKS + 2; ++s) {
++            float square = lane < IK_MIX_THREADS / 32 ? red[lane][2 * s] : 0.f;
++            float dot = lane < IK_MIX_THREADS / 32 ? red[lane][2 * s + 1] : 0.f;
++            square = warp_sum(square);
++            dot = warp_sum(dot);
++            if (!lane) {
++                inv[s] = rsqrtf(square / a.width + 1e-6f);
++                prob[s] = dot * inv[s];
++            }
++        }
++        if (!lane) {
++            // the original order: stored blocks, the partial, then attention
++            int order[IK_MIX_BLOCKS + 2], n = 0;
++            for (int s = 0; s < bc; ++s) order[n++] = s;
++            order[n++] = IK_MIX_BLOCKS;
++            if (a.mode == 1) order[n++] = IK_MIX_BLOCKS + 1;
++            float m = -INFINITY, z = 0.f;
++            for (int i = 0; i < n; ++i) m = isnan(prob[order[i]]) ? prob[order[i]] : fmaxf(m, prob[order[i]]);
++            for (int i = 0; i < n; ++i) z += (prob[order[i]] = expf(prob[order[i]] - m));
++            for (int s = 0; s < IK_MIX_BLOCKS + 2; ++s) prob[s] = (s < bc || s == IK_MIX_BLOCKS || (s == IK_MIX_BLOCKS + 1 && a.mode == 1)) ? prob[s] / z : 0.f;
++        }
+     }
+     __syncthreads();
+-    float square = 0.f, values[18]; // exactly 4608 / 256 elements per thread
+-    for (int j = 0; j < 18; ++j) {
+-        const int c = t + j * 256;
+-        float v = 0.f;
+-        if (c < a.width) for (int s = 0; s < sources; ++s)
+-            v += prob[s] * (ik_source(a, row, s, c) * inv[s]);
+-        values[j] = v;
+-        square += v * v;
++    float out[8], square = 0.f;
++#pragma unroll
++    for (int j = 0; j < 8; ++j) {
++        float x = 0.f;
++#pragma unroll
++        for (int s = 0; s < IK_MIX_BLOCKS; ++s)
++            if (s < bc) x += prob[s] * (v[s][j] * inv[s]);
++        x += prob[IK_MIX_BLOCKS] * (v[IK_MIX_BLOCKS][j] * inv[IK_MIX_BLOCKS]);
++        if (a.mode == 1) x += prob[IK_MIX_BLOCKS + 1] * (v[IK_MIX_BLOCKS + 1][j] * inv[IK_MIX_BLOCKS + 1]);
++        out[j] = x;
++        square += x * x;
+     }
+     const float scale = rsqrtf(sum(square) / a.width + 1e-6f);
+-    for (int j = 0; j < 18; ++j) {
+-        const int c = t + j * 256;
+-        if (c < a.width) a.out[((size_t)q * a.rows + row) * a.width + c] =
+-            b(values[j] * scale * f(a.norm[q * a.width + c]));
+-    }
++    float norm[8];
++    ik_load8(a.norm + q * a.width + c0, norm);
++    uint4 packed;
++    bf16* o = reinterpret_cast<bf16*>(&packed);
++#pragma unroll
++    for (int j = 0; j < 8; ++j) o[j] = b(out[j] * scale * norm[j]);
++    *reinterpret_cast<uint4*>(a.out + ((size_t)q * a.rows + row) * a.width + c0) = packed;
+ }
+ 
+ extern "C" __global__ void tf_ik_finish(bf16* partial, bf16* blocks, const bf16* attn,
+diff --git a/zig/src/families/inkling2/draft.zig b/zig/src/families/inkling2/draft.zig
+index 234388f2..8add3fff 100644
+--- a/zig/src/families/inkling2/draft.zig
++++ b/zig/src/families/inkling2/draft.zig
+@@ -86,10 +86,10 @@ pub const Draft = struct {
+         return wt.linear(&d.owner, f, name, n, k, if (columns) .{ 0, n } else .{ s.rank * n / 2, (s.rank + 1) * n / 2 }, if (columns) .{ s.rank * k / 2, (s.rank + 1) * k / 2 } else .{ 0, k });
+     }
+ 
+-    pub fn init(gpa: std.mem.Allocator, io: std.Io, driver: *const cuda.Driver, dir: []const u8, share: cfg.Share, context: usize, rows: usize) !Draft {
++    pub fn init(gpa: std.mem.Allocator, io: std.Io, driver: *const cuda.Driver, dir: []const u8, share: cfg.Share, context: usize, rows: usize, quant: ?*const @import("fp4.zig").Quant) !Draft {
+         var module = try cuda.Module.load(driver, cuda.kernels.inkling2_draft);
+         errdefer module.unload();
+-        var d: Draft = .{ .owner = .{ .gpa = gpa, .d = driver, .share = share }, .module = module, .ops = undefined };
++        var d: Draft = .{ .owner = .{ .gpa = gpa, .d = driver, .share = share, .fp4 = quant }, .module = module, .ops = undefined };
+         errdefer d.owner.deinit();
+         inline for (comptime std.meta.tags(Op)) |op| d.ops.set(op, try module.function("tf_ik_draft_" ++ @tagName(op)));
+         const config_path = try std.fs.path.join(gpa, &.{ dir, "auxiliary/config.json" });
+diff --git a/zig/src/families/inkling2/forward.zig b/zig/src/families/inkling2/forward.zig
+index 7557a98d..7915e8fa 100644
+--- a/zig/src/families/inkling2/forward.zig
++++ b/zig/src/families/inkling2/forward.zig
+@@ -152,7 +152,7 @@ pub const Forward = struct {
+         const blocks = cfg.blocksBefore(index);
+         if (index == 0) {
+             try f.k.go(.norm, stream, .{ .x = @intCast(rows) }, 256, .{ s.partial, l.norms, s.streams, int(h) });
+-        } else try f.k.go(.mix, stream, .{ .x = @intCast(rows), .y = @intCast(streams) }, 256, .{kern.Mix{ .partial = s.partial, .blocks = s.blocks, .attention = 0, .query = l.attn_query, .norm = l.norms, .out = s.streams, .rows = int(rows), .width = h, .block_stride = int(s.rows * h), .blocks_count = int(blocks), .queries = int(streams), .mode = 0 }});
++        } else try f.k.go(.mix, stream, .{ .x = @intCast(rows), .y = @intCast(streams) }, kern.mix_threads, .{kern.Mix{ .partial = s.partial, .blocks = s.blocks, .attention = 0, .query = l.attn_query, .norm = l.norms, .out = s.streams, .rows = int(rows), .width = h, .block_stride = int(s.rows * h), .blocks_count = int(blocks), .queries = int(streams), .mode = 0 }});
+         const qsource = s.streams;
+         const ksource = s.streams + (if (local) @as(usize, 0) else rows * h * 2);
+         const vsource = s.streams + (if (local) @as(usize, 0) else 2 * rows * h * 2);
+@@ -198,17 +198,17 @@ pub const Forward = struct {
+         try f.gather(mine, s.parts, part_bytes);
+         try f.k.go(.rank_sum, stream, .{ .x = ceil(rows * h, 256) }, 256, .{ s.parts, s.conv_temp, int(rows * h), int(share.world) });
+         try f.conv(l.attn_conv, s.conv_temp, 0, cache.conv[2], s.attention, rows);
+-        try f.k.go(.mix, stream, .{ .x = @intCast(rows) }, 256, .{kern.Mix{ .partial = s.partial, .blocks = s.blocks, .attention = s.attention, .query = l.mlp_query, .norm = l.mlp_norm, .out = s.mlp_input, .rows = int(rows), .width = h, .block_stride = int(s.rows * h), .blocks_count = int(blocks), .queries = 1, .mode = if (index % cfg.block_size == 0) 1 else 2 }});
++        try f.k.go(.mix, stream, .{ .x = @intCast(rows) }, kern.mix_threads, .{kern.Mix{ .partial = s.partial, .blocks = s.blocks, .attention = s.attention, .query = l.mlp_query, .norm = l.mlp_norm, .out = s.mlp_input, .rows = int(rows), .width = h, .block_stride = int(s.rows * h), .blocks_count = int(blocks), .queries = 1, .mode = if (index % cfg.block_size == 0) 1 else 2 }});
+         try f.product(l.router, s.mlp_input, s.router, rows, .f32);
+         try f.k.go(.route, stream, .{ .x = @intCast(rows) }, 512, .{ s.router, l.router_bias, s.picks, s.gamma, int(share.expertStart()), int(share.expertCount()) });
+-        try f.k.go(.quant, stream, .{ .x = @intCast(rows) }, 256, .{ s.mlp_input, s.quant_up, int(h), @as(i32, @intFromBool(index < 40)) });
++        try f.k.go(.quant, stream, .{ .x = @intCast(rows) }, kern.quantThreads(h), .{ s.mlp_input, s.quant_up, int(h), @as(i32, @intFromBool(index < 40)) });
+         const pairs = rows * cfg.topk;
+         try f.k.plan.route(stream, s.picks, pairs, share.expertCount() + 1, 16, s.plan);
+         try f.zero(s.gu, pairs * h * 2);
+         try f.zero(s.down, pairs * h * 2);
+         try f.projectExperts(l.w13, s.quant_up, cfg.topk, s.gu, rows, 4);
+         try f.k.go(.swiglu, stream, .{ .x = ceil(pairs * cfg.intermediate, 256) }, 256, .{ s.gu, s.gamma, s.hidden, int(pairs * cfg.intermediate), @as(i32, cfg.intermediate) });
+-        try f.k.go(.quant, stream, .{ .x = @intCast(pairs) }, 256, .{ s.hidden, s.quant_down, @as(i32, cfg.intermediate), @as(i32, @intFromBool(index < 40)) });
++        try f.k.go(.quant, stream, .{ .x = @intCast(pairs) }, kern.quantThreads(cfg.intermediate), .{ s.hidden, s.quant_down, @as(i32, cfg.intermediate), @as(i32, @intFromBool(index < 40)) });
+         try f.projectExperts(l.w2, s.quant_down, 0, s.down, rows, 1);
+         try f.gather(s.down, s.gathered, pairs * h * 2);
+         try f.k.go(.moe_sum, stream, .{ .x = ceil(rows * h, 256) }, 256, .{ s.gathered, s.conv_temp, int(rows), @as(i32, h), int(share.world) });
+@@ -237,7 +237,7 @@ pub const Forward = struct {
+         const all = f.verifying or f.drafter != null;
+         const last = if (all) 0 else (rows - 1) * cfg.hidden * 2;
+         const norm_rows = if (all) rows else 1;
+-        try f.k.go(.mix, f.stream, .{ .x = @intCast(norm_rows) }, 256, .{kern.Mix{ .partial = s.partial + last, .blocks = s.blocks + last, .attention = 0, .query = f.w.output_query, .norm = f.w.norm, .out = s.normed, .rows = int(norm_rows), .width = cfg.hidden, .block_stride = int(s.rows * cfg.hidden), .blocks_count = int(cfg.blocksBefore(f.w.layer.len)), .queries = 1, .mode = 0 }});
++        try f.k.go(.mix, f.stream, .{ .x = @intCast(norm_rows) }, kern.mix_threads, .{kern.Mix{ .partial = s.partial + last, .blocks = s.blocks + last, .attention = 0, .query = f.w.output_query, .norm = f.w.norm, .out = s.normed, .rows = int(norm_rows), .width = cfg.hidden, .block_stride = int(s.rows * cfg.hidden), .blocks_count = int(cfg.blocksBefore(f.w.layer.len)), .queries = 1, .mode = 0 }});
+         if (f.drafter) |d| {
+             try f.copy(d.taps + 7 * s.rows * cfg.hidden * 2, s.normed, rows * cfg.hidden * 2);
+             if (!f.verifying) try d.ingest(f, start, rows);
+diff --git a/zig/src/families/inkling2/fp4.zig b/zig/src/families/inkling2/fp4.zig
+index 958ff591..4657ab10 100644
+--- a/zig/src/families/inkling2/fp4.zig
++++ b/zig/src/families/inkling2/fp4.zig
+@@ -4,15 +4,18 @@ const cuda = @import("cuda");
+ const kern = @import("kernels.zig");
+ const wt = @import("weights.zig");
+ 
+-/// off; attn: Q, K, V, R, gate and O; all: those and the output head. Router, sink and conv projections stay BF16.
++/// off; attn: Q, K, V, R, gate and O; all: those, the output head and the DSpark drafter's layer projections.
++/// Router, sink and conv projections, and the drafter's recurrent head, stay BF16.
+ pub const Set = enum(u8) { off, attn, all };
+ 
+ const attn = [_][]const u8{ "attn.wq_du.weight", "attn.wk_dv.weight", "attn.wv_dv.weight", "attn.wr_du.weight", "attn.wo_ud.weight", "attn.gate_attn.weight" };
+ const head = "model.llm.unembed.weight";
++const draft = [_][]const u8{ "self_attn.q_proj.weight", "self_attn.k_proj.weight", "self_attn.v_proj.weight", "self_attn.k_proj_ctx.weight", "self_attn.v_proj_ctx.weight", "self_attn.o_proj.weight", "mlp.gate_proj.weight", "mlp.up_proj.weight", "mlp.down_proj.weight" };
+ 
+ pub fn wants(set: Set, name: []const u8) bool {
+     if (set == .off) return false;
+     if (set == .all and std.mem.eql(u8, name, head)) return true;
++    if (set == .all) for (draft) |s| if (std.mem.endsWith(u8, name, s)) return true;
+     for (attn) |s| if (std.mem.endsWith(u8, name, s)) return true;
+     return false;
+ }
+@@ -69,4 +72,7 @@ test "TF_INKLING_FP4 picks attention projections and, with all, the head" {
+     try std.testing.expect(!wants(.attn, head));
+     try std.testing.expect(wants(.all, head));
+     try std.testing.expect(!wants(.off, "model.llm.layers.3.attn.wq_du.weight"));
++    try std.testing.expect(wants(.all, "layers.2.mlp.down_proj.weight"));
++    try std.testing.expect(!wants(.attn, "layers.2.mlp.down_proj.weight"));
++    try std.testing.expect(!wants(.all, "markov_head.rnn_proj.weight"));
+ }
+diff --git a/zig/src/families/inkling2/kernels.zig b/zig/src/families/inkling2/kernels.zig
+index 0bab6d2b..6a4820b5 100644
+--- a/zig/src/families/inkling2/kernels.zig
++++ b/zig/src/families/inkling2/kernels.zig
+@@ -107,6 +107,14 @@ pub const Kernels = struct {
+     }
+ };
+ 
++/// tf_ik_mix's CTA: one 8-column chunk a thread across the 4608-wide row.
++pub const mix_threads: u32 = 576;
++
++/// tf_ik_quant's CTA: one 16-value group a thread, in whole warps.
++pub fn quantThreads(width: usize) u32 {
++    return @intCast((width / 16 + 31) / 32 * 32);
++}
++
+ pub fn int(v: usize) i32 {
+     return @intCast(v);
+ }
+diff --git a/zig/src/families/inkling2/native.zig b/zig/src/families/inkling2/native.zig
+index 8da5834f..cb578b05 100644
+--- a/zig/src/families/inkling2/native.zig
++++ b/zig/src/families/inkling2/native.zig
+@@ -140,7 +140,7 @@ fn openPair(gpa: std.mem.Allocator, io: std.Io, ctx: *const cuda.Context, dir: [
+     errdefer own.f.deinit();
+     errdefer if (own.draft) |*d| d.deinit();
+     if (o.drafts) {
+-        own.draft = try @import("draft.zig").Draft.init(gpa, io, ctx.d, dir, share, o.context, own.s.rows);
++        own.draft = try @import("draft.zig").Draft.init(gpa, io, ctx.d, dir, share, o.context, own.s.rows, if (quant) |*q| q else null);
+         own.f.drafter = &own.draft.?;
+         own.f.verify_check = try environment.read(bool, "TF_INKLING_VERIFY_CHECK", false);
+         try own.f.prepareVerify();
+-- 
+2.56.1
+
+
+From 96948dfd43770dbe0bf6447a20a5e9d280704bfc Mon Sep 17 00:00:00 2001
+From: LPFchan <me@lost.plus>
+Date: Tue, 17 Nov 2026 23:29:20 +0900
+Subject: [PATCH 03/17] Inkling verification: one attention launch and one
+ small BF16 projection call for every verified row
+
+The decode attention kernel already masks each row's own causal window, so batching keeps each row's
+bits. Router, sink and conv projections now take all rows in one cuBLASLt call (rows differ in the last
+bits from the one-row call). DRAFTS=1: code 39 -> 42 tok/s, short reasoning 26 -> 30 tok/s.
+---
+ zig/src/families/inkling2/forward.zig | 17 +++--------------
+ 1 file changed, 3 insertions(+), 14 deletions(-)
+
+diff --git a/zig/src/families/inkling2/forward.zig b/zig/src/families/inkling2/forward.zig
+index 7915e8fa..f4e4c249 100644
+--- a/zig/src/families/inkling2/forward.zig
++++ b/zig/src/families/inkling2/forward.zig
+@@ -55,9 +55,7 @@ pub const Forward = struct {
+                 inline for (.{ x, l.ptr, out, int(l.k), int(l.n), int(rows) }) |v| args.add(v);
+                 return cuda.launch.launch(if (kind == .bf16) f.verify_bf16 else f.verify_f32, .{ .grid = .{ .x = @intCast(l.n / 8 * rows) }, .block = .{ .x = 32 } }, f.stream, &args);
+             }
+-            const bytes: usize = if (kind == .bf16) 2 else 4;
+-            for (0..rows) |r| try f.product(l, x + r * l.k * 2, out + r * l.n * bytes, 1, kind);
+-            return;
++            // the small BF16 projections (router, sink, conv) take every verified row in one call below
+         }
+         if (f.k.dense) |*dense| {
+             if (f.blas_version == 0) f.blas_version = f.lt.api.cublasLtGetVersion();
+@@ -174,17 +172,8 @@ pub const Forward = struct {
+         try f.k.go(.relative, stream, .{ .x = 8, .y = @intCast(rows * heads) }, 128, .{ s.r, l.relative, s.relative, int(heads) });
+         const attention: kern.Attention = .{ .q = s.q, .k = cache.k, .v = cache.v, .relative = s.relative, .gate = s.gate, .sink = s.sink, .out = s.attn_heads, .rows = int(rows), .pos = int(s.pos), .hq = int(heads), .hk = int(keys), .capacity = int(cache.capacity), .window = if (local) 1023 else 0 };
+         if (f.verifying and rows > 1) {
+-            for (0..rows) |r| {
+-                var a = attention;
+-                a.rows = 1;
+-                a.pos += int(r);
+-                a.q += r * heads * 128 * 2;
+-                a.relative += r * heads * 1024 * 2;
+-                a.gate += r * heads * 128 * 2;
+-                a.sink += r * heads * 2;
+-                a.out += r * heads * 128 * 2;
+-                try f.k.go(.attention_decode, stream, .{ .x = 1, .y = @intCast(heads), .z = 4 }, 128, .{a});
+-            }
++            // one launch for every verified row: masked keys add exact zeros, so each row keeps its one-row bits
++            try f.k.go(.attention_decode, stream, .{ .x = 1, .y = @intCast(heads), .z = 4 }, 128, .{attention});
+         } else if (rows == 1 and f.k.split_decode) {
+             try f.k.go(.attention_decode, stream, .{ .x = 1, .y = @intCast(heads), .z = 4 }, 128, .{attention});
+             if (!f.decode_reported) {
+-- 
+2.56.1
+
+
+From 3a6b5504d561d17f420582133ed40be48582795d Mon Sep 17 00:00:00 2001
+From: LPFchan <me@lost.plus>
+Date: Wed, 18 Nov 2026 00:03:41 +0900
+Subject: [PATCH 04/17] Inkling: replay one CUDA graph per one-token step and
+ verify window (TF_INKLING_GRAPHS, default on)
+
+Prep and attention read the step position from the device when a graph replays; draft mode's
+vocab-sharded embedding runs from device ids (tf_ik_embed_shard / tf_ik_embed_pick). The ids and
+position are uploaded before each launch. Outputs are bit-identical to eager launches.
+DRAFTS=1 on the Spark pair: code 42 -> 46 tok/s, prose 26-29 -> 29-31 tok/s.
+---
+ zig/kernels/cuda/inkling2_attention.cuh       |  2 +
+ .../cuda/inkling2_attention_decode.cuh        |  1 +
+ zig/kernels/cuda/inkling2_heads.cuh           |  3 +-
+ zig/kernels/cuda/inkling2_rows.cuh            | 15 +++++
+ zig/src/families/inkling2/forward.zig         | 63 +++++++++++++++++--
+ zig/src/families/inkling2/fp4.zig             | 23 +++++++
+ zig/src/families/inkling2/kernels.zig         |  5 +-
+ zig/src/families/inkling2/native.zig          |  1 +
+ zig/src/families/inkling2/weights.zig         |  4 ++
+ zig/src/platform/environment.zig              |  1 +
+ 10 files changed, 110 insertions(+), 8 deletions(-)
+
+diff --git a/zig/kernels/cuda/inkling2_attention.cuh b/zig/kernels/cuda/inkling2_attention.cuh
+index f4d250df..fbf412d1 100644
+--- a/zig/kernels/cuda/inkling2_attention.cuh
++++ b/zig/kernels/cuda/inkling2_attention.cuh
+@@ -7,6 +7,7 @@ struct InklingAttention {
+     const bf16 *q, *k, *v, *relative, *gate, *sink;
+     bf16* out;
+     int rows, pos, hq, hk, capacity, window;
++    const int* posp; // set: the position is read from the device (a replayed graph)
+ };
+ 
+ __device__ inline uint32_t ik_pack(float a, float c) {
+@@ -53,6 +54,7 @@ __device__ inline void ik_attention_exception(InklingAttention a, int r0, int he
+ }
+ 
+ extern "C" __global__ __launch_bounds__(128) void tf_ik_attention(InklingAttention a) {
++    if (a.posp) a.pos = *a.posp;
+     constexpr int D = 128, NK = 64;
+     __shared__ __align__(16) bf16 keys[NK][136], values[D][72], probabilities[3][16][NK];
+     __shared__ float scores[16][NK], maxima[16], totals[16], alpha[16];
+diff --git a/zig/kernels/cuda/inkling2_attention_decode.cuh b/zig/kernels/cuda/inkling2_attention_decode.cuh
+index 67e55289..94821fea 100644
+--- a/zig/kernels/cuda/inkling2_attention_decode.cuh
++++ b/zig/kernels/cuda/inkling2_attention_decode.cuh
+@@ -144,5 +144,6 @@ __device__ __forceinline__ void ik_decode_attention(InklingAttention a) {
+ }
+ 
+ extern "C" __global__ __launch_bounds__(128) void tf_ik_attention_decode(InklingAttention a) {
++    if (a.posp) a.pos = *a.posp;
+     ik_decode_attention<4>(a);
+ }
+diff --git a/zig/kernels/cuda/inkling2_heads.cuh b/zig/kernels/cuda/inkling2_heads.cuh
+index 92856bab..25d7d531 100644
+--- a/zig/kernels/cuda/inkling2_heads.cuh
++++ b/zig/kernels/cuda/inkling2_heads.cuh
+@@ -4,7 +4,8 @@
+ using namespace inkling2;
+ 
+ extern "C" __global__ void tf_ik_prep(const bf16* x, const bf16* weight, bf16* out, bf16* cache,
+-                                     int heads, int width, int pos, int capacity, int kind, int global) {
++                                     int heads, int width, int pos, int capacity, int kind, int global, const int* posp) {
++    if (posp) pos = *posp; // a replayed graph reads the step's position from the device
+     const int row = blockIdx.y, head = blockIdx.x, c = threadIdx.x;
+     const size_t at = ((size_t)row * heads + head) * width + c;
+     float value = c < width ? f(x[at]) : 0.f;
+diff --git a/zig/kernels/cuda/inkling2_rows.cuh b/zig/kernels/cuda/inkling2_rows.cuh
+index 03ebc407..3db94b61 100644
+--- a/zig/kernels/cuda/inkling2_rows.cuh
++++ b/zig/kernels/cuda/inkling2_rows.cuh
+@@ -8,6 +8,21 @@ extern "C" __global__ void tf_ik_embed(const int* ids, const bf16* table, bf16*
+     if (i < rows * width) out[i] = table[(size_t)ids[i / width] * width + i % width];
+ }
+ 
++// Draft mode's vocab-sharded lookup from device ids: this rank's rows, zero elsewhere (then all-gathered).
++extern "C" __global__ void tf_ik_embed_shard(const int* ids, const bf16* table, bf16* out, int rows, int width, int first, int count) {
++    const int i = blockIdx.x * blockDim.x + threadIdx.x;
++    if (i >= rows * width) return;
++    const int id = ids[i / width] - first;
++    out[i] = id >= 0 && id < count ? table[(size_t)id * width + i % width] : b(0.f);
++}
++
++// Each row's bytes from its owner's gathered part: ownership is id / half (embedding.zig owner).
++extern "C" __global__ void tf_ik_embed_pick(const int* ids, const bf16* parts, bf16* out, int rows, int width, int half) {
++    const int i = blockIdx.x * blockDim.x + threadIdx.x;
++    if (i >= rows * width) return;
++    out[i] = parts[(size_t)(ids[i / width] / half) * rows * width + i];
++}
++
+ extern "C" __global__ void tf_ik_norm(const bf16* x, const bf16* weight, bf16* out, int width) {
+     const int row = blockIdx.x, t = threadIdx.x;
+     float square = 0.f;
+diff --git a/zig/src/families/inkling2/forward.zig b/zig/src/families/inkling2/forward.zig
+index f4e4c249..b04f043e 100644
+--- a/zig/src/families/inkling2/forward.zig
++++ b/zig/src/families/inkling2/forward.zig
+@@ -34,12 +34,22 @@ pub const Forward = struct {
+     verify_conv: cuda.Function = undefined,
+     verify_check: bool = false,
+     audit: ?@import("verify_audit.zig").Audit = null,
++    graphs_on: bool = false, // TF_INKLING_GRAPHS: one-token and verify steps replay a captured graph per row count
++    graphing: bool = false, // capturing: ids and position come from the device
++    pos_dev: ?cuda.DeviceBuffer = null,
++    graphs: [9][2]?cuda.graph.Exec = @splat(@splat(null)),
+ 
+     pub fn deinit(f: *Forward) void {
+         for (f.plans.items) |*p| p.plan.deinit();
+         f.plans.deinit(f.gpa);
+         if (f.verify_mod) |*m| m.unload();
+         if (f.audit) |*a| a.deinit();
++        for (&f.graphs) |*row| for (row) |*g| if (g.*) |*e| e.deinit();
++        if (f.pos_dev) |*p| p.free();
++    }
++
++    fn posp(f: *const Forward) u64 {
++        return if (f.graphing) f.pos_dev.?.ptr else 0;
+     }
+ 
+     pub fn product(f: *Forward, l: wt.Linear, x: u64, out: u64, rows: usize, kind: cuda.cublaslt.DataType) !void {
+@@ -92,6 +102,16 @@ pub const Forward = struct {
+ 
+     pub fn embedding(f: *Forward, ids: []const u32, out: u64) !void {
+         const row_bytes = cfg.hidden * 2;
++        if (f.graphing) {
++            // the ids are already in s.ids: no host upload or host-side ownership inside a capture
++            const n = ids.len * cfg.hidden;
++            const first = f.w.embed_first orelse
++                return f.k.go(.embed, f.stream, .{ .x = ceil(n, 256) }, 256, .{ f.s.ids, f.w.embed, out, int(ids.len), @as(i32, cfg.hidden) });
++            const half = cfg.vocab / 2;
++            try f.k.go(.embed_shard, f.stream, .{ .x = ceil(n, 256) }, 256, .{ f.s.ids, f.w.embed, f.s.raw_embed, int(ids.len), @as(i32, cfg.hidden), int(first), @as(i32, half) });
++            try f.gather(f.s.raw_embed, f.s.parts, ids.len * row_bytes);
++            return f.k.go(.embed_pick, f.stream, .{ .x = ceil(n, 256) }, 256, .{ f.s.ids, f.s.parts, out, int(ids.len), @as(i32, cfg.hidden), @as(i32, half) });
++        }
+         const first = f.w.embed_first orelse {
+             try cuda.copy_source.enqueue(f.d, f.s.ids, std.mem.sliceAsBytes(ids), f.stream);
+             return f.k.go(.embed, f.stream, .{ .x = ceil(ids.len * cfg.hidden, 256) }, 256, .{ f.s.ids, f.w.embed, out, int(ids.len), @as(i32, cfg.hidden) });
+@@ -165,12 +185,12 @@ pub const Forward = struct {
+         const heads = share.queryHeads();
+         const keys = share.keyHeads();
+         const cache = s.cache[index];
+-        try f.k.go(.prep, stream, .{ .x = @intCast(heads), .y = @intCast(rows) }, 128, .{ s.q, l.q_scale, s.q, @as(u64, 0), int(heads), @as(i32, 128), int(s.pos), int(cache.capacity), @as(i32, 0), @as(i32, @intFromBool(!local)) });
+-        try f.k.go(.prep, stream, .{ .x = @intCast(keys), .y = @intCast(rows) }, 128, .{ s.k, @as(u64, 0), s.k, cache.k, int(keys), @as(i32, 128), int(s.pos), int(cache.capacity), @as(i32, 1), @as(i32, 0) });
+-        try f.k.go(.prep, stream, .{ .x = @intCast(keys), .y = @intCast(rows) }, 128, .{ s.v, @as(u64, 0), s.v, cache.v, int(keys), @as(i32, 128), int(s.pos), int(cache.capacity), @as(i32, 2), @as(i32, 0) });
+-        try f.k.go(.prep, stream, .{ .x = @intCast(heads), .y = @intCast(rows) }, 128, .{ s.r, l.r_scale, s.r, @as(u64, 0), int(heads), @as(i32, 16), int(s.pos), int(cache.capacity), @as(i32, 3), @as(i32, @intFromBool(!local)) });
++        try f.k.go(.prep, stream, .{ .x = @intCast(heads), .y = @intCast(rows) }, 128, .{ s.q, l.q_scale, s.q, @as(u64, 0), int(heads), @as(i32, 128), int(s.pos), int(cache.capacity), @as(i32, 0), @as(i32, @intFromBool(!local)), f.posp() });
++        try f.k.go(.prep, stream, .{ .x = @intCast(keys), .y = @intCast(rows) }, 128, .{ s.k, @as(u64, 0), s.k, cache.k, int(keys), @as(i32, 128), int(s.pos), int(cache.capacity), @as(i32, 1), @as(i32, 0), f.posp() });
++        try f.k.go(.prep, stream, .{ .x = @intCast(keys), .y = @intCast(rows) }, 128, .{ s.v, @as(u64, 0), s.v, cache.v, int(keys), @as(i32, 128), int(s.pos), int(cache.capacity), @as(i32, 2), @as(i32, 0), f.posp() });
++        try f.k.go(.prep, stream, .{ .x = @intCast(heads), .y = @intCast(rows) }, 128, .{ s.r, l.r_scale, s.r, @as(u64, 0), int(heads), @as(i32, 16), int(s.pos), int(cache.capacity), @as(i32, 3), @as(i32, @intFromBool(!local)), f.posp() });
+         try f.k.go(.relative, stream, .{ .x = 8, .y = @intCast(rows * heads) }, 128, .{ s.r, l.relative, s.relative, int(heads) });
+-        const attention: kern.Attention = .{ .q = s.q, .k = cache.k, .v = cache.v, .relative = s.relative, .gate = s.gate, .sink = s.sink, .out = s.attn_heads, .rows = int(rows), .pos = int(s.pos), .hq = int(heads), .hk = int(keys), .capacity = int(cache.capacity), .window = if (local) 1023 else 0 };
++        const attention: kern.Attention = .{ .q = s.q, .k = cache.k, .v = cache.v, .relative = s.relative, .gate = s.gate, .sink = s.sink, .out = s.attn_heads, .rows = int(rows), .pos = int(s.pos), .hq = int(heads), .hk = int(keys), .capacity = int(cache.capacity), .window = if (local) 1023 else 0, .posp = f.posp() };
+         if (f.verifying and rows > 1) {
+             // one launch for every verified row: masked keys add exact zeros, so each row keeps its one-row bits
+             try f.k.go(.attention_decode, stream, .{ .x = 1, .y = @intCast(heads), .z = 4 }, 128, .{attention});
+@@ -211,6 +231,39 @@ pub const Forward = struct {
+         const s = f.s;
+         if (rows == 0 or rows > s.rows or rows + s.pos > s.context) return error.InklingContext;
+         for (ids) |id| if (id >= cfg.vocabulary) return error.InklingToken;
++        // a one-token step, or a verify window, replays its captured graph (a plain step with a drafter ingests on the host)
++        if (f.graphs_on and final and rows < f.graphs.len and (f.verifying or f.drafter == null) and !f.verify_check) return f.replay(ids);
++        return f.body(ids, final);
++    }
++
++    /// Upload the ids and position, then launch this row count's graph, capturing it on first use.
++    fn replay(f: *Forward, ids: []const u32) !void {
++        const s = f.s;
++        const pos = s.pos;
++        if (f.pos_dev == null) f.pos_dev = try cuda.DeviceBuffer.alloc(f.d, 256);
++        try cuda.copy_source.enqueue(f.d, s.ids, std.mem.sliceAsBytes(ids), f.stream);
++        const p32: i32 = @intCast(pos);
++        try cuda.copy_source.enqueue(f.d, f.pos_dev.?.ptr, std.mem.asBytes(&p32), f.stream);
++        const slot = &f.graphs[ids.len][@intFromBool(f.verifying)];
++        if (slot.* == null) {
++            f.graphing = true;
++            defer f.graphing = false;
++            try cuda.graph.beginCapture(f.stream, .thread_local);
++            const captured = f.body(ids, true);
++            var g = try cuda.graph.endCapture(f.stream);
++            defer g.deinit();
++            try captured;
++            slot.* = try g.instantiate();
++            std.log.info("inkling graph: {d} row(s){s}, captured", .{ ids.len, if (f.verifying) " (verify)" else "" });
++        }
++        s.pos = pos;
++        try slot.*.?.launchOn(f.stream);
++        s.pos = pos + ids.len;
++    }
++
++    fn body(f: *Forward, ids: []const u32, final: bool) !void {
++        const rows = ids.len;
++        const s = f.s;
+         try f.embedding(ids, s.raw_embed);
+         try f.k.go(.norm, f.stream, .{ .x = @intCast(rows) }, 256, .{ s.raw_embed, f.w.embed_norm, s.partial, @as(i32, cfg.hidden) });
+         f.history_offset = 0;
+diff --git a/zig/src/families/inkling2/fp4.zig b/zig/src/families/inkling2/fp4.zig
+index 4657ab10..8ff38eff 100644
+--- a/zig/src/families/inkling2/fp4.zig
++++ b/zig/src/families/inkling2/fp4.zig
+@@ -12,6 +12,15 @@ const attn = [_][]const u8{ "attn.wq_du.weight", "attn.wk_dv.weight", "attn.wv_d
+ const head = "model.llm.unembed.weight";
+ const draft = [_][]const u8{ "self_attn.q_proj.weight", "self_attn.k_proj.weight", "self_attn.v_proj.weight", "self_attn.k_proj_ctx.weight", "self_attn.v_proj_ctx.weight", "self_attn.o_proj.weight", "mlp.gate_proj.weight", "mlp.up_proj.weight", "mlp.down_proj.weight" };
+ 
++/// Small BF16 projections that stay BF16 but move onto the lane, which takes up to 16 rows in one pass.
++const lane16 = [_][]const u8{ "mlp.gate.weight", "attn.attn_sink_proj.weight", "sconv.weight_proj" };
++
++pub fn keepsBf16(set: Set, name: []const u8) bool {
++    if (set == .off) return false;
++    for (lane16) |s| if (std.mem.endsWith(u8, name, s)) return true;
++    return false;
++}
++
+ pub fn wants(set: Set, name: []const u8) bool {
+     if (set == .off) return false;
+     if (set == .all and std.mem.eql(u8, name, head)) return true;
+@@ -41,6 +50,16 @@ pub const Quant = struct {
+         q.packer.unload();
+     }
+ 
++    /// bf16 [n, k] at `src` as a `.bf16` lane weight `w` owns: the same values, the lane's tile order.
++    pub fn packBf16(q: *const Quant, w: *wt.Weights, src: u64, n: usize, k: usize) !cuda.qmmf.Weight {
++        if (k % 64 != 0) return error.InklingTensorShape;
++        const npad = cuda.nvfp4.padded(n);
++        const out = try w.alloc(npad * k * 2);
++        try q.packer.bf16Lane(q.stream, src, out, n, k);
++        try q.stream.synchronize();
++        return .{ .mode = .bf16, .codes = out, .scales = 0, .n = @intCast(n), .k = @intCast(k), .npad = @intCast(npad) };
++    }
++
+     /// bf16 [n, k] at `src` as a packed `.nvfp4` lane weight whose words and scale tiles `w` owns.
+     pub fn pack(q: *const Quant, w: *wt.Weights, src: u64, n: usize, k: usize) !cuda.qmmf.Weight {
+         if (k % 64 != 0) return error.InklingTensorShape;
+@@ -75,4 +94,8 @@ test "TF_INKLING_FP4 picks attention projections and, with all, the head" {
+     try std.testing.expect(wants(.all, "layers.2.mlp.down_proj.weight"));
+     try std.testing.expect(!wants(.attn, "layers.2.mlp.down_proj.weight"));
+     try std.testing.expect(!wants(.all, "markov_head.rnn_proj.weight"));
++    try std.testing.expect(keepsBf16(.attn, "model.llm.layers.5.mlp.gate.weight"));
++    try std.testing.expect(keepsBf16(.all, "model.llm.layers.5.attn.k_sconv.weight_proj"));
++    try std.testing.expect(!keepsBf16(.all, "layers.2.mlp.gate_proj.weight"));
++    try std.testing.expect(!keepsBf16(.off, "model.llm.layers.5.mlp.gate.weight"));
+ }
+diff --git a/zig/src/families/inkling2/kernels.zig b/zig/src/families/inkling2/kernels.zig
+index 6a4820b5..6deff543 100644
+--- a/zig/src/families/inkling2/kernels.zig
++++ b/zig/src/families/inkling2/kernels.zig
+@@ -2,7 +2,7 @@
+ const std = @import("std");
+ const cuda = @import("cuda");
+ 
+-pub const Op = enum { mix, finish, rank_sum, logits, quant, swiglu, route, moe_sum, conv, conv_commit, prep, relative, attention, attention_decode, rotate, unrotate, embed, norm, top1, fp4_amax, fp4_quant };
++pub const Op = enum { mix, finish, rank_sum, logits, quant, swiglu, route, moe_sum, conv, conv_commit, prep, relative, attention, attention_decode, rotate, unrotate, embed, norm, top1, fp4_amax, fp4_quant, embed_shard, embed_pick };
+ 
+ pub const Mix = extern struct {
+     partial: u64,
+@@ -32,6 +32,7 @@ pub const Attention = extern struct {
+     hk: i32,
+     capacity: i32,
+     window: i32,
++    posp: u64 = 0,
+ };
+ pub const Dot = extern struct {
+     x0: u64,
+@@ -124,7 +125,7 @@ pub fn ceil(n: usize, d: usize) u32 {
+ 
+ test "Inkling CUDA by-value argument layouts match the kernel's C structs" {
+     try std.testing.expectEqual(@as(usize, 72), @sizeOf(Mix));
+-    try std.testing.expectEqual(@as(usize, 80), @sizeOf(Attention));
++    try std.testing.expectEqual(@as(usize, 88), @sizeOf(Attention));
+     try std.testing.expectEqual(@as(usize, 128), @sizeOf(Dot));
+     try std.testing.expectEqual(@as(usize, 16), @sizeOf(Pick));
+ }
+diff --git a/zig/src/families/inkling2/native.zig b/zig/src/families/inkling2/native.zig
+index cb578b05..0a25f4d6 100644
+--- a/zig/src/families/inkling2/native.zig
++++ b/zig/src/families/inkling2/native.zig
+@@ -138,6 +138,7 @@ fn openPair(gpa: std.mem.Allocator, io: std.Io, ctx: *const cuda.Context, dir: [
+     errdefer own.peer.?.deinit();
+     own.f = .{ .gpa = gpa, .d = ctx.d, .stream = own.stream, .w = &own.w, .s = &own.s, .k = &own.k, .lt = &own.lt, .exchange = .{ .lib = &own.lib.?, .comm = own.comm, .group = &own.group.? } };
+     errdefer own.f.deinit();
++    own.f.graphs_on = try environment.read(bool, "TF_INKLING_GRAPHS", true);
+     errdefer if (own.draft) |*d| d.deinit();
+     if (o.drafts) {
+         own.draft = try @import("draft.zig").Draft.init(gpa, io, ctx.d, dir, share, o.context, own.s.rows, if (quant) |*q| q else null);
+diff --git a/zig/src/families/inkling2/weights.zig b/zig/src/families/inkling2/weights.zig
+index 2b9138a6..17117a9f 100644
+--- a/zig/src/families/inkling2/weights.zig
++++ b/zig/src/families/inkling2/weights.zig
+@@ -113,6 +113,10 @@ pub fn linear(w: *Weights, f: *const File, name: []const u8, n: usize, k: usize,
+         var staged = try cuda.DeviceBuffer.fromHost(w.d, bytes);
+         defer staged.free();
+         return .{ .ptr = 0, .k = kk, .n = nn, .q = try q.pack(w, staged.ptr, nn, kk) };
++    } else if (fp4.keepsBf16(q.set, name)) {
++        var staged = try cuda.DeviceBuffer.fromHost(w.d, bytes);
++        defer staged.free();
++        return .{ .ptr = 0, .k = kk, .n = nn, .q = try q.packBf16(w, staged.ptr, nn, kk) };
+     };
+     return .{ .ptr = try w.put(bytes), .k = kk, .n = nn };
+ }
+diff --git a/zig/src/platform/environment.zig b/zig/src/platform/environment.zig
+index 171bd7c8..fe3f9ca5 100644
+--- a/zig/src/platform/environment.zig
++++ b/zig/src/platform/environment.zig
+@@ -31,6 +31,7 @@ pub fn isReal(kind: Kind) bool {
+ 
+ pub const rules = [_]Rule{
+     .{ .name = "TF_INKLING_FP4", .scope = .cuda, .kind = .word, .words = &.{ "off", "attn", "all" }, .forms = "off, attn (Q, K, V, R, gate and O as NVFP4) or all (also the output head)" },
++    .{ .name = "TF_INKLING_GRAPHS", .scope = .cuda, .kind = .flag, .forms = "0 or 1 (default 1: one-token and verify steps replay CUDA graphs)" },
+     .{ .name = "TF_INKLING_VERIFY_CHECK", .scope = .cuda, .kind = .flag, .forms = "0 or 1" },
+     .{ .name = "TF_INKLING_RANK", .scope = .cuda, .kind = .u32, .max = 1, .forms = "rank 0 or 1" },
+     .{ .name = "TF_INKLING_WORLD", .scope = .cuda, .kind = .u32, .only = &.{ 1, 2 }, .forms = "one rank for operator checks or two for serving" },
+-- 
+2.56.1
+
+
+From 377844b40b29a1f6383f57ff1f2f860506b6df50 Mon Sep 17 00:00:00 2001
+From: LPFchan <me@lost.plus>
+Date: Wed, 18 Nov 2026 00:32:24 +0900
+Subject: [PATCH 05/17] Inkling: split experts across the pair
+ (TF_INKLING_EXPERTS=<full checkpoint>)
+
+Every rank runs half of every routed expert: w13's output tile columns (its gate/up pairs) and
+w2's input tile rows, sliced from the full EXL3 checkpoint at load. Ranks finish together, so
+the all-gather no longer waits on the busier rank; moe_sum adds the two halves as it added
+remote experts. Down activations take NVFP4 scales from the rank's half row.
+DRAFTS=1: code 46 -> 53 tok/s, prose 29-31 -> 30-34 tok/s; load 4 -> 9 min (strided reads).
+---
+ zig/src/families/inkling2/config.zig  | 10 +++++--
+ zig/src/families/inkling2/forward.zig |  4 +--
+ zig/src/families/inkling2/native.zig  | 14 ++++++++--
+ zig/src/families/inkling2/weights.zig | 39 ++++++++++++++++++++-------
+ zig/src/platform/environment.zig      |  1 +
+ 5 files changed, 52 insertions(+), 16 deletions(-)
+
+diff --git a/zig/src/families/inkling2/config.zig b/zig/src/families/inkling2/config.zig
+index 2391f1e4..ad02ff5f 100644
+--- a/zig/src/families/inkling2/config.zig
++++ b/zig/src/families/inkling2/config.zig
+@@ -25,6 +25,7 @@ pub fn blocksBefore(layer: usize) usize {
+ pub const Share = struct {
+     rank: usize,
+     world: usize,
++    split: bool = false, // TF_INKLING_EXPERTS: every rank holds half of every expert's intermediate, not whole experts
+ 
+     pub fn init(rank: usize, world: usize) !Share {
+         if ((world != 1 and world != 2) or rank >= world) return error.InklingRanks;
+@@ -32,11 +33,16 @@ pub const Share = struct {
+     }
+ 
+     pub fn expertStart(s: Share) usize {
+-        return s.rank * s.expertCount();
++        return if (s.split) 0 else s.rank * s.expertCount();
+     }
+ 
+     pub fn expertCount(s: Share) usize {
+-        return experts / s.world;
++        return if (s.split) experts else experts / s.world;
++    }
++
++    /// This rank's intermediate width of every expert it runs.
++    pub fn inter(s: Share) usize {
++        return if (s.split) intermediate / s.world else intermediate;
+     }
+ 
+     pub fn queryHeads(s: Share) usize {
+diff --git a/zig/src/families/inkling2/forward.zig b/zig/src/families/inkling2/forward.zig
+index b04f043e..51a7c216 100644
+--- a/zig/src/families/inkling2/forward.zig
++++ b/zig/src/families/inkling2/forward.zig
+@@ -216,8 +216,8 @@ pub const Forward = struct {
+         try f.zero(s.gu, pairs * h * 2);
+         try f.zero(s.down, pairs * h * 2);
+         try f.projectExperts(l.w13, s.quant_up, cfg.topk, s.gu, rows, 4);
+-        try f.k.go(.swiglu, stream, .{ .x = ceil(pairs * cfg.intermediate, 256) }, 256, .{ s.gu, s.gamma, s.hidden, int(pairs * cfg.intermediate), @as(i32, cfg.intermediate) });
+-        try f.k.go(.quant, stream, .{ .x = @intCast(pairs) }, kern.quantThreads(cfg.intermediate), .{ s.hidden, s.quant_down, @as(i32, cfg.intermediate), @as(i32, @intFromBool(index < 40)) });
++        try f.k.go(.swiglu, stream, .{ .x = ceil(pairs * share.inter(), 256) }, 256, .{ s.gu, s.gamma, s.hidden, int(pairs * share.inter()), int(share.inter()) });
++        try f.k.go(.quant, stream, .{ .x = @intCast(pairs) }, kern.quantThreads(share.inter()), .{ s.hidden, s.quant_down, int(share.inter()), @as(i32, @intFromBool(index < 40)) });
+         try f.projectExperts(l.w2, s.quant_down, 0, s.down, rows, 1);
+         try f.gather(s.down, s.gathered, pairs * h * 2);
+         try f.k.go(.moe_sum, stream, .{ .x = ceil(rows * h, 256) }, 256, .{ s.gathered, s.conv_temp, int(rows), @as(i32, h), int(share.world) });
+diff --git a/zig/src/families/inkling2/native.zig b/zig/src/families/inkling2/native.zig
+index 0a25f4d6..3a61e5b7 100644
+--- a/zig/src/families/inkling2/native.zig
++++ b/zig/src/families/inkling2/native.zig
+@@ -51,7 +51,17 @@ const Owned = struct {
+ };
+ 
+ pub fn place() !cfg.Share {
+-    return cfg.Share.init(try environment.read(usize, "TF_INKLING_RANK", 0), try environment.read(usize, "TF_INKLING_WORLD", 1));
++    var s = try cfg.Share.init(try environment.read(usize, "TF_INKLING_RANK", 0), try environment.read(usize, "TF_INKLING_WORLD", 1));
++    s.split = (try expertsDir()) != null;
++    return s;
++}
++
++/// TF_INKLING_EXPERTS: the full checkpoint's folder; set, every rank runs half of every expert (balanced ranks).
++fn expertsDir() !?[]const u8 {
++    return environment.path("TF_INKLING_EXPERTS", @import("sys").getenv("TF_INKLING_EXPERTS")) catch {
++        std.log.err("TF_INKLING_EXPERTS: expected the full checkpoint's folder", .{});
++        return error.InvalidEnvironment;
++    };
+ }
+ 
+ pub fn admit(sm: u32, world: usize) !void {
+@@ -125,7 +135,7 @@ fn openPair(gpa: std.mem.Allocator, io: std.Io, ctx: *const cuda.Context, dir: [
+         quant = try fp4.Quant.init(ctx.d, &own.k, set);
+         std.log.info("inkling2 rank {d}: NVFP4 {s} projections, quantized at load", .{ share.rank, @tagName(set) });
+     }
+-    own.w = try wt.loadProfile(gpa, io, ctx.d, dir, share, cfg.layers, o.drafts, if (quant) |*q| q else null);
++    own.w = try wt.loadProfile(gpa, io, ctx.d, dir, share, cfg.layers, o.drafts, if (quant) |*q| q else null, try expertsDir());
+     errdefer own.w.deinit();
+     const kv = try share.kvBytes(o.context) + if (o.drafts) try @import("draft_config.zig").kvBytes(share, o.context) else 0;
+     if (o.room) |r| if ((r.read(r.ctx) orelse 0) < kv + (1 << 30)) return error.InklingKvRoom;
+diff --git a/zig/src/families/inkling2/weights.zig b/zig/src/families/inkling2/weights.zig
+index 17117a9f..cd581e8e 100644
+--- a/zig/src/families/inkling2/weights.zig
++++ b/zig/src/families/inkling2/weights.zig
+@@ -49,6 +49,7 @@ pub const Weights = struct {
+     head: Linear = undefined,
+     bytes: usize = 0,
+     fp4: ?*const fp4.Quant = null,
++    experts_dir: ?[]const u8 = null, // split experts: the full checkpoint, every expert in every layer
+ 
+     pub fn deinit(w: *Weights) void {
+         for (w.buffers.items) |*b| b.free();
+@@ -222,44 +223,62 @@ fn loadExperts(w: *Weights, io: std.Io, dir: []const u8, layer: usize, comptime
+     var sv: std.ArrayList(u8) = .empty;
+     defer sv.deinit(w.gpa);
+     var name: [128]u8 = undefined;
+-    const start = w.share.expertStart();
+-    const end = start + w.share.expertCount();
++    const s = w.share;
++    // split: w13 keeps this rank's output tile columns (gate/up pairs of its intermediate half), w2 its input tile rows
++    const cut_n = s.split and comptime std.mem.eql(u8, proj, "w13");
++    const cut_k = s.split and !cut_n;
++    const kk = if (cut_k) k / s.world else k;
++    const nn = if (cut_n) n / s.world else n;
++    const start = s.expertStart();
++    const end = start + s.expertCount();
++    var tiles: std.ArrayList(u8) = .empty;
++    defer tiles.deinit(w.gpa);
+     var first = start;
+     while (first < end) : (first += 8) {
+         const path = try std.fmt.bufPrint(&name, "layers/{d:0>2}/experts-{d:0>3}-{d:0>3}.safetensors", .{ layer, first, first + 7 });
+-        var f = try open(w.gpa, io, dir, path);
++        var f = try open(w.gpa, io, w.experts_dir orelse dir, path);
+         defer f.closeCopied(io);
+         for (first..first + 8) |e| {
+             const key = try std.fmt.bufPrint(&name, "experts.{d}." ++ proj ++ ".trellis", .{e});
+             const t = f.get(key) orelse return error.InklingMissingTensor;
+             if (t.dtype != .i16 or t.rank != 3 or t.dim(0) != k / 16 or t.dim(1) != n / 16 or
+                 (t.dim(2) != 32 and t.dim(2) != 48)) return error.InklingExl3;
+-            try ptrs.append(w.gpa, try w.put(t.bytes));
++            const tile = t.dim(2) * 2;
++            if (cut_n) {
++                const row = nn / 16 * tile;
++                tiles.clearRetainingCapacity();
++                for (0..k / 16) |i| try tiles.appendSlice(w.gpa, t.bytes[(i * (n / 16) + s.rank * (nn / 16)) * tile ..][0..row]);
++                try ptrs.append(w.gpa, try w.put(tiles.items));
++            } else if (cut_k) {
++                const part = kk / 16 * (n / 16) * tile;
++                try ptrs.append(w.gpa, try w.put(t.bytes[s.rank * part ..][0..part]));
++            } else try ptrs.append(w.gpa, try w.put(t.bytes));
+             try bits.append(w.gpa, @intCast(t.dim(2) / 8));
+             const marker = try get(&f, try std.fmt.bufPrint(&name, "experts.{d}." ++ proj ++ ".mul1", .{e}), .i32, &.{});
+             if (std.mem.readInt(u32, marker.bytes[0..4], .little) != 0x83dcd12d) return error.InklingExl3;
+             const suh = try get(&f, try std.fmt.bufPrint(&name, "experts.{d}." ++ proj ++ ".suh", .{e}), .f16, &.{k});
+-            try su.appendSlice(w.gpa, suh.bytes);
++            try su.appendSlice(w.gpa, if (cut_k) suh.bytes[s.rank * kk * 2 ..][0 .. kk * 2] else suh.bytes);
+             const svh = try get(&f, try std.fmt.bufPrint(&name, "experts.{d}." ++ proj ++ ".svh", .{e}), .f16, &.{n});
+-            try sv.appendSlice(w.gpa, svh.bytes);
++            try sv.appendSlice(w.gpa, if (cut_n) svh.bytes[s.rank * nn * 2 ..][0 .. nn * 2] else svh.bytes);
+         }
+     }
+-    return .{ .ptrs = try w.put(std.mem.sliceAsBytes(ptrs.items)), .bits = try w.put(std.mem.sliceAsBytes(bits.items)), .suh = try w.put(su.items), .svh = try w.put(sv.items), .k = k, .n = n };
++    return .{ .ptrs = try w.put(std.mem.sliceAsBytes(ptrs.items)), .bits = try w.put(std.mem.sliceAsBytes(bits.items)), .suh = try w.put(su.items), .svh = try w.put(sv.items), .k = kk, .n = nn };
+ }
+ 
+ /// `count` is 48 when serving; the independent layer dump tool may load a shorter prefix for a bounded canary.
+ pub fn load(gpa: std.mem.Allocator, io: std.Io, d: *const cuda.Driver, dir: []const u8, share: cfg.Share, count: usize) !Weights {
+-    return loadProfile(gpa, io, d, dir, share, count, false, null);
++    return loadProfile(gpa, io, d, dir, share, count, false, null, null);
+ }
+ 
+-pub fn loadProfile(gpa: std.mem.Allocator, io: std.Io, d: *const cuda.Driver, dir: []const u8, share: cfg.Share, count: usize, drafts: bool, quant: ?*const fp4.Quant) !Weights {
++pub fn loadProfile(gpa: std.mem.Allocator, io: std.Io, d: *const cuda.Driver, dir: []const u8, share: cfg.Share, count: usize, drafts: bool, quant: ?*const fp4.Quant, experts_dir: ?[]const u8) !Weights {
+     if (count == 0 or count > cfg.layers) return error.InklingGeometry;
+     const path = try std.fs.path.join(gpa, &.{ dir, "checkpoint.json" });
+     defer gpa.free(path);
+     const text = try std.Io.Dir.cwd().readFileAlloc(io, path, gpa, .limited(1 << 28));
+     defer gpa.free(text);
+     try cfg.admit(gpa, text);
+-    var w: Weights = .{ .gpa = gpa, .d = d, .share = share, .fp4 = quant };
++    if (share.split != (experts_dir != null)) return error.InklingGeometry;
++    var w: Weights = .{ .gpa = gpa, .d = d, .share = share, .fp4 = quant, .experts_dir = experts_dir };
+     errdefer w.deinit();
+     var globals = try open(gpa, io, dir, "dense/global.safetensors");
+     defer globals.closeCopied(io);
+diff --git a/zig/src/platform/environment.zig b/zig/src/platform/environment.zig
+index fe3f9ca5..2351961d 100644
+--- a/zig/src/platform/environment.zig
++++ b/zig/src/platform/environment.zig
+@@ -31,6 +31,7 @@ pub fn isReal(kind: Kind) bool {
+ 
+ pub const rules = [_]Rule{
+     .{ .name = "TF_INKLING_FP4", .scope = .cuda, .kind = .word, .words = &.{ "off", "attn", "all" }, .forms = "off, attn (Q, K, V, R, gate and O as NVFP4) or all (also the output head)" },
++    .{ .name = "TF_INKLING_EXPERTS", .scope = .cuda, .kind = .path, .forms = "the full Inkling checkpoint folder without control characters (every rank then runs half of every expert)" },
+     .{ .name = "TF_INKLING_GRAPHS", .scope = .cuda, .kind = .flag, .forms = "0 or 1 (default 1: one-token and verify steps replay CUDA graphs)" },
+     .{ .name = "TF_INKLING_VERIFY_CHECK", .scope = .cuda, .kind = .flag, .forms = "0 or 1" },
+     .{ .name = "TF_INKLING_RANK", .scope = .cuda, .kind = .u32, .max = 1, .forms = "rank 0 or 1" },
+-- 
+2.56.1
+
+
+From 789e179ab26119d5a6de7b898a10edc605b2c499 Mon Sep 17 00:00:00 2001
+From: LPFchan <me@lost.plus>
+Date: Wed, 18 Nov 2026 01:00:07 +0900
+Subject: [PATCH 06/17] inkling2: Q, gate, R (and local K, V) as one NVFP4
+ projection per layer
+
+---
+ zig/kernels/cuda/inkling2_rows.cuh    | 17 ++++++++++++
+ zig/src/families/inkling2/forward.zig | 35 ++++++++++++++++++------
+ zig/src/families/inkling2/kernels.zig |  2 +-
+ zig/src/families/inkling2/state.zig   |  2 ++
+ zig/src/families/inkling2/weights.zig | 38 +++++++++++++++++++++++----
+ 5 files changed, 80 insertions(+), 14 deletions(-)
+
+diff --git a/zig/kernels/cuda/inkling2_rows.cuh b/zig/kernels/cuda/inkling2_rows.cuh
+index 3db94b61..24875a4c 100644
+--- a/zig/kernels/cuda/inkling2_rows.cuh
++++ b/zig/kernels/cuda/inkling2_rows.cuh
+@@ -23,6 +23,23 @@ extern "C" __global__ void tf_ik_embed_pick(const int* ids, const bf16* parts, b
+     out[i] = parts[(size_t)(ids[i / width] / half) * rows * width + i];
+ }
+ 
++// A fused projection's rows [rows, total] back into its pieces' own row-major buffers (widths multiples of 8).
++extern "C" __global__ void tf_ik_split(const bf16* src, int rows, int total, bf16* d0, int w0, bf16* d1, int w1,
++                                       bf16* d2, int w2, bf16* d3, int w3, bf16* d4, int w4) {
++    const int i = blockIdx.x * blockDim.x + threadIdx.x, chunks = total / 8;
++    if (i >= rows * chunks) return;
++    const int row = i / chunks;
++    int c = (i % chunks) * 8;
++    const uint4 v = *reinterpret_cast<const uint4*>(src + (size_t)row * total + c);
++    bf16* d = d0;
++    int w = w0;
++    if (c >= w0) { c -= w0; d = d1; w = w1;
++        if (c >= w1) { c -= w1; d = d2; w = w2;
++            if (c >= w2) { c -= w2; d = d3; w = w3;
++                if (c >= w3) { c -= w3; d = d4; w = w4; } } } }
++    *reinterpret_cast<uint4*>(d + (size_t)row * w + c) = v;
++}
++
+ extern "C" __global__ void tf_ik_norm(const bf16* x, const bf16* weight, bf16* out, int width) {
+     const int row = blockIdx.x, t = threadIdx.x;
+     float square = 0.f;
+diff --git a/zig/src/families/inkling2/forward.zig b/zig/src/families/inkling2/forward.zig
+index 51a7c216..85cc082e 100644
+--- a/zig/src/families/inkling2/forward.zig
++++ b/zig/src/families/inkling2/forward.zig
+@@ -174,16 +174,35 @@ pub const Forward = struct {
+         const qsource = s.streams;
+         const ksource = s.streams + (if (local) @as(usize, 0) else rows * h * 2);
+         const vsource = s.streams + (if (local) @as(usize, 0) else 2 * rows * h * 2);
+-        try f.product(l.q, qsource, s.q, rows, .bf16);
+-        try f.product(l.k, ksource, s.conv_temp, rows, .bf16);
+-        try f.conv(l.k_conv, s.conv_temp, ksource, s.cache[index].conv[0], s.k, rows);
+-        try f.product(l.v, vsource, s.conv_temp, rows, .bf16);
+-        try f.conv(l.v_conv, s.conv_temp, vsource, s.cache[index].conv[1], s.v, rows);
+-        try f.product(l.r, qsource, s.r, rows, .bf16);
+-        try f.product(l.gate, qsource, s.gate, rows, .bf16);
+-        try f.product(l.sink, qsource, s.sink, rows, .bf16);
+         const heads = share.queryHeads();
+         const keys = share.keyHeads();
++        if (l.fused) |fu| {
++            // one NVFP4 pass over the shared input, then each piece back to its own buffer
++            const kw = keys * 128;
++            const kbuf = s.conv_temp;
++            const vbuf = s.conv_temp + rows * kw * 2;
++            const kv: usize = if (l.fused_kv) kw else 0;
++            try f.product(fu, qsource, s.fused, rows, .bf16);
++            try f.k.go(.split, stream, .{ .x = ceil(rows * fu.n / 8, 256) }, 256, .{ s.fused, int(rows), int(fu.n), s.q, int(heads * 128), s.gate, int(heads * 128), s.r, int(heads * 16), kbuf, int(kv), vbuf, int(kv) });
++            if (l.fused_kv) {
++                try f.conv(l.k_conv, kbuf, ksource, s.cache[index].conv[0], s.k, rows);
++                try f.conv(l.v_conv, vbuf, vsource, s.cache[index].conv[1], s.v, rows);
++            } else {
++                try f.product(l.k, ksource, s.conv_temp, rows, .bf16);
++                try f.conv(l.k_conv, s.conv_temp, ksource, s.cache[index].conv[0], s.k, rows);
++                try f.product(l.v, vsource, s.conv_temp, rows, .bf16);
++                try f.conv(l.v_conv, s.conv_temp, vsource, s.cache[index].conv[1], s.v, rows);
++            }
++        } else {
++            try f.product(l.q, qsource, s.q, rows, .bf16);
++            try f.product(l.k, ksource, s.conv_temp, rows, .bf16);
++            try f.conv(l.k_conv, s.conv_temp, ksource, s.cache[index].conv[0], s.k, rows);
++            try f.product(l.v, vsource, s.conv_temp, rows, .bf16);
++            try f.conv(l.v_conv, s.conv_temp, vsource, s.cache[index].conv[1], s.v, rows);
++            try f.product(l.r, qsource, s.r, rows, .bf16);
++            try f.product(l.gate, qsource, s.gate, rows, .bf16);
++        }
++        try f.product(l.sink, qsource, s.sink, rows, .bf16);
+         const cache = s.cache[index];
+         try f.k.go(.prep, stream, .{ .x = @intCast(heads), .y = @intCast(rows) }, 128, .{ s.q, l.q_scale, s.q, @as(u64, 0), int(heads), @as(i32, 128), int(s.pos), int(cache.capacity), @as(i32, 0), @as(i32, @intFromBool(!local)), f.posp() });
+         try f.k.go(.prep, stream, .{ .x = @intCast(keys), .y = @intCast(rows) }, 128, .{ s.k, @as(u64, 0), s.k, cache.k, int(keys), @as(i32, 128), int(s.pos), int(cache.capacity), @as(i32, 1), @as(i32, 0), f.posp() });
+diff --git a/zig/src/families/inkling2/kernels.zig b/zig/src/families/inkling2/kernels.zig
+index 6deff543..0a67df86 100644
+--- a/zig/src/families/inkling2/kernels.zig
++++ b/zig/src/families/inkling2/kernels.zig
+@@ -2,7 +2,7 @@
+ const std = @import("std");
+ const cuda = @import("cuda");
+ 
+-pub const Op = enum { mix, finish, rank_sum, logits, quant, swiglu, route, moe_sum, conv, conv_commit, prep, relative, attention, attention_decode, rotate, unrotate, embed, norm, top1, fp4_amax, fp4_quant, embed_shard, embed_pick };
++pub const Op = enum { mix, finish, rank_sum, logits, quant, swiglu, route, moe_sum, conv, conv_commit, prep, relative, attention, attention_decode, rotate, unrotate, embed, norm, top1, fp4_amax, fp4_quant, embed_shard, embed_pick, split };
+ 
+ pub const Mix = extern struct {
+     partial: u64,
+diff --git a/zig/src/families/inkling2/state.zig b/zig/src/families/inkling2/state.zig
+index 8af8c644..bd866c21 100644
+--- a/zig/src/families/inkling2/state.zig
++++ b/zig/src/families/inkling2/state.zig
+@@ -29,6 +29,7 @@ pub const State = struct {
+     sink: u64 = 0,
+     dynamic: u64 = 0,
+     conv_temp: u64 = 0,
++    fused: u64 = 0, // a fused projection's rows before tf_ik_split
+     attn_heads: u64 = 0,
+     attention: u64 = 0,
+     mlp: u64 = 0,
+@@ -87,6 +88,7 @@ pub const State = struct {
+         s.sink = try s.take(r * heads * 2);
+         s.dynamic = try s.take(r * keys * 4 * 2);
+         s.conv_temp = try s.take(r * h * 2);
++        s.fused = try s.take(r * (2 * heads * 128 + heads * 16 + 2 * w.share.keyHeads() * 128) * 2);
+         s.attn_heads = try s.take(r * heads * 128 * 2);
+         s.attention = try s.take(r * h * 2);
+         s.mlp = try s.take(r * h * 2);
+diff --git a/zig/src/families/inkling2/weights.zig b/zig/src/families/inkling2/weights.zig
+index cd581e8e..24d790ac 100644
+--- a/zig/src/families/inkling2/weights.zig
++++ b/zig/src/families/inkling2/weights.zig
+@@ -33,6 +33,8 @@ pub const Layer = struct {
+     mlp_conv: Conv,
+     w13: Matrix,
+     w2: Matrix,
++    fused: ?Linear = null, // NVFP4: Q, gate and R (and K, V on local layers) as one projection of the shared input
++    fused_kv: bool = false,
+ };
+ 
+ pub const Weights = struct {
+@@ -137,6 +139,20 @@ const Loader = struct {
+     fn projection(l: *Loader, suffix: []const u8, n: usize, k: usize, rows: [2]usize, cols: [2]usize) !Linear {
+         return linear(l.w, l.f, try l.name(suffix), n, k, rows, cols);
+     }
++    /// Q, gate and R (with K and V when `kv`) row slices stacked as one NVFP4 projection of the full hidden input.
++    fn fused(l: *Loader, q: *const fp4.Quant, parts: []const struct { []const u8, usize, [2]usize }) !Linear {
++        var rows: std.ArrayList(u8) = .empty;
++        defer rows.deinit(l.w.gpa);
++        var n: usize = 0;
++        for (parts) |p| {
++            const t = try get(l.f, try l.name(p[0]), .bf16, &.{ p[1], cfg.hidden });
++            try rows.appendSlice(l.w.gpa, t.bytes[p[2][0] * cfg.hidden * 2 .. p[2][1] * cfg.hidden * 2]);
++            n += p[2][1] - p[2][0];
++        }
++        var staged = try cuda.DeviceBuffer.fromHost(l.w.d, rows.items);
++        defer staged.free();
++        return .{ .ptr = 0, .k = cfg.hidden, .n = n, .q = try q.pack(l.w, staged.ptr, n, cfg.hidden) };
++    }
+     fn full(l: *Loader, suffix: []const u8, n: usize) !Linear {
+         return l.projection(suffix, n, cfg.hidden, .{ 0, n }, .{ 0, cfg.hidden });
+     }
+@@ -185,6 +201,16 @@ fn loadLayer(w: *Weights, io: std.Io, dir: []const u8, i: usize, globals: *const
+         const t = try get(globals, try std.fmt.bufPrint(&name, "model.llm.attn_res.attn_queries.{d}", .{i - 1}), .f32, if (is_local) &.{h} else &.{ 3, h });
+         aq = try w.put(t.bytes);
+     }
++    const none: Linear = .{ .ptr = 0, .k = 0, .n = 0 };
++    var fused: ?Linear = null;
++    if (w.fp4) |q| if (q.set != .off) {
++        const qr = [2]usize{ q0 * 128, q1 * 128 };
++        const kr = [2]usize{ k0 * 128, k1 * 128 };
++        fused = if (is_local)
++            try l.fused(q, &.{ .{ "attn.wq_du.weight", 6144, qr }, .{ "attn.gate_attn.weight", 6144, qr }, .{ "attn.wr_du.weight", 768, .{ q0 * 16, q1 * 16 } }, .{ "attn.wk_dv.weight", 1024, kr }, .{ "attn.wv_dv.weight", 1024, kr } })
++        else
++            try l.fused(q, &.{ .{ "attn.wq_du.weight", 6144, qr }, .{ "attn.gate_attn.weight", 6144, qr }, .{ "attn.wr_du.weight", 768, .{ q0 * 16, q1 * 16 } } });
++    };
+     const qs = try get(&f, try l.name("attn.q_l2_clip.scale"), .bf16, &.{ 48, 128 });
+     const rs = try get(&f, try l.name("attn.rel_l2_clip.scale"), .bf16, &.{ 48, 16 });
+     return .{
+@@ -192,12 +218,12 @@ fn loadLayer(w: *Weights, io: std.Io, dir: []const u8, i: usize, globals: *const
+         .mlp_norm = try l.tensor("mlp_norm.weight", .bf16, &.{h}),
+         .attn_query = aq,
+         .mlp_query = try w.put(mlp_q.bytes),
+-        .q = try l.projection("attn.wq_du.weight", 6144, h, .{ q0 * 128, q1 * 128 }, .{ 0, h }),
+-        .k = try l.projection("attn.wk_dv.weight", 1024, h, .{ k0 * 128, k1 * 128 }, .{ 0, h }),
+-        .v = try l.projection("attn.wv_dv.weight", 1024, h, .{ k0 * 128, k1 * 128 }, .{ 0, h }),
+-        .r = try l.projection("attn.wr_du.weight", 768, h, .{ q0 * 16, q1 * 16 }, .{ 0, h }),
++        .q = if (fused != null) none else try l.projection("attn.wq_du.weight", 6144, h, .{ q0 * 128, q1 * 128 }, .{ 0, h }),
++        .k = if (fused != null and is_local) none else try l.projection("attn.wk_dv.weight", 1024, h, .{ k0 * 128, k1 * 128 }, .{ 0, h }),
++        .v = if (fused != null and is_local) none else try l.projection("attn.wv_dv.weight", 1024, h, .{ k0 * 128, k1 * 128 }, .{ 0, h }),
++        .r = if (fused != null) none else try l.projection("attn.wr_du.weight", 768, h, .{ q0 * 16, q1 * 16 }, .{ 0, h }),
+         .o = try l.projection("attn.wo_ud.weight", h, 6144, .{ 0, h }, .{ q0 * 128, q1 * 128 }),
+-        .gate = try l.projection("attn.gate_attn.weight", 6144, h, .{ q0 * 128, q1 * 128 }, .{ 0, h }),
++        .gate = if (fused != null) none else try l.projection("attn.gate_attn.weight", 6144, h, .{ q0 * 128, q1 * 128 }, .{ 0, h }),
+         .sink = try l.projection("attn.attn_sink_proj.weight", 48, h, .{ q0, q1 }, .{ 0, h }),
+         .router = try l.full("mlp.gate.weight", cfg.experts),
+         .router_bias = try l.tensor("mlp.gate.bias", .f32, &.{cfg.experts}),
+@@ -210,6 +236,8 @@ fn loadLayer(w: *Weights, io: std.Io, dir: []const u8, i: usize, globals: *const
+         .mlp_conv = try l.convolution("mlp_sconv", false, false),
+         .w13 = undefined,
+         .w2 = undefined,
++        .fused = fused,
++        .fused_kv = fused != null and is_local,
+     };
+ }
+ 
+-- 
+2.56.1
+
+
+From a3c3d0a78b38b334b3f7742e7951ea85e6fbc57a Mon Sep 17 00:00:00 2001
+From: LPFchan <me@lost.plus>
+Date: Wed, 18 Nov 2026 01:28:35 +0900
+Subject: [PATCH 07/17] inkling2: decode attention split over 16 key-tile sets
+ per head, merged in order; row-invariant, 5x faster at 8k
+
+---
+ zig/kernels/cuda/inkling2.cu                  |   1 +
+ zig/kernels/cuda/inkling2_attention_split.cuh | 176 ++++++++++++++++++
+ zig/src/families/inkling2/forward.zig         |  12 +-
+ zig/src/families/inkling2/kernels.zig         |   2 +-
+ zig/src/families/inkling2/state.zig           |   2 +
+ 5 files changed, 189 insertions(+), 4 deletions(-)
+ create mode 100644 zig/kernels/cuda/inkling2_attention_split.cuh
+
+diff --git a/zig/kernels/cuda/inkling2.cu b/zig/kernels/cuda/inkling2.cu
+index 0df52847..840dcdd8 100644
+--- a/zig/kernels/cuda/inkling2.cu
++++ b/zig/kernels/cuda/inkling2.cu
+@@ -6,6 +6,7 @@
+ #include "inkling2_heads.cuh"
+ #include "inkling2_attention.cuh"
+ #include "inkling2_attention_decode.cuh"
++#include "inkling2_attention_split.cuh"
+ #include "inkling2_exl3.cuh"
+ #include "inkling2_rows.cuh"
+ #include "inkling2_fp4.cuh"
+diff --git a/zig/kernels/cuda/inkling2_attention_split.cuh b/zig/kernels/cuda/inkling2_attention_split.cuh
+new file mode 100644
+index 00000000..6924ab26
+--- /dev/null
++++ b/zig/kernels/cuda/inkling2_attention_split.cuh
+@@ -0,0 +1,176 @@
++// Decode attention split over keys: CTA (head, j) takes every IK_SPLITS-th 64-key tile, by absolute key position,
++// so a row's partials do not depend on which other rows share the launch; the merge adds them in a fixed order.
++#pragma once
++#include "inkling2_attention_decode.cuh"
++
++#define IK_SPLITS 16
++#define IK_SLOT 132 // out[128], max, total, exceptional flag (row 0), pad
++
++__device__ __forceinline__ void ik_ldmatrix_t(uint32_t& b0, uint32_t& b1, const bf16* p) {
++    const unsigned addr = static_cast<unsigned>(__cvta_generic_to_shared(p));
++    asm volatile("ldmatrix.sync.aligned.m8n8.x2.trans.shared.b16 {%0, %1}, [%2];" : "=r"(b0), "=r"(b1) : "r"(addr));
++}
++
++// Nonzero when any of the eight bf16 is infinite, NaN or subnormal: two halves per instruction.
++__device__ __forceinline__ unsigned ik_unusual8(uint4 x) {
++    unsigned bad = 0;
++    for (const unsigned w : {x.x, x.y, x.z, x.w}) {
++        const unsigned e = w & 0x7f807f80u;
++        bad |= __vcmpeq2(e, 0x7f807f80u) | (__vcmpeq2(e, 0u) & ~__vcmpeq2(w & 0x007f007fu, 0u));
++    }
++    return bad;
++}
++
++extern "C" __global__ __launch_bounds__(128) void tf_ik_attention_part(InklingAttention a, float* parts) {
++    if (a.posp) a.pos = *a.posp;
++    constexpr int D = 128, NK = 64;
++    __shared__ __align__(16) bf16 keys[NK][136], values[NK][136], probabilities[3][16][NK];
++    __shared__ float scores[16][NK], maxima[16], totals[16], alpha[16];
++    const int t = threadIdx.x, w = t >> 5, lane = t & 31, g = lane >> 2, sub = lane & 3;
++    const int head = blockIdx.x, j = blockIdx.y, kh = head / (a.hq / a.hk);
++    const int row0 = g, row1 = g + 8;
++    const int last = a.pos + a.rows - 1;
++    const int first = a.window ? max(0, a.pos - a.window) : 0;
++    float* slot = parts + (size_t)(j * a.hq + head) * 16 * IK_SLOT;
++    bool unusual_q = false;
++    for (int i = t; i < a.rows * D; i += 128) {
++        const float q = f(a.q[((size_t)(i / D) * a.hq + head) * D + i % D]);
++        unusual_q |= !isfinite(q) || (q != 0.f && fabsf(q) < 0x1p-126f);
++    }
++    if (__syncthreads_or(unusual_q)) { if (!t) slot[130] = 1.f; return; }
++    uint32_t qa[8][4];
++    for (int s = 0; s < 8; ++s) {
++        const bf16* q0 = a.q + ((size_t)min(row0, a.rows - 1) * a.hq + head) * D + s * 16;
++        const bf16* q1 = a.q + ((size_t)min(row1, a.rows - 1) * a.hq + head) * D + s * 16;
++        qa[s][0] = *reinterpret_cast<const uint32_t*>(q0 + 2 * sub);
++        qa[s][1] = *reinterpret_cast<const uint32_t*>(q1 + 2 * sub);
++        qa[s][2] = *reinterpret_cast<const uint32_t*>(q0 + 8 + 2 * sub);
++        qa[s][3] = *reinterpret_cast<const uint32_t*>(q1 + 8 + 2 * sub);
++    }
++    float out[4][4] = {};
++    if (t < 16) { maxima[t] = -INFINITY; totals[t] = 0.f; }
++    __syncthreads();
++    const int t0 = first / NK;
++    // the next tile's keys and values wait in registers while this one is computed
++    uint4 kr[8], vr[8];
++    auto fetch = [&](int tile) {
++#pragma unroll
++        for (int r = 0; r < 8; ++r) {
++            const int i = t + r * 128, at = tile * NK + (i >> 4);
++            kr[r] = vr[r] = make_uint4(0, 0, 0, 0);
++            if (at <= last) {
++                const size_t offset = ((size_t)(at % a.capacity) * a.hk + kh) * D + (i & 15) * 8;
++                kr[r] = *reinterpret_cast<const uint4*>(a.k + offset);
++                vr[r] = *reinterpret_cast<const uint4*>(a.v + offset);
++            }
++        }
++    };
++    int tile = t0 + ((j - t0 % IK_SPLITS) + IK_SPLITS) % IK_SPLITS;
++    if (tile * NK <= last) fetch(tile);
++    for (; tile * NK <= last; tile += IK_SPLITS) {
++        const int base = tile * NK;
++        unsigned unusual = 0;
++#pragma unroll
++        for (int r = 0; r < 8; ++r) {
++            const int i = t + r * 128, key = i >> 4, c = (i & 15) * 8;
++            *reinterpret_cast<uint4*>(&keys[key][c]) = kr[r];
++            *reinterpret_cast<uint4*>(&values[key][c]) = vr[r];
++            unusual |= ik_unusual8(kr[r]) | ik_unusual8(vr[r]);
++        }
++        if (__syncthreads_or(unusual != 0)) { if (!t) slot[130] = 1.f; return; }
++        bool exceptional = false;
++        if ((tile + IK_SPLITS) * NK <= last) fetch(tile + IK_SPLITS);
++        float sc[2][4] = {};
++        for (int n = 0; n < 2; ++n) for (int s = 0; s < 8; ++s) {
++            const int key = w * 16 + n * 8 + g;
++            ik_mma(sc[n], qa[s], *reinterpret_cast<const uint32_t*>(&keys[key][s * 16 + 2 * sub]),
++                   *reinterpret_cast<const uint32_t*>(&keys[key][s * 16 + 8 + 2 * sub]));
++        }
++        for (int n = 0; n < 2; ++n) for (int half = 0; half < 2; ++half) for (int e = 0; e < 2; ++e) {
++            const int row = g + half * 8, col = w * 16 + n * 8 + 2 * sub + e;
++            const int distance = a.pos + row - (base + col);
++            float score = sc[n][2 * half + e] * 0.08838834764831845f;
++            const bool valid = row < a.rows && distance >= 0 && (!a.window || distance <= a.window);
++            if (valid && distance < 1024) score += f(a.relative[((size_t)row * a.hq + head) * 1024 + distance]);
++            scores[g + half * 8][col] = valid ? score : -INFINITY;
++        }
++        __syncthreads();
++        const int rr = t / 8, col0 = t % 8;
++        float m = maxima[rr];
++        for (int col = col0; col < NK; col += 8) {
++            const float v = scores[rr][col];
++            m = isnan(m) || isnan(v) ? nanf("") : fmaxf(m, v);
++        }
++        for (int off = 1; off < 8; off <<= 1) {
++            const float other = __shfl_xor_sync(0xffffffffu, m, off, 8);
++            m = isnan(m) || isnan(other) ? nanf("") : fmaxf(m, other);
++        }
++        const float aold = maxima[rr] == m ? 1.f : expf(maxima[rr] - m);
++        float z = 0.f;
++        for (int col = col0; col < NK; col += 8) {
++            float p = scores[rr][col] == -INFINITY ? 0.f : expf(scores[rr][col] - m);
++            z += p;
++            for (int limb = 0; limb < 3; ++limb) {
++                const bf16 piece = b(p);
++                probabilities[limb][rr][col] = piece;
++                exceptional |= f(piece) != 0.f && fabsf(f(piece)) < 0x1p-126f;
++                p -= f(piece);
++            }
++            exceptional |= p != 0.f;
++        }
++        if (__syncthreads_or(exceptional)) { if (!t) slot[130] = 1.f; return; }
++        for (int off = 1; off < 8; off <<= 1) z += __shfl_xor_sync(0xffffffffu, z, off, 8);
++        if (!col0) { totals[rr] = totals[rr] * aold + z; maxima[rr] = m; alpha[rr] = aold; }
++        __syncthreads();
++        for (int n = 0; n < 4; ++n) for (int e = 0; e < 4; ++e) out[n][e] *= alpha[g + (e / 2) * 8];
++        for (int s = 0; s < 4; ++s) {
++            uint32_t vb[4][2];
++            for (int n = 0; n < 4; ++n) ik_ldmatrix_t(vb[n][0], vb[n][1], &values[s * 16 + (lane & 15)][w * 32 + n * 8]);
++            for (int limb = 0; limb < 3; ++limb) {
++                uint32_t p[4];
++                p[0] = *reinterpret_cast<const uint32_t*>(&probabilities[limb][g][s * 16 + 2 * sub]);
++                p[1] = *reinterpret_cast<const uint32_t*>(&probabilities[limb][g + 8][s * 16 + 2 * sub]);
++                p[2] = *reinterpret_cast<const uint32_t*>(&probabilities[limb][g][s * 16 + 8 + 2 * sub]);
++                p[3] = *reinterpret_cast<const uint32_t*>(&probabilities[limb][g + 8][s * 16 + 8 + 2 * sub]);
++                for (int n = 0; n < 4; ++n) ik_mma(out[n], p, vb[n][0], vb[n][1]);
++            }
++        }
++        __syncthreads();
++    }
++    for (int n = 0; n < 4; ++n) for (int half = 0; half < 2; ++half) for (int e = 0; e < 2; ++e) {
++        const int row = g + half * 8, c = w * 32 + n * 8 + 2 * sub + e;
++        if (row < a.rows) slot[row * IK_SLOT + c] = out[n][half * 2 + e];
++    }
++    if (t < a.rows) { slot[t * IK_SLOT + 128] = maxima[t]; slot[t * IK_SLOT + 129] = totals[t]; }
++    if (!t) slot[130] = 0.f;
++}
++
++// One CTA per (head, row): adds the IK_SPLITS partials in order, then the gate and the sink; exceptional inputs take the scalar path.
++extern "C" __global__ __launch_bounds__(128) void tf_ik_attention_merge(InklingAttention a, const float* parts) {
++    if (a.posp) a.pos = *a.posp;
++    __shared__ float top[IK_SPLITS], total[IK_SPLITS];
++    __shared__ int unusual;
++    const int head = blockIdx.x, row = blockIdx.y, c = threadIdx.x;
++    if (row >= a.rows) return;
++    if (!c) unusual = 0;
++    __syncthreads();
++    if (c < IK_SPLITS) {
++        const float* s = parts + ((size_t)(c * a.hq + head) * 16) * IK_SLOT;
++        if (s[130] != 0.f) unusual = 1;
++        top[c] = s[row * IK_SLOT + 128];
++        total[c] = s[row * IK_SLOT + 129];
++    }
++    __syncthreads();
++    if (unusual) { if (!row) ik_decode_exception<1>(a, 0, head); return; }
++    float m = -INFINITY;
++    for (int j = 0; j < IK_SPLITS; ++j) m = fmaxf(m, top[j]);
++    float out = 0.f, z = 0.f;
++    for (int j = 0; j < IK_SPLITS; ++j) {
++        if (top[j] == -INFINITY) continue;
++        const float scale = expf(top[j] - m);
++        out += parts[((size_t)(j * a.hq + head) * 16 + row) * IK_SLOT + c] * scale;
++        z += total[j] * scale;
++    }
++    const size_t at = ((size_t)row * a.hq + head) * 128 + c;
++    a.out[at] = b(((out / z) * sigmoid(f(a.gate[at]))) * sigmoid((m + logf(z)) - f(a.sink[row * a.hq + head])));
++}
+diff --git a/zig/src/families/inkling2/forward.zig b/zig/src/families/inkling2/forward.zig
+index 85cc082e..1f84ac6b 100644
+--- a/zig/src/families/inkling2/forward.zig
++++ b/zig/src/families/inkling2/forward.zig
+@@ -212,11 +212,11 @@ pub const Forward = struct {
+         const attention: kern.Attention = .{ .q = s.q, .k = cache.k, .v = cache.v, .relative = s.relative, .gate = s.gate, .sink = s.sink, .out = s.attn_heads, .rows = int(rows), .pos = int(s.pos), .hq = int(heads), .hk = int(keys), .capacity = int(cache.capacity), .window = if (local) 1023 else 0, .posp = f.posp() };
+         if (f.verifying and rows > 1) {
+             // one launch for every verified row: masked keys add exact zeros, so each row keeps its one-row bits
+-            try f.k.go(.attention_decode, stream, .{ .x = 1, .y = @intCast(heads), .z = 4 }, 128, .{attention});
++            try f.splitAttention(attention, heads);
+         } else if (rows == 1 and f.k.split_decode) {
+-            try f.k.go(.attention_decode, stream, .{ .x = 1, .y = @intCast(heads), .z = 4 }, 128, .{attention});
++            try f.splitAttention(attention, heads);
+             if (!f.decode_reported) {
+-                std.log.info("inkling attention decode: tf_ik_attention_decode, 4 output partitions per head", .{});
++                std.log.info("inkling attention decode: tf_ik_attention_part over 16 key splits, then tf_ik_attention_merge", .{});
+                 f.decode_reported = true;
+             }
+         } else try f.k.go(.attention, stream, .{ .x = ceil(rows, 16), .y = @intCast(heads) }, 128, .{attention});
+@@ -367,6 +367,12 @@ pub const Forward = struct {
+         f.s.pos = f.verify_start + count;
+     }
+ 
++    /// Decode and verify attention (at most 16 rows): every 16th key tile per CTA, then an in-order merge per head.
++    fn splitAttention(f: *Forward, a: kern.Attention, heads: usize) !void {
++        try f.k.go(.attention_part, f.stream, .{ .x = @intCast(heads), .y = 16 }, 128, .{ a, f.s.attn_parts });
++        try f.k.go(.attention_merge, f.stream, .{ .x = @intCast(heads), .y = @intCast(a.rows) }, 128, .{ a, f.s.attn_parts });
++    }
++
+     pub fn settleDraft(f: *Forward) !void {
+         const d = f.drafter orelse return;
+         const count = try @import("draft_commit.zig").pending(f.s.pos, d.pos, f.verify_start);
+diff --git a/zig/src/families/inkling2/kernels.zig b/zig/src/families/inkling2/kernels.zig
+index 0a67df86..dcae77b3 100644
+--- a/zig/src/families/inkling2/kernels.zig
++++ b/zig/src/families/inkling2/kernels.zig
+@@ -2,7 +2,7 @@
+ const std = @import("std");
+ const cuda = @import("cuda");
+ 
+-pub const Op = enum { mix, finish, rank_sum, logits, quant, swiglu, route, moe_sum, conv, conv_commit, prep, relative, attention, attention_decode, rotate, unrotate, embed, norm, top1, fp4_amax, fp4_quant, embed_shard, embed_pick, split };
++pub const Op = enum { mix, finish, rank_sum, logits, quant, swiglu, route, moe_sum, conv, conv_commit, prep, relative, attention, attention_decode, rotate, unrotate, embed, norm, top1, fp4_amax, fp4_quant, embed_shard, embed_pick, split, attention_part, attention_merge };
+ 
+ pub const Mix = extern struct {
+     partial: u64,
+diff --git a/zig/src/families/inkling2/state.zig b/zig/src/families/inkling2/state.zig
+index bd866c21..61429166 100644
+--- a/zig/src/families/inkling2/state.zig
++++ b/zig/src/families/inkling2/state.zig
+@@ -31,6 +31,7 @@ pub const State = struct {
+     conv_temp: u64 = 0,
+     fused: u64 = 0, // a fused projection's rows before tf_ik_split
+     attn_heads: u64 = 0,
++    attn_parts: u64 = 0, // tf_ik_attention_part: 16 splits x heads x 16 rows x 132 floats
+     attention: u64 = 0,
+     mlp: u64 = 0,
+     mlp_input: u64 = 0,
+@@ -90,6 +91,7 @@ pub const State = struct {
+         s.conv_temp = try s.take(r * h * 2);
+         s.fused = try s.take(r * (2 * heads * 128 + heads * 16 + 2 * w.share.keyHeads() * 128) * 2);
+         s.attn_heads = try s.take(r * heads * 128 * 2);
++        s.attn_parts = try s.take(16 * heads * 16 * 132 * 4);
+         s.attention = try s.take(r * h * 2);
+         s.mlp = try s.take(r * h * 2);
+         s.mlp_input = try s.take(r * h * 2);
+-- 
+2.56.1
+
+
+From ab0010657824d26cf3c308235d70494933fcbd00 Mon Sep 17 00:00:00 2001
+From: LPFchan <me@lost.plus>
+Date: Wed, 18 Nov 2026 01:28:35 +0900
+Subject: [PATCH 08/17] inkling2: TF_INKLING_EXPERTS also takes a pack already
+ cut to this rank's half
+
+---
+ zig/src/families/inkling2/weights.zig | 16 ++++++++++------
+ 1 file changed, 10 insertions(+), 6 deletions(-)
+
+diff --git a/zig/src/families/inkling2/weights.zig b/zig/src/families/inkling2/weights.zig
+index 24d790ac..99b00b99 100644
+--- a/zig/src/families/inkling2/weights.zig
++++ b/zig/src/families/inkling2/weights.zig
+@@ -269,10 +269,14 @@ fn loadExperts(w: *Weights, io: std.Io, dir: []const u8, layer: usize, comptime
+         for (first..first + 8) |e| {
+             const key = try std.fmt.bufPrint(&name, "experts.{d}." ++ proj ++ ".trellis", .{e});
+             const t = f.get(key) orelse return error.InklingMissingTensor;
+-            if (t.dtype != .i16 or t.rank != 3 or t.dim(0) != k / 16 or t.dim(1) != n / 16 or
++            // a pack already cut to this rank's half (scripts/split-experts.py) is taken whole
++            const precut = (cut_n or cut_k) and t.rank == 3 and t.dim(0) == kk / 16 and t.dim(1) == nn / 16;
++            if (t.dtype != .i16 or t.rank != 3 or (!precut and (t.dim(0) != k / 16 or t.dim(1) != n / 16)) or
+                 (t.dim(2) != 32 and t.dim(2) != 48)) return error.InklingExl3;
+             const tile = t.dim(2) * 2;
+-            if (cut_n) {
++            if (precut) {
++                try ptrs.append(w.gpa, try w.put(t.bytes));
++            } else if (cut_n) {
+                 const row = nn / 16 * tile;
+                 tiles.clearRetainingCapacity();
+                 for (0..k / 16) |i| try tiles.appendSlice(w.gpa, t.bytes[(i * (n / 16) + s.rank * (nn / 16)) * tile ..][0..row]);
+@@ -284,10 +288,10 @@ fn loadExperts(w: *Weights, io: std.Io, dir: []const u8, layer: usize, comptime
+             try bits.append(w.gpa, @intCast(t.dim(2) / 8));
+             const marker = try get(&f, try std.fmt.bufPrint(&name, "experts.{d}." ++ proj ++ ".mul1", .{e}), .i32, &.{});
+             if (std.mem.readInt(u32, marker.bytes[0..4], .little) != 0x83dcd12d) return error.InklingExl3;
+-            const suh = try get(&f, try std.fmt.bufPrint(&name, "experts.{d}." ++ proj ++ ".suh", .{e}), .f16, &.{k});
+-            try su.appendSlice(w.gpa, if (cut_k) suh.bytes[s.rank * kk * 2 ..][0 .. kk * 2] else suh.bytes);
+-            const svh = try get(&f, try std.fmt.bufPrint(&name, "experts.{d}." ++ proj ++ ".svh", .{e}), .f16, &.{n});
+-            try sv.appendSlice(w.gpa, if (cut_n) svh.bytes[s.rank * nn * 2 ..][0 .. nn * 2] else svh.bytes);
++            const suh = try get(&f, try std.fmt.bufPrint(&name, "experts.{d}." ++ proj ++ ".suh", .{e}), .f16, &.{if (precut) kk else k});
++            try su.appendSlice(w.gpa, if (cut_k and !precut) suh.bytes[s.rank * kk * 2 ..][0 .. kk * 2] else suh.bytes);
++            const svh = try get(&f, try std.fmt.bufPrint(&name, "experts.{d}." ++ proj ++ ".svh", .{e}), .f16, &.{if (precut) nn else n});
++            try sv.appendSlice(w.gpa, if (cut_n and !precut) svh.bytes[s.rank * nn * 2 ..][0 .. nn * 2] else svh.bytes);
+         }
+     }
+     return .{ .ptrs = try w.put(std.mem.sliceAsBytes(ptrs.items)), .bits = try w.put(std.mem.sliceAsBytes(bits.items)), .suh = try w.put(su.items), .svh = try w.put(sv.items), .k = kk, .n = nn };
+-- 
+2.56.1
+
+
+From 043a53a41eca9204af6e89600af96d9eb50453e3 Mon Sep 17 00:00:00 2001
+From: LPFchan <me@lost.plus>
+Date: Wed, 18 Nov 2026 01:51:21 +0900
+Subject: [PATCH 09/17] inkling2: build the glue and drafter kernels
+ arch-specific (sm_121a): native FP4/FP8 conversions
+
+---
+ zig/build/cuda_kernels.zig | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/zig/build/cuda_kernels.zig b/zig/build/cuda_kernels.zig
+index 9b4f6c77..688b055f 100644
+--- a/zig/build/cuda_kernels.zig
++++ b/zig/build/cuda_kernels.zig
+@@ -53,10 +53,10 @@ const torch_ops = &[_][]const u8{ "-O3", "--fmad=false", "--ftz=false" };
+ const glue = &[_][]const u8{ "-O3", "--fmad=false", "--ftz=false", "--prec-div=true", "--prec-sqrt=true" };
+ 
+ pub const kernels = [_]Kernel{
+-    .{ .name = "inkling2", .flags = glue, .min_sm = 120 },
++    .{ .name = "inkling2", .flags = glue, .min_sm = 120, .arch_specific = true },
+     .{ .name = "inkling2_dense", .flags = glue, .min_sm = 120 },
+     .{ .name = "inkling2_verify", .flags = glue, .min_sm = 120 },
+-    .{ .name = "inkling2_draft", .flags = glue, .min_sm = 120 },
++    .{ .name = "inkling2_draft", .flags = glue, .min_sm = 120, .arch_specific = true },
+     .{ .name = "qwen4_projection", .flags = glue },
+     .{ .name = "qwen4_gdn", .flags = glue },
+     .{ .name = "qwen4_hc", .flags = glue },
+-- 
+2.56.1
+
+
+From b71cf55b766fb07d42dc314522b0f3978cc6dbba Mon Sep 17 00:00:00 2001
+From: LPFchan <me@lost.plus>
+Date: Wed, 18 Nov 2026 02:20:32 +0900
+Subject: [PATCH 10/17] inkling2: forward graph in pieces; warp-level route
+ top-8 and mix reductions; drafter rnn and fold as NVFP4
+
+---
+ zig/kernels/cuda/inkling2_residual.cuh | 60 +++++++++++++-----------
+ zig/kernels/cuda/inkling2_route.cuh    | 65 +++++++++++++++++---------
+ zig/src/families/inkling2/forward.zig  | 41 ++++++++++++++--
+ zig/src/families/inkling2/fp4.zig      | 12 +++--
+ 4 files changed, 120 insertions(+), 58 deletions(-)
+
+diff --git a/zig/kernels/cuda/inkling2_residual.cuh b/zig/kernels/cuda/inkling2_residual.cuh
+index bbbc3261..5052a301 100644
+--- a/zig/kernels/cuda/inkling2_residual.cuh
++++ b/zig/kernels/cuda/inkling2_residual.cuh
+@@ -41,7 +41,8 @@ extern "C" __global__ void __launch_bounds__(IK_MIX_THREADS) tf_ik_mix(InklingMi
+ #pragma unroll
+     for (int s = 0; s < IK_MIX_BLOCKS; ++s)
+         if (s < bc) ik_load8(a.blocks + (size_t)s * a.block_stride + (size_t)row * a.width + c0, v[s]);
+-    float attn[8] = {};
++    float attn[8] = {}, norm[8];
++    ik_load8(a.norm + q * a.width + c0, norm); // issued with the sources, used last
+     ik_load8(a.partial + (size_t)row * a.width + c0, v[IK_MIX_BLOCKS]);
+     if (a.mode) ik_load8(a.attention + (size_t)row * a.width + c0, attn);
+ #pragma unroll
+@@ -59,8 +60,11 @@ extern "C" __global__ void __launch_bounds__(IK_MIX_THREADS) tf_ik_mix(InklingMi
+ #pragma unroll
+         for (int j = 0; j < 8; ++j) query[j] = qq[j] * qs;
+     }
++    // every source's square and dot, reduced across the warp together (independent shuffles overlap)
++    constexpr int NS = IK_MIX_BLOCKS + 2;
++    float part[2 * NS];
+ #pragma unroll
+-    for (int s = 0; s < IK_MIX_BLOCKS + 2; ++s) {
++    for (int s = 0; s < NS; ++s) {
+         const bool live = s < bc || s == IK_MIX_BLOCKS || (s == IK_MIX_BLOCKS + 1 && a.mode == 1);
+         float square = 0.f, dot = 0.f;
+ #pragma unroll
+@@ -68,33 +72,37 @@ extern "C" __global__ void __launch_bounds__(IK_MIX_THREADS) tf_ik_mix(InklingMi
+             square += v[s][j] * v[s][j];
+             dot += v[s][j] * query[j];
+         }
+-        square = live ? warp_sum(square) : 0.f;
+-        dot = live ? warp_sum(dot) : 0.f;
+-        if (!lane) red[warp][2 * s] = square, red[warp][2 * s + 1] = dot;
++        part[2 * s] = live ? square : 0.f;
++        part[2 * s + 1] = live ? dot : 0.f;
+     }
++#pragma unroll
++    for (int off = 16; off; off >>= 1)
++#pragma unroll
++        for (int i = 0; i < 2 * NS; ++i) part[i] += __shfl_xor_sync(0xffffffffu, part[i], off);
++    if (!lane)
++#pragma unroll
++        for (int i = 0; i < 2 * NS; ++i) red[warp][i] = part[i];
+     __syncthreads();
+     if (warp == 0) {
+-        for (int s = 0; s < IK_MIX_BLOCKS + 2; ++s) {
+-            float square = lane < IK_MIX_THREADS / 32 ? red[lane][2 * s] : 0.f;
+-            float dot = lane < IK_MIX_THREADS / 32 ? red[lane][2 * s + 1] : 0.f;
+-            square = warp_sum(square);
+-            dot = warp_sum(dot);
+-            if (!lane) {
+-                inv[s] = rsqrtf(square / a.width + 1e-6f);
+-                prob[s] = dot * inv[s];
+-            }
+-        }
+-        if (!lane) {
+-            // the original order: stored blocks, the partial, then attention
+-            int order[IK_MIX_BLOCKS + 2], n = 0;
+-            for (int s = 0; s < bc; ++s) order[n++] = s;
+-            order[n++] = IK_MIX_BLOCKS;
+-            if (a.mode == 1) order[n++] = IK_MIX_BLOCKS + 1;
+-            float m = -INFINITY, z = 0.f;
+-            for (int i = 0; i < n; ++i) m = isnan(prob[order[i]]) ? prob[order[i]] : fmaxf(m, prob[order[i]]);
+-            for (int i = 0; i < n; ++i) z += (prob[order[i]] = expf(prob[order[i]] - m));
+-            for (int s = 0; s < IK_MIX_BLOCKS + 2; ++s) prob[s] = (s < bc || s == IK_MIX_BLOCKS || (s == IK_MIX_BLOCKS + 1 && a.mode == 1)) ? prob[s] / z : 0.f;
++        // lane i adds quantity i (source i / 2's square or dot) over the warps; even lanes then own a source
++        float total = 0.f;
++        if (lane < 2 * NS)
++            for (int w = 0; w < IK_MIX_THREADS / 32; ++w) total += red[w][lane];
++        const float dot = __shfl_down_sync(0xffffffffu, total, 1);
++        const int s = lane / 2;
++        const bool live = !(lane & 1) && lane < 2 * NS && (s < bc || s == IK_MIX_BLOCKS || (s == IK_MIX_BLOCKS + 1 && a.mode == 1));
++        const float iv = rsqrtf(total / a.width + 1e-6f), logit = dot * iv;
++        float m = live ? logit : -INFINITY;
++        bool nan_seen = live && isnan(logit);
++        for (int off = 16; off; off >>= 1) {
++            m = fmaxf(m, __shfl_xor_sync(0xffffffffu, m, off));
++            nan_seen |= __shfl_xor_sync(0xffffffffu, nan_seen, off);
+         }
++        if (nan_seen) m = nanf("");
++        const float e = live ? expf(logit - m) : 0.f;
++        float z = e;
++        for (int off = 16; off; off >>= 1) z += __shfl_xor_sync(0xffffffffu, z, off);
++        if (!(lane & 1) && lane < 2 * NS) { inv[s] = iv; prob[s] = live ? e / z : 0.f; }
+     }
+     __syncthreads();
+     float out[8], square = 0.f;
+@@ -110,8 +118,6 @@ extern "C" __global__ void __launch_bounds__(IK_MIX_THREADS) tf_ik_mix(InklingMi
+         square += x * x;
+     }
+     const float scale = rsqrtf(sum(square) / a.width + 1e-6f);
+-    float norm[8];
+-    ik_load8(a.norm + q * a.width + c0, norm);
+     uint4 packed;
+     bf16* o = reinterpret_cast<bf16*>(&packed);
+ #pragma unroll
+diff --git a/zig/kernels/cuda/inkling2_route.cuh b/zig/kernels/cuda/inkling2_route.cuh
+index 91df10a1..96343dbd 100644
+--- a/zig/kernels/cuda/inkling2_route.cuh
++++ b/zig/kernels/cuda/inkling2_route.cuh
+@@ -3,32 +3,55 @@
+ #include "inkling2_common.cuh"
+ using namespace inkling2;
+ 
++// (b, ib) ranks before (a, ia): larger first, NaN above everything, then the lower id.
++__device__ __forceinline__ bool ik_before(float b, int ib, float a, int ia) {
++    return isnan(b) ? !isnan(a) || ib < ia : !isnan(a) && (b > a || (b == a && ib < ia));
++}
++__device__ __forceinline__ void ik_warp_best(float& v, int& id) {
++    for (int off = 16; off; off >>= 1) {
++        const float ov = __shfl_xor_sync(0xffffffffu, v, off);
++        const int oi = __shfl_xor_sync(0xffffffffu, id, off);
++        if (ik_before(ov, oi, v, id)) v = ov, id = oi;
++    }
++}
++
++// Top-8 per warp, then the top-8 of those candidates in one warp: the same picks, in the same order, as eight
++// block-wide arg-max passes.
+ extern "C" __global__ void tf_ik_route(const float* logits, const float* bias,
+                                       int* picks, float* gamma, int first, int owned) {
+-    const int row = blockIdx.x, t = threadIdx.x;
+-    __shared__ float scores[512], tmp[512];
+-    __shared__ int ids[512], chosen[8];
+-    float selection = t < 384 ? sigmoid(logits[row * 384 + t]) + bias[t] : -INFINITY;
+-    scores[t] = selection;
+-    __syncthreads();
++    const int row = blockIdx.x, t = threadIdx.x, lane = t & 31, warp = t >> 5, warps = blockDim.x >> 5;
++    __shared__ float cand_v[16 * 8];
++    __shared__ int cand_i[16 * 8], chosen[8];
++    float mine = t < 384 ? sigmoid(logits[row * 384 + t]) + bias[t] : -INFINITY;
+     for (int slot = 0; slot < 8; ++slot) {
+-        tmp[t] = scores[t];
+-        ids[t] = t;
+-        __syncthreads();
+-        for (int stride = 256; stride; stride >>= 1) {
+-            if (t < stride) {
+-                const float a = tmp[t], b = tmp[t + stride];
+-                const bool take = isnan(b) ? !isnan(a) || ids[t + stride] < ids[t]
+-                    : !isnan(a) && (b > a || (b == a && ids[t + stride] < ids[t]));
+-                if (take) { tmp[t] = b; ids[t] = ids[t + stride]; }
+-            }
+-            __syncthreads();
++        float v = mine;
++        int id = t;
++        ik_warp_best(v, id);
++        if (!lane) cand_v[warp * 8 + slot] = v, cand_i[warp * 8 + slot] = id;
++        if (id == t) mine = -INFINITY;
++    }
++    __syncthreads();
++    if (warp == 0) {
++        const int count = warps * 8;
++        float v[4];
++        int ids[4];
++        for (int j = 0; j < 4; ++j) {
++            const int c = lane + j * 32;
++            v[j] = c < count ? cand_v[c] : -INFINITY;
++            ids[j] = c < count ? cand_i[c] : 0x7fffffff;
++        }
++        for (int slot = 0; slot < 8; ++slot) {
++            float bv = v[0];
++            int bi = ids[0], bj = 0;
++            for (int j = 1; j < 4; ++j) if (ik_before(v[j], ids[j], bv, bi)) bv = v[j], bi = ids[j], bj = j;
++            float wv = bv;
++            int wi = bi;
++            ik_warp_best(wv, wi);
++            if (wi == bi) v[bj] = -INFINITY, ids[bj] = 0x7fffffff;
++            if (!lane) chosen[slot] = wi;
+         }
+-        if (!t) chosen[slot] = ids[0];
+-        __syncthreads();
+-        if (t == chosen[slot]) scores[t] = -INFINITY;
+-        __syncthreads();
+     }
++    __syncthreads();
+     if (!t) {
+         float logs[8], values[8], maximum = -INFINITY;
+         for (int s = 0; s < 8; ++s) {
+diff --git a/zig/src/families/inkling2/forward.zig b/zig/src/families/inkling2/forward.zig
+index 1f84ac6b..74d48c3b 100644
+--- a/zig/src/families/inkling2/forward.zig
++++ b/zig/src/families/inkling2/forward.zig
+@@ -37,14 +37,15 @@ pub const Forward = struct {
+     graphs_on: bool = false, // TF_INKLING_GRAPHS: one-token and verify steps replay a captured graph per row count
+     graphing: bool = false, // capturing: ids and position come from the device
+     pos_dev: ?cuda.DeviceBuffer = null,
+-    graphs: [9][2]?cuda.graph.Exec = @splat(@splat(null)),
++    graphs: [9][2]?Chain = @splat(@splat(null)),
++    chain: ?*Chain = null, // capturing: where the forward is cut into launchable pieces
+ 
+     pub fn deinit(f: *Forward) void {
+         for (f.plans.items) |*p| p.plan.deinit();
+         f.plans.deinit(f.gpa);
+         if (f.verify_mod) |*m| m.unload();
+         if (f.audit) |*a| a.deinit();
+-        for (&f.graphs) |*row| for (row) |*g| if (g.*) |*e| e.deinit();
++        for (&f.graphs) |*row| for (row) |*g| if (g.*) |*c| c.deinit();
+         if (f.pos_dev) |*p| p.free();
+     }
+ 
+@@ -267,16 +268,21 @@ pub const Forward = struct {
+         if (slot.* == null) {
+             f.graphing = true;
+             defer f.graphing = false;
++            var chain: Chain = .{};
++            errdefer chain.deinit();
++            f.chain = &chain;
++            defer f.chain = null;
+             try cuda.graph.beginCapture(f.stream, .thread_local);
+             const captured = f.body(ids, true);
+             var g = try cuda.graph.endCapture(f.stream);
+             defer g.deinit();
+             try captured;
+-            slot.* = try g.instantiate();
+-            std.log.info("inkling graph: {d} row(s){s}, captured", .{ ids.len, if (f.verifying) " (verify)" else "" });
++            try chain.add(try g.instantiate());
++            slot.* = chain;
++            std.log.info("inkling graph: {d} row(s){s}, captured in {d} pieces", .{ ids.len, if (f.verifying) " (verify)" else "" , chain.count });
+         }
+         s.pos = pos;
+-        try slot.*.?.launchOn(f.stream);
++        for (slot.*.?.parts[0..slot.*.?.count]) |e| try e.launchOn(f.stream);
+         s.pos = pos + ids.len;
+     }
+ 
+@@ -291,6 +297,8 @@ pub const Forward = struct {
+                 if (i == tap) try f.copy(d.taps + j * s.rows * cfg.hidden * 2, s.partial, rows * cfg.hidden * 2);
+             };
+             try f.layer(l, i, rows);
++            // a small first piece starts the device while the host still submits the rest
++            if (f.chain) |c| if (i + 1 == 2 or (i + 1) % 8 == 0 and i + 1 < f.w.layer.len) try c.cut(f.stream);
+         }
+         const start = s.pos;
+         s.pos += rows;
+@@ -403,3 +411,26 @@ pub const Forward = struct {
+         return best.token;
+     }
+ };
++
++/// A captured forward in pieces: cuGraphLaunch costs host time per node, and the device only starts a piece once
++/// it is submitted, so the pieces after the first are submitted while the device runs the earlier ones.
++const Chain = struct {
++    parts: [8]cuda.graph.Exec = undefined,
++    count: usize = 0,
++
++    fn add(c: *Chain, e: cuda.graph.Exec) !void {
++        if (c.count == c.parts.len) return error.InklingGraphPieces;
++        c.parts[c.count] = e;
++        c.count += 1;
++    }
++    fn cut(c: *Chain, stream: cuda.Stream) !void {
++        var g = try cuda.graph.endCapture(stream);
++        defer g.deinit();
++        try c.add(try g.instantiate());
++        try cuda.graph.beginCapture(stream, .thread_local);
++    }
++    fn deinit(c: *Chain) void {
++        for (c.parts[0..c.count]) |*e| e.deinit();
++        c.count = 0;
++    }
++};
+diff --git a/zig/src/families/inkling2/fp4.zig b/zig/src/families/inkling2/fp4.zig
+index 8ff38eff..08a3f9c4 100644
+--- a/zig/src/families/inkling2/fp4.zig
++++ b/zig/src/families/inkling2/fp4.zig
+@@ -4,13 +4,14 @@ const cuda = @import("cuda");
+ const kern = @import("kernels.zig");
+ const wt = @import("weights.zig");
+ 
+-/// off; attn: Q, K, V, R, gate and O; all: those, the output head and the DSpark drafter's layer projections.
+-/// Router, sink and conv projections, and the drafter's recurrent head, stay BF16.
++/// off; attn: Q, K, V, R, gate and O; all: those, the output head and the DSpark drafter's projections (its layers,
++/// recurrent head and vocabulary fold). Router, sink and conv projections stay BF16.
+ pub const Set = enum(u8) { off, attn, all };
+ 
+ const attn = [_][]const u8{ "attn.wq_du.weight", "attn.wk_dv.weight", "attn.wv_dv.weight", "attn.wr_du.weight", "attn.wo_ud.weight", "attn.gate_attn.weight" };
+ const head = "model.llm.unembed.weight";
+-const draft = [_][]const u8{ "self_attn.q_proj.weight", "self_attn.k_proj.weight", "self_attn.v_proj.weight", "self_attn.k_proj_ctx.weight", "self_attn.v_proj_ctx.weight", "self_attn.o_proj.weight", "mlp.gate_proj.weight", "mlp.up_proj.weight", "mlp.down_proj.weight" };
++const draft = [_][]const u8{ "self_attn.q_proj.weight", "self_attn.k_proj.weight", "self_attn.v_proj.weight", "self_attn.k_proj_ctx.weight", "self_attn.v_proj_ctx.weight", "self_attn.o_proj.weight", "mlp.gate_proj.weight", "mlp.up_proj.weight", "mlp.down_proj.weight", "markov_head.rnn_proj.weight" };
++const fold = "weight"; // auxiliary/dspark-fold.safetensors
+ 
+ /// Small BF16 projections that stay BF16 but move onto the lane, which takes up to 16 rows in one pass.
+ const lane16 = [_][]const u8{ "mlp.gate.weight", "attn.attn_sink_proj.weight", "sconv.weight_proj" };
+@@ -23,7 +24,7 @@ pub fn keepsBf16(set: Set, name: []const u8) bool {
+ 
+ pub fn wants(set: Set, name: []const u8) bool {
+     if (set == .off) return false;
+-    if (set == .all and std.mem.eql(u8, name, head)) return true;
++    if (set == .all and (std.mem.eql(u8, name, head) or std.mem.eql(u8, name, fold))) return true;
+     if (set == .all) for (draft) |s| if (std.mem.endsWith(u8, name, s)) return true;
+     for (attn) |s| if (std.mem.endsWith(u8, name, s)) return true;
+     return false;
+@@ -93,7 +94,8 @@ test "TF_INKLING_FP4 picks attention projections and, with all, the head" {
+     try std.testing.expect(!wants(.off, "model.llm.layers.3.attn.wq_du.weight"));
+     try std.testing.expect(wants(.all, "layers.2.mlp.down_proj.weight"));
+     try std.testing.expect(!wants(.attn, "layers.2.mlp.down_proj.weight"));
+-    try std.testing.expect(!wants(.all, "markov_head.rnn_proj.weight"));
++    try std.testing.expect(wants(.all, "markov_head.rnn_proj.weight"));
++    try std.testing.expect(wants(.all, "weight") and !wants(.attn, "weight"));
+     try std.testing.expect(keepsBf16(.attn, "model.llm.layers.5.mlp.gate.weight"));
+     try std.testing.expect(keepsBf16(.all, "model.llm.layers.5.attn.k_sconv.weight_proj"));
+     try std.testing.expect(!keepsBf16(.all, "layers.2.mlp.gate_proj.weight"));
+-- 
+2.56.1
+
+
+From 427a874ffca07c1770318912cc1a76cbfb0665e7 Mon Sep 17 00:00:00 2001
+From: LPFchan <me@lost.plus>
+Date: Wed, 18 Nov 2026 02:32:26 +0900
+Subject: [PATCH 11/17] inkling2: keep() restores every conv history in one
+ launch
+
+---
+ zig/kernels/cuda/inkling2_rows.cuh    |  9 +++++++++
+ zig/src/families/inkling2/forward.zig | 27 ++++++++++++++++++++-------
+ zig/src/families/inkling2/kernels.zig |  2 +-
+ 3 files changed, 30 insertions(+), 8 deletions(-)
+
+diff --git a/zig/kernels/cuda/inkling2_rows.cuh b/zig/kernels/cuda/inkling2_rows.cuh
+index 24875a4c..e3f6b393 100644
+--- a/zig/kernels/cuda/inkling2_rows.cuh
++++ b/zig/kernels/cuda/inkling2_rows.cuh
+@@ -23,6 +23,15 @@ extern "C" __global__ void tf_ik_embed_pick(const int* ids, const bf16* parts, b
+     out[i] = parts[(size_t)(ids[i / width] / half) * rows * width + i];
+ }
+ 
++// Every conv history back from one draft row's snapshot in one launch: block i copies segment i (even bf16 counts).
++struct IkSegment { unsigned long long dst; unsigned off, len; };
++extern "C" __global__ void tf_ik_restore(const IkSegment* table, const bf16* src) {
++    const IkSegment g = table[blockIdx.x];
++    const unsigned* from = reinterpret_cast<const unsigned*>(src + g.off);
++    unsigned* to = reinterpret_cast<unsigned*>(g.dst);
++    for (unsigned i = threadIdx.x; i < g.len / 2; i += blockDim.x) to[i] = from[i];
++}
++
+ // A fused projection's rows [rows, total] back into its pieces' own row-major buffers (widths multiples of 8).
+ extern "C" __global__ void tf_ik_split(const bf16* src, int rows, int total, bf16* d0, int w0, bf16* d1, int w1,
+                                        bf16* d2, int w2, bf16* d3, int w3, bf16* d4, int w4) {
+diff --git a/zig/src/families/inkling2/forward.zig b/zig/src/families/inkling2/forward.zig
+index 74d48c3b..e48262b4 100644
+--- a/zig/src/families/inkling2/forward.zig
++++ b/zig/src/families/inkling2/forward.zig
+@@ -38,7 +38,9 @@ pub const Forward = struct {
+     graphing: bool = false, // capturing: ids and position come from the device
+     pos_dev: ?cuda.DeviceBuffer = null,
+     graphs: [9][2]?Chain = @splat(@splat(null)),
+-    chain: ?*Chain = null, // capturing: where the forward is cut into launchable pieces
++    chain: ?*Chain = null,
++    restore_table: ?cuda.DeviceBuffer = null, // keep(): every conv history's segment in a draft snapshot row
++    restore_segments: usize = 0, // capturing: where the forward is cut into launchable pieces
+ 
+     pub fn deinit(f: *Forward) void {
+         for (f.plans.items) |*p| p.plan.deinit();
+@@ -46,6 +48,7 @@ pub const Forward = struct {
+         if (f.verify_mod) |*m| m.unload();
+         if (f.audit) |*a| a.deinit();
+         for (&f.graphs) |*row| for (row) |*g| if (g.*) |*c| c.deinit();
++        if (f.restore_table) |*t| t.free();
+         if (f.pos_dev) |*p| p.free();
+     }
+ 
+@@ -360,12 +363,20 @@ pub const Forward = struct {
+ 
+     fn restoreHistory(f: *Forward, count: usize) !void {
+         const d = f.drafter orelse return error.InklingNoDrafts;
+-        var offset: usize = 0;
+-        for (f.s.cache) |c| for (c.conv, 0..) |history, j| {
+-            const size = 3 * (if (j < 2) f.w.share.keyHeads() * 128 else cfg.hidden);
+-            try f.copy(history, d.snapshots + (count * d.snapshot_stride + offset) * 2, size * 2);
+-            offset += size;
+-        };
++        if (f.restore_table == null) {
++            // one segment per conv history, at its offset in a snapshot row: built once, then a single launch
++            var table: std.ArrayList(Segment) = .empty;
++            defer table.deinit(f.gpa);
++            var offset: usize = 0;
++            for (f.s.cache) |c| for (c.conv, 0..) |history, j| {
++                const size = 3 * (if (j < 2) f.w.share.keyHeads() * 128 else cfg.hidden);
++                try table.append(f.gpa, .{ .dst = history, .off = @intCast(offset), .len = @intCast(size) });
++                offset += size;
++            };
++            f.restore_table = try cuda.DeviceBuffer.fromHost(f.d, std.mem.sliceAsBytes(table.items));
++            f.restore_segments = table.items.len;
++        }
++        try f.k.go(.restore, f.stream, .{ .x = @intCast(f.restore_segments) }, 256, .{ f.restore_table.?.ptr, d.snapshots + count * d.snapshot_stride * 2 });
+     }
+ 
+     pub fn keep(f: *Forward, count: usize) !void {
+@@ -414,6 +425,8 @@ pub const Forward = struct {
+ 
+ /// A captured forward in pieces: cuGraphLaunch costs host time per node, and the device only starts a piece once
+ /// it is submitted, so the pieces after the first are submitted while the device runs the earlier ones.
++const Segment = extern struct { dst: u64, off: u32, len: u32 };
++
+ const Chain = struct {
+     parts: [8]cuda.graph.Exec = undefined,
+     count: usize = 0,
+diff --git a/zig/src/families/inkling2/kernels.zig b/zig/src/families/inkling2/kernels.zig
+index dcae77b3..52a87e1c 100644
+--- a/zig/src/families/inkling2/kernels.zig
++++ b/zig/src/families/inkling2/kernels.zig
+@@ -2,7 +2,7 @@
+ const std = @import("std");
+ const cuda = @import("cuda");
+ 
+-pub const Op = enum { mix, finish, rank_sum, logits, quant, swiglu, route, moe_sum, conv, conv_commit, prep, relative, attention, attention_decode, rotate, unrotate, embed, norm, top1, fp4_amax, fp4_quant, embed_shard, embed_pick, split, attention_part, attention_merge };
++pub const Op = enum { mix, finish, rank_sum, logits, quant, swiglu, route, moe_sum, conv, conv_commit, prep, relative, attention, attention_decode, rotate, unrotate, embed, norm, top1, fp4_amax, fp4_quant, embed_shard, embed_pick, split, attention_part, attention_merge, restore };
+ 
+ pub const Mix = extern struct {
+     partial: u64,
+-- 
+2.56.1
+
+
+From d910d2b7cf40eb1b0d327cd464f3ee38afdfb217 Mon Sep 17 00:00:00 2001
+From: LPFchan <me@lost.plus>
+Date: Wed, 18 Nov 2026 04:36:01 +0900
+Subject: [PATCH 12/17] inkling2: verify drafts while their chained chance
+ stays at least TF_INKLING_DRAFT_FLOOR (default 0.6), up to 5 deep
+
+The drafter reports each pick's probability (tf_ik_top1p: one 1024-thread block, float4 loads, online
+logsumexp; 87 -> 17 us) and stops drafting once the chain falls under the floor. A first draft under it
+is not computed in verify. Decode on prose 36-38 -> 39-42 tok/s, code 55 -> 69, 8k context 35 -> 37.
+---
+ zig/kernels/cuda/inkling2_rows.cuh    | 53 +++++++++++++++++++++++++++
+ zig/src/families/inkling2/backend.zig | 41 +++++++++++++++++----
+ zig/src/families/inkling2/draft.zig   | 19 ++++++++--
+ zig/src/families/inkling2/forward.zig | 17 +++++++++
+ zig/src/families/inkling2/kernels.zig |  2 +-
+ zig/src/families/inkling2/link.zig    |  3 +-
+ zig/src/families/inkling2/native.zig  |  9 ++++-
+ zig/src/platform/environment.zig      |  1 +
+ 8 files changed, 130 insertions(+), 15 deletions(-)
+
+diff --git a/zig/kernels/cuda/inkling2_rows.cuh b/zig/kernels/cuda/inkling2_rows.cuh
+index e3f6b393..d9d83c3d 100644
+--- a/zig/kernels/cuda/inkling2_rows.cuh
++++ b/zig/kernels/cuda/inkling2_rows.cuh
+@@ -82,3 +82,56 @@ extern "C" __global__ void tf_ik_top1(const float* x, InklingPick* out, int coun
+     }
+     if (!t) *out = {values[0], (unsigned)(ids[0] + first), (unsigned)bad[0], 0};
+ }
++
++// tf_ik_top1 plus the softmax mass beside the maximum: pad carries sum(exp(x - max)) as float bits, so the host
++// turns the ranks' picks into the winner's probability. One 1024-thread block, float4 loads, online logsumexp.
++struct IkTop {
++    float value, mass;
++    int id, bad;
++};
++__device__ __forceinline__ void ik_top_add(IkTop& t, float v, int i) {
++    if (!isfinite(v)) { t.bad = 1; return; }
++    if (v > t.value) { t.mass = t.mass * __expf(t.value - v) + 1.f; t.value = v; t.id = i; }
++    else { t.mass += __expf(v - t.value); if (v == t.value && i < t.id) t.id = i; }
++}
++__device__ __forceinline__ IkTop ik_top_join(IkTop a, IkTop b) {
++    const float top = fmaxf(a.value, b.value);
++    IkTop r;
++    r.mass = (a.value == -INFINITY ? 0.f : a.mass * __expf(a.value - top)) + (b.value == -INFINITY ? 0.f : b.mass * __expf(b.value - top));
++    const bool take = b.value > a.value || (b.value == a.value && b.id < a.id);
++    r.value = take ? b.value : a.value;
++    r.id = take ? b.id : a.id;
++    r.bad = a.bad | b.bad;
++    return r;
++}
++__device__ __forceinline__ IkTop ik_top_shuffle(IkTop t, int o) {
++    IkTop u;
++    u.value = __shfl_xor_sync(0xffffffffu, t.value, o);
++    u.mass = __shfl_xor_sync(0xffffffffu, t.mass, o);
++    u.id = __shfl_xor_sync(0xffffffffu, t.id, o);
++    u.bad = __shfl_xor_sync(0xffffffffu, t.bad, o);
++    return ik_top_join(t, u);
++}
++extern "C" __global__ void __launch_bounds__(1024) tf_ik_top1p(const float* x, InklingPick* out, int count, int first) {
++    __shared__ IkTop part[32];
++    const int t = threadIdx.x;
++    IkTop top = {-INFINITY, 0.f, 0x7fffffff, 0};
++    const int quads = count / 4;
++    const float4* x4 = reinterpret_cast<const float4*>(x);
++    for (int q = t; q < quads; q += 1024) {
++        const float4 v = x4[q];
++        ik_top_add(top, v.x, 4 * q);
++        ik_top_add(top, v.y, 4 * q + 1);
++        ik_top_add(top, v.z, 4 * q + 2);
++        ik_top_add(top, v.w, 4 * q + 3);
++    }
++    for (int i = 4 * quads + t; i < count; i += 1024) ik_top_add(top, x[i], i);
++    for (int o = 16; o; o >>= 1) top = ik_top_shuffle(top, o);
++    if ((t & 31) == 0) part[t >> 5] = top;
++    __syncthreads();
++    if (t < 32) {
++        top = part[t];
++        for (int o = 16; o; o >>= 1) top = ik_top_shuffle(top, o);
++        if (!t) *out = {top.value, (unsigned)(top.id + first), (unsigned)top.bad, __float_as_uint(top.mass)};
++    }
++}
+diff --git a/zig/src/families/inkling2/backend.zig b/zig/src/families/inkling2/backend.zig
+index 5bf19d78..10c637cd 100644
+--- a/zig/src/families/inkling2/backend.zig
++++ b/zig/src/families/inkling2/backend.zig
+@@ -12,6 +12,8 @@ pub const Backend = struct {
+     filling: usize = 0,
+     token: u32 = 0,
+     held: [7]u32 = undefined,
++    chances: [7]f64 = undefined, // the drafter's probability for each held draft
++    floor: f64 = 0, // TF_INKLING_DRAFT_FLOOR: drafts are verified while their chained chance stays at least this
+     held_n: usize = 0,
+     rounds: usize = 0,
+     verified: usize = 0,
+@@ -19,10 +21,26 @@ pub const Backend = struct {
+     pub fn backend(b: *Backend) be.Backend {
+         return .{ .ptr = b, .vtable = &vtable };
+     }
+-    pub fn facts(drafting: bool) lanes.Model {
+-        return .{ .exact_width = if (drafting) 8 else 1, .gpu_tokens = false, .mtp = drafting, .speculate = drafting, .speculate_early = false, .drafts = if (drafting) 7 else 0, .hidden_rows = false, .batch_rows = 1, .max_streams = 1, .copy_drafts = false };
++    /// With a draft floor every round drafts `confident_depth` and the engine verifies the chained chances at least
++    /// the floor (the first always; verify drops that one too when it is under the floor). The engine cuts a gated
++    /// window to batch_rows, so it is the verify width there.
++    pub fn facts(drafting: bool, floor: f64) lanes.Model {
++        const gated = drafting and floor > 0;
++        return .{ .exact_width = if (drafting) 8 else 1, .gpu_tokens = false, .mtp = drafting, .speculate = drafting, .speculate_early = false, .drafts = if (gated) confident_depth else if (drafting) 7 else 0, .hidden_rows = false, .batch_rows = if (gated) 8 else 1, .max_streams = 1, .copy_drafts = false, .draft_probabilities = gated, .draft_confidence = if (gated) floor else null };
++    }
++    const confident_depth = 5;
++    const vtable: be.Backend.VTable = .{ .prefill = prefill, .prefill_step = step, .first = first, .queue = queue, .read = read, .verify = verify, .keep = keep, .draft = draft, .probabilities = probabilities, .release = release, .reports_fill = true };
++
++    fn probabilities(p: *anyopaque, s: *lanes.Stream, out: []f64) anyerror!bool {
++        const b = self(p);
++        if (b.floor <= 0 or b.active != s or b.held_n == 0) return false;
++        var chain: f64 = 1; // a draft lands only if every one before it does
++        for (out, 0..) |*c, i| {
++            if (i < b.held_n) chain *= b.chances[i] else chain = 0;
++            c.* = chain;
++        }
++        return true;
+     }
+-    const vtable: be.Backend.VTable = .{ .prefill = prefill, .prefill_step = step, .first = first, .queue = queue, .read = read, .verify = verify, .keep = keep, .draft = draft, .release = release, .reports_fill = true };
+     fn self(p: *anyopaque) *Backend {
+         return @ptrCast(@alignCast(p));
+     }
+@@ -101,11 +119,20 @@ pub const Backend = struct {
+         ids[0] = w.pending;
+         const drafts = if (w.held > 0) b.held[0..w.held] else w.tokens;
+         @memcpy(ids[1..][0..drafts.len], drafts);
+-        if (b.peer) |peer| try peer.send(.verify, ids[0..w.rows()], true);
+-        try b.f.verify(ids[0..w.rows()], out[0].sampled);
++        // the engine verifies at least one draft; one under the floor is not computed, and is reported as a token
++        // the target did not pick, so the round ends on the pending row's own pick
++        var rows = w.rows();
++        if (b.floor > 0 and w.held > 0 and b.held_n > 0 and b.chances[0] < b.floor) rows = 1;
++        if (b.peer) |peer| try peer.send(.verify, ids[0..rows], true);
++        try b.f.verify(ids[0..rows], out[0].sampled);
+         b.rounds += 1;
+-        b.verified += w.rows();
++        b.verified += rows;
+         @memcpy(out[0].drafts[0..drafts.len], drafts);
++        if (rows < w.rows()) {
++            const pick = out[0].sampled[rows - 1];
++            out[0].drafts[rows - 1] = if (pick == 0) 1 else 0;
++            for (out[0].sampled[rows..w.rows()]) |*x| x.* = 0;
++        }
+     }
+     fn keep(p: *anyopaque, _: []const be.Window, paths: []const []const u32) anyerror!void {
+         const b = self(p);
+@@ -132,7 +159,7 @@ pub const Backend = struct {
+                 .handle => |v| @as(u32, @intCast(v)),
+             };
+             if (b.peer) |peer| try peer.send(.draft, &.{ anchor, r.depth }, false);
+-            try d.propose(b.f, anchor, r.depth, &b.held);
++            try d.propose(b.f, anchor, r.depth, &b.held, &b.chances);
+             b.held_n = r.depth;
+         }
+     }
+diff --git a/zig/src/families/inkling2/draft.zig b/zig/src/families/inkling2/draft.zig
+index 8add3fff..81975ffa 100644
+--- a/zig/src/families/inkling2/draft.zig
++++ b/zig/src/families/inkling2/draft.zig
+@@ -60,6 +60,7 @@ pub const Draft = struct {
+     residual: u64 = 0,
+     f_rnn: u64 = 0,
+     rnn_input: u64 = 0,
++    floor: f64 = 0, // propose stops once the chained chance falls under it; the rest are held as never-verified
+     projection: u64 = 0,
+     latent: u64 = 0,
+     base_logits: u64 = 0,
+@@ -183,10 +184,11 @@ pub const Draft = struct {
+         try f.k.go(.rank_sum, f.stream, .{ .x = ceil(8 * 4608, 256) }, 256, .{ d.parts, d.residual, @as(i32, 8 * 4608), @as(i32, 2) });
+         try d.go(f, .add, .{ .x = ceil(8 * 4608, 256) }, 256, .{ d.x, d.residual, @as(i32, 8 * 4608) });
+     }
+-    pub fn propose(d: *Draft, f: *Forward, anchor: u32, depth: usize, out: []u32) !void {
++    /// `chances[i]`: the drafter's probability for out[i] (the head's softmax over the whole vocabulary).
++    pub fn propose(d: *Draft, f: *Forward, anchor: u32, depth: usize, out: []u32, chances: []f64) !void {
+         try f.settleDraft();
+         if (d.pos != f.s.pos) return error.InklingDraftPosition;
+-        if (anchor >= cfg.vocabulary or depth > 7 or out.len < depth) return error.InklingDraftRows;
++        if (anchor >= cfg.vocabulary or depth > 7 or out.len < depth or chances.len < depth) return error.InklingDraftRows;
+         if (depth == 0) return;
+         try f.embedding(&.{anchor}, d.x);
+         for (1..8) |r| try f.copy(d.x + r * 4608 * 2, d.mask, 4608 * 2);
+@@ -211,7 +213,13 @@ pub const Draft = struct {
+         try f.product(f.w.head, d.normed, d.base_logits, 8, .bf16);
+         try f.zero(d.rnn_input, 256 * 2);
+         var previous = anchor;
++        var chain: f64 = 1;
+         for (0..depth) |step| {
++            if (chain < d.floor) {
++                out[step] = 0;
++                chances[step] = 0;
++                continue;
++            }
+             try f.copy(d.rnn_input + 256 * 2, d.markov_embed + @as(usize, previous) * 256 * 2, 256 * 2);
+             try f.copy(d.rnn_input + 512 * 2, d.normed + (step + 1) * 4608 * 2, 4608 * 2);
+             try f.copy(d.rnn_input + (512 + 4608) * 2, d.f_rnn, 4608 * 2);
+@@ -220,10 +228,13 @@ pub const Draft = struct {
+             try f.product(d.fold, d.latent, d.correction, 1, .f32);
+             try d.go(f, .logits, .{ .x = ceil(d.fold.n, 256) }, 256, .{ d.base_logits + (step + 1) * d.fold.n * 2, d.correction, d.fold_bias, d.logits, int(d.fold.n) });
+             const first = f.w.share.rank * d.fold.n;
+-            try f.k.go(.top1, f.stream, .{ .x = 1 }, 256, .{ d.logits, d.top1 + f.w.share.rank * 16, int(@min(d.fold.n, cfg.vocabulary - first)), int(first) });
++            try f.k.go(.top1p, f.stream, .{ .x = 1 }, 1024, .{ d.logits, d.top1 + f.w.share.rank * 16, int(@min(d.fold.n, cfg.vocabulary - first)), int(first) });
+             try f.gather(d.top1 + f.w.share.rank * 16, d.top1, 16);
+-            previous = try f.pickAt(d.top1);
++            const pick = try f.pickChance(d.top1);
++            previous = pick.token;
+             out[step] = previous;
++            chances[step] = pick.chance;
++            chain *= pick.chance;
+         }
+     }
+ };
+diff --git a/zig/src/families/inkling2/forward.zig b/zig/src/families/inkling2/forward.zig
+index e48262b4..7fb4d945 100644
+--- a/zig/src/families/inkling2/forward.zig
++++ b/zig/src/families/inkling2/forward.zig
+@@ -408,6 +408,23 @@ pub const Forward = struct {
+         return f.pickAt(f.s.top1);
+     }
+ 
++    /// The drafter's pick with its probability under the full vocabulary (tf_ik_top1p's per-rank mass).
++    pub fn pickChance(f: *Forward, ptr: u64) !struct { token: u32, chance: f64 } {
++        try f.stream.synchronize();
++        if (f.exchange) |e| if (e.group) |g| try g.check();
++        var picks: [2]kern.Pick = undefined;
++        const all = picks[0..f.w.share.world];
++        try cuda.memory.download(f.d, ptr, std.mem.sliceAsBytes(all));
++        var best: kern.Pick = .{ .value = -std.math.inf(f32), .token = std.math.maxInt(u32), .nonfinite = 0, .pad = 0 };
++        for (all) |p| {
++            if (p.nonfinite != 0) return error.NonFiniteLogits;
++            if (p.value > best.value or (p.value == best.value and p.token < best.token)) best = p;
++        }
++        var total: f64 = 0;
++        for (all) |p| total += @as(f64, @as(f32, @bitCast(p.pad))) * @exp(@as(f64, p.value) - @as(f64, best.value));
++        return .{ .token = best.token, .chance = if (total > 0) 1.0 / total else 0 };
++    }
++
+     pub fn pickAt(f: *Forward, ptr: u64) !u32 {
+         try f.stream.synchronize();
+         if (f.exchange) |e| if (e.group) |g| try g.check();
+diff --git a/zig/src/families/inkling2/kernels.zig b/zig/src/families/inkling2/kernels.zig
+index 52a87e1c..7452cd52 100644
+--- a/zig/src/families/inkling2/kernels.zig
++++ b/zig/src/families/inkling2/kernels.zig
+@@ -2,7 +2,7 @@
+ const std = @import("std");
+ const cuda = @import("cuda");
+ 
+-pub const Op = enum { mix, finish, rank_sum, logits, quant, swiglu, route, moe_sum, conv, conv_commit, prep, relative, attention, attention_decode, rotate, unrotate, embed, norm, top1, fp4_amax, fp4_quant, embed_shard, embed_pick, split, attention_part, attention_merge, restore };
++pub const Op = enum { mix, finish, rank_sum, logits, quant, swiglu, route, moe_sum, conv, conv_commit, prep, relative, attention, attention_decode, rotate, unrotate, embed, norm, top1, fp4_amax, fp4_quant, embed_shard, embed_pick, split, attention_part, attention_merge, restore, top1p };
+ 
+ pub const Mix = extern struct {
+     partial: u64,
+diff --git a/zig/src/families/inkling2/link.zig b/zig/src/families/inkling2/link.zig
+index 8e16e340..12481774 100644
+--- a/zig/src/families/inkling2/link.zig
++++ b/zig/src/families/inkling2/link.zig
+@@ -73,7 +73,8 @@ pub const Link = struct {
+                         .draft => {
+                             if (values.len != 2) return error.InklingCommand;
+                             var proposals: [7]u32 = undefined;
+-                            try (f.drafter orelse return error.InklingNoDrafts).propose(f, values[0], values[1], &proposals);
++                            var chances: [7]f64 = undefined;
++                            try (f.drafter orelse return error.InklingNoDrafts).propose(f, values[0], values[1], &proposals, &chances);
+                         },
+                         else => unreachable,
+                     }
+diff --git a/zig/src/families/inkling2/native.zig b/zig/src/families/inkling2/native.zig
+index 3a61e5b7..ff428d8a 100644
+--- a/zig/src/families/inkling2/native.zig
++++ b/zig/src/families/inkling2/native.zig
+@@ -57,6 +57,10 @@ pub fn place() !cfg.Share {
+ }
+ 
+ /// TF_INKLING_EXPERTS: the full checkpoint's folder; set, every rank runs half of every expert (balanced ranks).
++fn draftFloor() !f64 {
++    return environment.read(f64, "TF_INKLING_DRAFT_FLOOR", 0.6);
++}
++
+ fn expertsDir() !?[]const u8 {
+     return environment.path("TF_INKLING_EXPERTS", @import("sys").getenv("TF_INKLING_EXPERTS")) catch {
+         std.log.err("TF_INKLING_EXPERTS: expected the full checkpoint's folder", .{});
+@@ -152,11 +156,12 @@ fn openPair(gpa: std.mem.Allocator, io: std.Io, ctx: *const cuda.Context, dir: [
+     errdefer if (own.draft) |*d| d.deinit();
+     if (o.drafts) {
+         own.draft = try @import("draft.zig").Draft.init(gpa, io, ctx.d, dir, share, o.context, own.s.rows, if (quant) |*q| q else null);
++        own.draft.?.floor = try draftFloor();
+         own.f.drafter = &own.draft.?;
+         own.f.verify_check = try environment.read(bool, "TF_INKLING_VERIFY_CHECK", false);
+         try own.f.prepareVerify();
+     }
+-    own.b = .{ .f = &own.f, .peer = &own.peer.? };
++    own.b = .{ .f = &own.f, .peer = &own.peer.?, .floor = try draftFloor() };
+     const bytes = try manifest(gpa, io, dir);
+     defer gpa.free(bytes);
+     var digest: [32]u8 = undefined;
+@@ -171,7 +176,7 @@ fn openPair(gpa: std.mem.Allocator, io: std.Io, ctx: *const cuda.Context, dir: [
+         release(own);
+         std.c._exit(0);
+     }
+-    return .{ .backend = own.b.backend(), .facts = backend.Backend.facts(o.drafts), .rows = if (o.drafts) 8 else 1, .stream_bytes = kv, .ctx = own, .deinit = release, .target = own };
++    return .{ .backend = own.b.backend(), .facts = backend.Backend.facts(o.drafts, try draftFloor()), .rows = if (o.drafts) 8 else 1, .stream_bytes = kv, .ctx = own, .deinit = release, .target = own };
+ }
+ 
+ fn release(p: *anyopaque) void {
+diff --git a/zig/src/platform/environment.zig b/zig/src/platform/environment.zig
+index 2351961d..0872392e 100644
+--- a/zig/src/platform/environment.zig
++++ b/zig/src/platform/environment.zig
+@@ -32,6 +32,7 @@ pub fn isReal(kind: Kind) bool {
+ pub const rules = [_]Rule{
+     .{ .name = "TF_INKLING_FP4", .scope = .cuda, .kind = .word, .words = &.{ "off", "attn", "all" }, .forms = "off, attn (Q, K, V, R, gate and O as NVFP4) or all (also the output head)" },
+     .{ .name = "TF_INKLING_EXPERTS", .scope = .cuda, .kind = .path, .forms = "the full Inkling checkpoint folder without control characters (every rank then runs half of every expert)" },
++    .{ .name = "TF_INKLING_DRAFT_FLOOR", .scope = .cuda, .kind = .real, .max = 1, .forms = "a chained draft chance from 0 to 1 (default 0.6: drafts under it are not verified or drafted further; 0 keeps the acceptance-rate depth rule)" },
+     .{ .name = "TF_INKLING_GRAPHS", .scope = .cuda, .kind = .flag, .forms = "0 or 1 (default 1: one-token and verify steps replay CUDA graphs)" },
+     .{ .name = "TF_INKLING_VERIFY_CHECK", .scope = .cuda, .kind = .flag, .forms = "0 or 1" },
+     .{ .name = "TF_INKLING_RANK", .scope = .cuda, .kind = .u32, .max = 1, .forms = "rank 0 or 1" },
+-- 
+2.56.1
+
+
+From b723bd4b0aaa55e93437decdc35f0e9e045f265d Mon Sep 17 00:00:00 2001
+From: LPFchan <me@lost.plus>
+Date: Wed, 18 Nov 2026 04:36:01 +0900
+Subject: [PATCH 13/17] environment tests: valid forms for TF_INKLING_FP4,
+ EXPERTS, GRAPHS and DRAFT_FLOOR
+
+---
+ zig/src/platform/environment_test.zig | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/zig/src/platform/environment_test.zig b/zig/src/platform/environment_test.zig
+index 046db04f..b150590f 100644
+--- a/zig/src/platform/environment_test.zig
++++ b/zig/src/platform/environment_test.zig
+@@ -70,6 +70,13 @@ const valid = [_]Case{
+     .{ .name = "TF_ROCE_GID_INDEX", .raw = "2147483647", .n = 2147483647 },
+     .{ .name = "TF_INKLING_VERIFY_CHECK", .raw = "0", .n = 0 },
+     .{ .name = "TF_INKLING_VERIFY_CHECK", .raw = "1", .n = 1 },
++    .{ .name = "TF_INKLING_FP4", .raw = "off", .n = 0 },
++    .{ .name = "TF_INKLING_FP4", .raw = "all", .n = 2 },
++    .{ .name = "TF_INKLING_EXPERTS", .raw = "/models/inkling2/exl3", .n = 0 },
++    .{ .name = "TF_INKLING_GRAPHS", .raw = "0", .n = 0 },
++    .{ .name = "TF_INKLING_GRAPHS", .raw = "1", .n = 1 },
++    .{ .name = "TF_INKLING_DRAFT_FLOOR", .raw = "0", .n = 0 },
++    .{ .name = "TF_INKLING_DRAFT_FLOOR", .raw = "0.6", .n = @bitCast(@as(f64, 0.6)) },
+     .{ .name = "TF_INKLING_RANK", .raw = "0", .n = 0 },
+     .{ .name = "TF_INKLING_RANK", .raw = "1", .n = 1 },
+     .{ .name = "TF_INKLING_WORLD", .raw = "1", .n = 1 },
+-- 
+2.56.1
+
+
+From afec536d2fca51b7496bfe1638b53892f571c90b Mon Sep 17 00:00:00 2001
+From: LPFchan <me@lost.plus>
+Date: Wed, 18 Nov 2026 04:50:40 +0900
+Subject: [PATCH 14/17] inkling2: peer records carry up to 12 ids in the header
+ (one broadcast each); keep rides with the next draft
+
+Rank 1 no longer drains its stream between the keep and the draft, so it queues ingest and drafting back to
+back like rank 0. Rank 0's first drafter gather waits 0.72 -> 0.41 ms a round.
+---
+ zig/src/families/inkling2/backend.zig | 23 ++++++++++++++-----
+ zig/src/families/inkling2/link.zig    | 32 +++++++++++++++++----------
+ 2 files changed, 38 insertions(+), 17 deletions(-)
+
+diff --git a/zig/src/families/inkling2/backend.zig b/zig/src/families/inkling2/backend.zig
+index 10c637cd..688c40c9 100644
+--- a/zig/src/families/inkling2/backend.zig
++++ b/zig/src/families/inkling2/backend.zig
+@@ -15,6 +15,7 @@ pub const Backend = struct {
+     chances: [7]f64 = undefined, // the drafter's probability for each held draft
+     floor: f64 = 0, // TF_INKLING_DRAFT_FLOOR: drafts are verified while their chained chance stays at least this
+     held_n: usize = 0,
++    pending_keep: u32 = 0, // a keep not yet sent to the peer: it rides with the next draft as one record
+     rounds: usize = 0,
+     verified: usize = 0,
+ 
+@@ -45,12 +46,24 @@ pub const Backend = struct {
+         return @ptrCast(@alignCast(p));
+     }
+ 
++    /// Every record to the peer goes through here, after any keep still held back.
++    fn tell(b: *Backend, kind: link.Kind, ids: []const u32, final: bool) !void {
++        const p = b.peer orelse return;
++        if (b.pending_keep > 0) {
++            const count = b.pending_keep;
++            b.pending_keep = 0;
++            if (kind == .draft) return p.send(.keep_draft, &.{ count, ids[0], ids[1] }, final);
++            try p.send(.keep, &.{count}, false);
++        }
++        try p.send(kind, ids, final);
++    }
++
+     fn begin(b: *Backend, s: *lanes.Stream) !void {
+         if (b.active != null and b.active != s) return error.InklingBusy;
+         if (s.images.len > 0) return error.InklingTextOnly;
+         if (s.sampling) |sp| if (sp.temperature > 0) return error.InklingGreedyOnly;
+         if (s.prompt().len == 0 or s.prompt().len + s.max_new > b.f.s.context) return error.InklingContext;
+-        if (b.peer) |p| try p.send(.begin, &.{}, false);
++        try b.tell(.begin, &.{}, false);
+         try b.f.clear();
+         b.active = s;
+         b.filling = 0;
+@@ -62,7 +75,7 @@ pub const Backend = struct {
+     }
+ 
+     fn run(b: *Backend, ids: []const u32, final: bool) !void {
+-        if (b.peer) |p| try p.send(.rows, ids, final);
++        try b.tell(.rows, ids, final);
+         try b.f.run(ids, final);
+         if (final) b.token = try b.f.pick();
+     }
+@@ -123,7 +136,7 @@ pub const Backend = struct {
+         // the target did not pick, so the round ends on the pending row's own pick
+         var rows = w.rows();
+         if (b.floor > 0 and w.held > 0 and b.held_n > 0 and b.chances[0] < b.floor) rows = 1;
+-        if (b.peer) |peer| try peer.send(.verify, ids[0..rows], true);
++        try b.tell(.verify, ids[0..rows], true);
+         try b.f.verify(ids[0..rows], out[0].sampled);
+         b.rounds += 1;
+         b.verified += rows;
+@@ -143,7 +156,7 @@ pub const Backend = struct {
+             if (path.len != 1) return error.InklingNoDrafts;
+             return;
+         }
+-        if (b.peer) |peer| try peer.send(.keep, &.{@intCast(path.len)}, false);
++        if (b.peer != null) b.pending_keep = @intCast(path.len);
+         try b.f.keep(path.len);
+     }
+     fn draft(p: *anyopaque, requests: []const be.DraftRequest) anyerror!void {
+@@ -158,7 +171,7 @@ pub const Backend = struct {
+                 .value => |v| v,
+                 .handle => |v| @as(u32, @intCast(v)),
+             };
+-            if (b.peer) |peer| try peer.send(.draft, &.{ anchor, r.depth }, false);
++            try b.tell(.draft, &.{ anchor, @intCast(r.depth) }, false);
+             try d.propose(b.f, anchor, r.depth, &b.held, &b.chances);
+             b.held_n = r.depth;
+         }
+diff --git a/zig/src/families/inkling2/link.zig b/zig/src/families/inkling2/link.zig
+index 12481774..d989ed85 100644
+--- a/zig/src/families/inkling2/link.zig
++++ b/zig/src/families/inkling2/link.zig
+@@ -3,8 +3,10 @@ const std = @import("std");
+ const cuda = @import("cuda");
+ const forward = @import("forward.zig");
+ 
+-pub const Kind = enum(u32) { begin = 1, rows, end, verify, keep, draft };
+-const Header = extern struct { kind: u32, rows: u32 = 0, final: u32 = 0, reserved: u32 = 0 };
++pub const Kind = enum(u32) { begin = 1, rows, end, verify, keep, draft, keep_draft };
++/// Up to `inline_ids` ids ride in the header itself, so a verify, keep or draft record is one broadcast.
++const inline_ids = 12;
++const Header = extern struct { kind: u32, rows: u32 = 0, final: u32 = 0, reserved: u32 = 0, ids: [inline_ids]u32 = @splat(0) };
+ 
+ pub const Link = struct {
+     d: *const cuda.Driver,
+@@ -30,10 +32,11 @@ pub const Link = struct {
+ 
+     pub fn send(l: *Link, kind: Kind, ids: []const u32, final: bool) !void {
+         if (ids.len * 4 > l.ids.len) return error.InklingCommandRows;
+-        const header: Header = .{ .kind = @backingInt(kind), .rows = @intCast(ids.len), .final = @intFromBool(final) };
++        var header: Header = .{ .kind = @backingInt(kind), .rows = @intCast(ids.len), .final = @intFromBool(final) };
++        if (ids.len <= inline_ids) @memcpy(header.ids[0..ids.len], ids);
+         try cuda.copy_source.enqueue(l.d, l.header.ptr, std.mem.asBytes(&header), l.stream);
+         try l.broadcast(l.header.ptr, @sizeOf(Header));
+-        if (ids.len > 0) {
++        if (ids.len > inline_ids) {
+             try cuda.copy_source.enqueue(l.d, l.ids.ptr, std.mem.sliceAsBytes(ids), l.stream);
+             try l.broadcast(l.ids.ptr, ids.len * 4);
+         }
+@@ -54,12 +57,14 @@ pub const Link = struct {
+                     if (header.rows != 0) return error.InklingCommand;
+                     try f.clear();
+                 },
+-                .rows, .verify, .keep, .draft => {
++                .rows, .verify, .keep, .draft, .keep_draft => {
+                     if (header.rows == 0 or header.rows > ids.len or header.final > 1) return error.InklingCommand;
+                     const values = ids[0..header.rows];
+-                    try l.broadcast(l.ids.ptr, values.len * 4);
+-                    try l.stream.synchronize();
+-                    try l.ids.download(0, std.mem.sliceAsBytes(values));
++                    if (values.len <= inline_ids) @memcpy(values, header.ids[0..values.len]) else {
++                        try l.broadcast(l.ids.ptr, values.len * 4);
++                        try l.stream.synchronize();
++                        try l.ids.download(0, std.mem.sliceAsBytes(values));
++                    }
+                     switch (kind) {
+                         .rows => try f.run(values, header.final != 0),
+                         .verify => {
+@@ -70,11 +75,14 @@ pub const Link = struct {
+                             if (values.len != 1) return error.InklingCommand;
+                             try f.keep(values[0]);
+                         },
+-                        .draft => {
+-                            if (values.len != 2) return error.InklingCommand;
++                        .draft, .keep_draft => {
++                            // keep_draft: the keep and the next draft in one record, queued back to back as on rank 0
++                            const extra: usize = @intFromBool(kind == .keep_draft);
++                            if (values.len != 2 + extra) return error.InklingCommand;
++                            if (kind == .keep_draft) try f.keep(values[0]);
+                             var proposals: [7]u32 = undefined;
+                             var chances: [7]f64 = undefined;
+-                            try (f.drafter orelse return error.InklingNoDrafts).propose(f, values[0], values[1], &proposals, &chances);
++                            try (f.drafter orelse return error.InklingNoDrafts).propose(f, values[extra], values[extra + 1], &proposals, &chances);
+                         },
+                         else => unreachable,
+                     }
+@@ -86,5 +94,5 @@ pub const Link = struct {
+ };
+ 
+ test "the paired forward header is fixed-size and contains no process-local pointers" {
+-    try std.testing.expectEqual(@as(usize, 16), @sizeOf(Header));
++    try std.testing.expectEqual(@as(usize, 64), @sizeOf(Header));
+ }
+-- 
+2.56.1
+
+
+From e4ca0d94d29e48cd30505322736329ef395e43dd Mon Sep 17 00:00:00 2001
+From: LPFchan <me@lost.plus>
+Date: Wed, 18 Nov 2026 05:23:05 +0900
+Subject: [PATCH 15/17] server: TENSORFOLD_KEYS_MODEL, a model id whose
+ requests carry keys to the engine for its per-request edit
+
+The same plumbing as our DeepSeek keys switch: the id is listed beside the served name, its requests set
+Request.keys through Spec and Stream, and its cache key's first token is tagged so no prompt cache state
+crosses between the two names.
+---
+ zig/src/core/engine_api.zig     |  2 ++
+ zig/src/core/lane_host_lone.zig |  2 +-
+ zig/src/core/lane_stream.zig    |  1 +
+ zig/src/core/lanes/stream.zig   |  3 +++
+ zig/src/server/chat.zig         | 13 +++++++++++++
+ zig/src/server/openai.zig       |  8 ++++++++
+ zig/src/server/serve.zig        |  5 ++++-
+ zig/src/server/server.zig       |  3 +++
+ 8 files changed, 35 insertions(+), 2 deletions(-)
+
+diff --git a/zig/src/core/engine_api.zig b/zig/src/core/engine_api.zig
+index 8ea65275..dbc18b81 100644
+--- a/zig/src/core/engine_api.zig
++++ b/zig/src/core/engine_api.zig
+@@ -77,6 +77,8 @@ pub const Request = struct {
+     loop_guard: bool = false,
+     /// With ``loop_guard``: the reply ends where the guard fires, with no forced close and no answer after it.
+     loop_stop: bool = false,
++    /// The served model's per-request edit (the server's TENSORFOLD_KEYS_MODEL); its cache_key is tagged.
++    keys: bool = false,
+     /// The prompt row (the assistant header's last) where routed lessons decide whether they act (null: none acts).
+     decide: ?u32 = null,
+     /// The model as shipped: no learned neuron acts on its rows, no prompt state is kept or reused (a lesson's writer).
+diff --git a/zig/src/core/lane_host_lone.zig b/zig/src/core/lane_host_lone.zig
+index 46cbf317..5222fbf9 100644
+--- a/zig/src/core/lane_host_lone.zig
++++ b/zig/src/core/lane_host_lone.zig
+@@ -15,7 +15,7 @@ fn takes(h: *LaneHost, job: *Job) bool {
+     const r = job.request;
+     const lone = h.lone orelse return false;
+     const think = lone.min_budget > 0 and (r.think_budget == 0 or r.think_budget > lone.min_budget);
+-    return !((r.sampling != null and !lone.sampled) or (!r.drafts and !lone.plain) or ((r.think_budget > 0 or r.loop_guard) and !think) or r.call != null or (r.structure != null and !lone.structures) or (r.images.len > 0 and !lone.images) or (r.logprobs != null and !lone.logprobs) or r.prompt_logprobs != null);
++    return !((r.sampling != null and !lone.sampled) or (!r.drafts and !lone.plain) or ((r.think_budget > 0 or r.loop_guard) and !think) or r.keys or r.call != null or (r.structure != null and !lone.structures) or (r.images.len > 0 and !lone.images) or (r.logprobs != null and !lone.logprobs) or r.prompt_logprobs != null);
+ }
+ 
+ /// After a round: the lane core's last live stream goes back to the driver when nothing else waits or is due.
+diff --git a/zig/src/core/lane_stream.zig b/zig/src/core/lane_stream.zig
+index 1bb925b1..d65f1711 100644
+--- a/zig/src/core/lane_stream.zig
++++ b/zig/src/core/lane_stream.zig
+@@ -58,6 +58,7 @@ pub fn open(h: *LaneHost, job: *Job) bool {
+         .prompt_logprobs = r.prompt_logprobs,
+         .loop_guard = r.loop_guard,
+         .loop_stop = r.loop_stop,
++        .keys = r.keys,
+         .chunks = r.chunks,
+         .history_len = r.history_len,
+         .shared_prefixes = r.shared_prefixes,
+diff --git a/zig/src/core/lanes/stream.zig b/zig/src/core/lanes/stream.zig
+index baff3bd3..437ec087 100644
+--- a/zig/src/core/lanes/stream.zig
++++ b/zig/src/core/lanes/stream.zig
+@@ -135,6 +135,7 @@ pub const Spec = struct {
+     answer_max: u32 = 0, // reply tokens after `think_end` at most, within `max_new` (0: `max_new` alone)
+     loop_guard: bool = false,
+     loop_stop: bool = false, // with loop_guard: finish where it fires instead of forcing the close
++    keys: bool = false, // the family's per-request edit (TENSORFOLD_KEYS_MODEL); false: the model as served
+     chunks: []const u32 = &.{}, // where prefill chunks start after 0 (Python's PrefillPlan); empty: the backend's step
+     history_len: u32 = 0, // prompt prefix lengths a backend may keep for a later turn: the rendered history,
+     shared_prefixes: []const u32 = &.{}, // then shared system blocks
+@@ -171,6 +172,7 @@ pub const Stream = struct {
+     answer_max: u32,
+     answer_from: ?usize = null, // emitted() index after the first `think_end`: the answer starts there
+     loop_guard: bool,
++    keys: bool = false,
+     loop_stop: bool = false,
+     loop_period: ?u32 = null,
+     long_loop: long_loop.Index = .{}, // the reasoning's runs, for passages repeated verbatim (long_loop.zig)
+@@ -269,6 +271,7 @@ pub const Stream = struct {
+             .think_open = spec.think_open orelse (spec.think_budget > 0 or (spec.loop_guard and spec.think_end >= 0)),
+             .answer_max = spec.answer_max,
+             .loop_guard = spec.loop_guard,
++            .keys = spec.keys,
+             .loop_stop = spec.loop_stop,
+             .chunks = spec.chunks,
+             .history_len = spec.history_len,
+diff --git a/zig/src/server/chat.zig b/zig/src/server/chat.zig
+index 36f37f1a..183025e3 100644
+--- a/zig/src/server/chat.zig
++++ b/zig/src/server/chat.zig
+@@ -115,6 +115,9 @@ test "Server recovery: token staging allocation failure ends the loop without co
+ }
+ 
+ /// Python's ``bool(fields.get(key))`` on the sampling fields.
++/// The keys model's cache-key tag (Request.keys).
++pub const keys_tag: u32 = 0x8000_0000;
++
+ fn flag(f: Value, key: []const u8) ?bool {
+     const v = f.get(key) orelse return null;
+     if (v == .null) return null;
+@@ -201,6 +204,16 @@ pub fn prepare(srv: *Server, cx: *Cx, input: Input, gone: anytype) Failure!Prepa
+         .cache_key = rendered.cache_key,
+     };
+     try srv.checkFeatures(cx, f, input.tools.len > 0, reasoning, rendered.ids, input.tools, &request);
++    if (flag(f, "tf_keys") orelse false) {
++        // the keys model's states are its own: its cache key's first token is tagged (bit 31: no token id has it), so
++        // the prompt cache and its joins never resume one variant's state for the other
++        request.keys = true;
++        if (request.images.len == 0 or request.cache_key.len > 0) {
++            const key = try a.dupe(u32, request.cacheKey());
++            if (key.len > 0) key[0] |= keys_tag;
++            request.cache_key = key;
++        }
++    }
+     server_mod.nameStructure(input.format, &request);
+     errdefer srv.release(false, request);
+     if (reasoning) {
+diff --git a/zig/src/server/openai.zig b/zig/src/server/openai.zig
+index bb85757f..d1f9c758 100644
+--- a/zig/src/server/openai.zig
++++ b/zig/src/server/openai.zig
+@@ -108,6 +108,13 @@ pub fn wrapError(a: Allocator, body: Value) Allocator.Error!Value {
+ }
+ 
+ /// The id a reply names: the one asked for when this endpoint answers to it, else the served name.
++/// Whether the request names the keys model (Config.keys_model, TENSORFOLD_KEYS_MODEL).
++pub fn keysAsked(srv: *const Server, body: Value) bool {
++    if (srv.config.keys_model.len == 0) return false;
++    const m = body.get("model") orelse return false;
++    return m == .string and std.mem.eql(u8, m.string, srv.config.keys_model);
++}
++
+ pub fn replyModel(srv: *const Server, body: Value) []const u8 {
+     if (body.get("model")) |m| if (m == .string) for (srv.config.model_ids) |known| if (std.mem.eql(u8, known, m.string)) return m.string;
+     return srv.config.served_name;
+@@ -162,6 +169,7 @@ pub fn plan(srv: *Server, cx: *Cx, is_chat: bool, raw: Value, format: ?[]const u
+     const thinking = try fields.thinkingFields(cx, body, srv.effort_levels);
+     if (thinking.effort) |e| try sampling.put(cx.a, "reasoning_effort", .{ .string = e });
+     if (thinking.enable) |on| try sampling.put(cx.a, "enable_thinking", .{ .bool = on });
++    if (keysAsked(srv, body)) try sampling.put(cx.a, "tf_keys", .{ .bool = true });
+     if (thinking.clear) |c| try sampling.put(cx.a, "clear_thinking", .{ .bool = c });
+     input.fields = .{ .object = sampling };
+     input.explicit_off = client_thinking and !(thinking.enable orelse true);
+diff --git a/zig/src/server/serve.zig b/zig/src/server/serve.zig
+index b2cba36b..d5b02cfc 100644
+--- a/zig/src/server/serve.zig
++++ b/zig/src/server/serve.zig
+@@ -147,7 +147,9 @@ pub fn run(gpa: Allocator, io: std.Io, args: cli.Args, s: Setup) u8 {
+     defer store.deinit();
+     if (!store.enabled() and !auth.loopback(args.host)) log.line("warning: non-loopback server has no API key; requests are open", .{});
+     var ids: std.ArrayList([]const u8) = .empty;
+-    for ([_][]const []const u8{ &.{s.served}, args.alias }) |group| for (group) |raw| {
++    // TENSORFOLD_KEYS_MODEL: a model id of its own for the engine's per-request edit
++    const keys_model = std.mem.trim(u8, env(s, "TENSORFOLD_KEYS_MODEL") orelse "", " \t\r\n");
++    for ([_][]const []const u8{ &.{s.served}, args.alias, &.{keys_model} }) |group| for (group) |raw| {
+         const id = std.mem.trim(u8, raw, " \t\r\n");
+         if (id.len == 0) continue;
+         for (ids.items) |seen| {
+@@ -187,6 +189,7 @@ pub fn run(gpa: Allocator, io: std.Io, args: cli.Args, s: Setup) u8 {
+         .voices_dir = args.voices,
+         .default_voice = args.default_voice,
+         .model_ids = ids.items,
++        .keys_model = keys_model,
+         .background_ids = backgrounds,
+         .default_max_tokens = args.max_tokens,
+         .enable_thinking = args.thinking,
+diff --git a/zig/src/server/server.zig b/zig/src/server/server.zig
+index 820d6556..872b9c1b 100644
+--- a/zig/src/server/server.zig
++++ b/zig/src/server/server.zig
+@@ -49,6 +49,9 @@ pub const Config = struct {
+     default_voice: []const u8 = "default",
+     /// The served name first, then aliases, without repeats.
+     model_ids: []const []const u8,
++    /// TENSORFOLD_KEYS_MODEL: the model id whose requests take the engine's per-request edit (listed in model_ids);
++    /// empty: none.
++    keys_model: []const u8 = "",
+     /// Ids a request may name for background priority by default (--name-priority); each is in model_ids.
+     background_ids: []const []const u8 = &.{},
+     default_max_tokens: i64 = 4096,
+-- 
+2.56.1
+
+
+From 2fe1103f1c0877e578abdfc1d6cda853c2af9594 Mon Sep 17 00:00:00 2001
+From: LPFchan <me@lost.plus>
+Date: Wed, 18 Nov 2026 05:23:05 +0900
+Subject: [PATCH 16/17] inkling2: TF_INKLING_EDIT, OpenUncensored's refusal
+ edit for requests that ask (TENSORFOLD_KEYS_MODEL)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+y -= s E (Eᵀ y) on each edited layer's summed attention and MoE outputs, one small kernel a site, launched only
+for streams that take the edit; they replay graphs of their own, so the stock model's launches and bits are
+unchanged. Rank 1 learns the choice from the begin record.
+---
+ zig/kernels/cuda/inkling2_residual.cuh | 30 ++++++++++++++++++
+ zig/src/families/inkling2/backend.zig  |  4 ++-
+ zig/src/families/inkling2/edit.zig     | 44 ++++++++++++++++++++++++++
+ zig/src/families/inkling2/forward.zig  | 26 ++++++++++++---
+ zig/src/families/inkling2/kernels.zig  |  2 +-
+ zig/src/families/inkling2/link.zig     |  4 ++-
+ zig/src/families/inkling2/native.zig   | 16 ++++++++++
+ zig/src/platform/environment.zig       |  1 +
+ zig/src/platform/environment_test.zig  |  1 +
+ 9 files changed, 121 insertions(+), 7 deletions(-)
+ create mode 100644 zig/src/families/inkling2/edit.zig
+
+diff --git a/zig/kernels/cuda/inkling2_residual.cuh b/zig/kernels/cuda/inkling2_residual.cuh
+index 5052a301..be1fa921 100644
+--- a/zig/kernels/cuda/inkling2_residual.cuh
++++ b/zig/kernels/cuda/inkling2_residual.cuh
+@@ -143,6 +143,36 @@ extern "C" __global__ void tf_ik_rank_sum(const float* parts, bf16* out, int cou
+     out[i] = b(v);
+ }
+ 
++// The refusal edit y -= s·E(Eᵀy) on each row of y, in place (one 512-thread block a row, width at most 4608):
++// E fp32 [width][ek] orthonormal columns, ek at most 4. Launched only for requests that take the edit.
++extern "C" __global__ void __launch_bounds__(512) tf_ik_edit(bf16* y, int width, const float* E, int ek, float s) {
++    __shared__ float part[16][4];
++    bf16* row = y + (size_t)blockIdx.x * width;
++    float v[9], c[4] = {0.f, 0.f, 0.f, 0.f};
++    for (int k = 0; k < 9; ++k) {
++        const int i = threadIdx.x + k * 512;
++        v[k] = i < width ? f(row[i]) : 0.f;
++        if (i < width) for (int j = 0; j < ek; ++j) c[j] += E[(size_t)i * ek + j] * v[k];
++    }
++    for (int j = 0; j < ek; ++j) {
++        for (int o = 16; o; o >>= 1) c[j] += __shfl_xor_sync(0xffffffffu, c[j], o);
++        if ((threadIdx.x & 31) == 0) part[threadIdx.x >> 5][j] = c[j];
++    }
++    __syncthreads();
++    for (int j = 0; j < ek; ++j) {
++        float t = 0.f;
++        for (int w = 0; w < 16; ++w) t += part[w][j];
++        c[j] = t;
++    }
++    for (int k = 0; k < 9; ++k) {
++        const int i = threadIdx.x + k * 512;
++        if (i >= width) continue;
++        float p = 0.f;
++        for (int j = 0; j < ek; ++j) p += E[(size_t)i * ek + j] * c[j];
++        row[i] = b(v[k] - s * p);
++    }
++}
++
+ extern "C" __global__ void tf_ik_logits(float* out, int n) {
+     const int i = blockIdx.x * blockDim.x + threadIdx.x;
+     if (i < n) out[i] = 30.f * tanhf(out[i] / 30.f);
+diff --git a/zig/src/families/inkling2/backend.zig b/zig/src/families/inkling2/backend.zig
+index 688c40c9..2d4afbc6 100644
+--- a/zig/src/families/inkling2/backend.zig
++++ b/zig/src/families/inkling2/backend.zig
+@@ -63,8 +63,10 @@ pub const Backend = struct {
+         if (s.images.len > 0) return error.InklingTextOnly;
+         if (s.sampling) |sp| if (sp.temperature > 0) return error.InklingGreedyOnly;
+         if (s.prompt().len == 0 or s.prompt().len + s.max_new > b.f.s.context) return error.InklingContext;
+-        try b.tell(.begin, &.{}, false);
++        if (s.keys and b.f.edit == null) return error.InklingNoEdit;
++        try b.tell(.begin, &.{@intFromBool(s.keys)}, false);
+         try b.f.clear();
++        try b.f.setEdit(s.keys);
+         b.active = s;
+         b.filling = 0;
+         b.held_n = 0;
+diff --git a/zig/src/families/inkling2/edit.zig b/zig/src/families/inkling2/edit.zig
+new file mode 100644
+index 00000000..3dbc0319
+--- /dev/null
++++ b/zig/src/families/inkling2/edit.zig
+@@ -0,0 +1,44 @@
++//! The refusal edit at run time: y -= s E (Eᵀ y) on each layer's summed attention and MoE outputs, which equals editing
++//! wo and every expert's w2 as W' = W - s E Eᵀ W. TF_INKLING_EDIT names tools/export_edit.py's directory: edit.json
++//! {"hidden", "rank", "s_attn", "s_mlp"} and q.f32 (E [hidden][rank] fp32, orthonormal columns, rank at most 4).
++//! Loaded, it runs only for requests that ask (the server's TENSORFOLD_KEYS_MODEL), from their own captured graphs.
++const std = @import("std");
++const cuda = @import("cuda");
++const cfg = @import("config.zig");
++
++const Meta = struct { hidden: usize, rank: usize, s_attn: []const f32, s_mlp: []const f32 };
++
++pub const Edit = struct {
++    buf: cuda.DeviceBuffer, // E
++    rank: u32,
++    s: [cfg.layers][2]f32, // per layer: the attention output's strength, the MoE output's (0: that site unedited)
++
++    pub fn e(x: *const Edit) u64 {
++        return x.buf.ptr;
++    }
++    pub fn deinit(x: *Edit) void {
++        x.buf.free();
++    }
++
++    pub fn load(gpa: std.mem.Allocator, io: std.Io, d: *const cuda.Driver, path: []const u8) !Edit {
++        var dir = try std.Io.Dir.cwd().openDir(io, path, .{});
++        defer dir.close(io);
++        const text = try dir.readFileAlloc(io, "edit.json", gpa, .limited(1 << 20));
++        defer gpa.free(text);
++        var doc = try std.json.parseFromSlice(Meta, gpa, text, .{ .ignore_unknown_fields = true });
++        defer doc.deinit();
++        const m = doc.value;
++        if (m.hidden != cfg.hidden or m.rank == 0 or m.rank > 4 or m.s_attn.len != cfg.layers or m.s_mlp.len != cfg.layers) {
++            std.log.err("TF_INKLING_EDIT: the edit is for hidden {d}, rank {d}, {d} layers", .{ m.hidden, m.rank, m.s_attn.len });
++            return error.InklingEdit;
++        }
++        const q = try dir.readFileAlloc(io, "q.f32", gpa, .limited(1 << 26));
++        defer gpa.free(q);
++        if (q.len != m.hidden * m.rank * 4) return error.InklingEdit;
++        var x: Edit = .{ .buf = try cuda.DeviceBuffer.alloc(d, q.len), .rank = @intCast(m.rank), .s = undefined };
++        errdefer x.buf.free();
++        try x.buf.upload(0, q);
++        for (&x.s, m.s_attn, m.s_mlp) |*s, a, b| s.* = .{ a, b };
++        return x;
++    }
++};
+diff --git a/zig/src/families/inkling2/forward.zig b/zig/src/families/inkling2/forward.zig
+index 7fb4d945..741d8526 100644
+--- a/zig/src/families/inkling2/forward.zig
++++ b/zig/src/families/inkling2/forward.zig
+@@ -25,6 +25,8 @@ pub const Forward = struct {
+     dense_reported: bool = false,
+     blas_version: usize = 0,
+     drafter: ?*@import("draft.zig").Draft = null,
++    edit: ?*const @import("edit.zig").Edit = null, // TF_INKLING_EDIT
++    editing: bool = false, // this request takes the edit: its own set of captured graphs
+     verifying: bool = false,
+     verify_start: usize = 0,
+     history_offset: usize = 0,
+@@ -37,7 +39,7 @@ pub const Forward = struct {
+     graphs_on: bool = false, // TF_INKLING_GRAPHS: one-token and verify steps replay a captured graph per row count
+     graphing: bool = false, // capturing: ids and position come from the device
+     pos_dev: ?cuda.DeviceBuffer = null,
+-    graphs: [9][2]?Chain = @splat(@splat(null)),
++    graphs: [2][9][2]?Chain = @splat(@splat(@splat(null))), // [editing][rows][verifying]
+     chain: ?*Chain = null,
+     restore_table: ?cuda.DeviceBuffer = null, // keep(): every conv history's segment in a draft snapshot row
+     restore_segments: usize = 0, // capturing: where the forward is cut into launchable pieces
+@@ -47,7 +49,7 @@ pub const Forward = struct {
+         f.plans.deinit(f.gpa);
+         if (f.verify_mod) |*m| m.unload();
+         if (f.audit) |*a| a.deinit();
+-        for (&f.graphs) |*row| for (row) |*g| if (g.*) |*c| c.deinit();
++        for (&f.graphs) |*set| for (set) |*row| for (row) |*g| if (g.*) |*c| c.deinit();
+         if (f.restore_table) |*t| t.free();
+         if (f.pos_dev) |*p| p.free();
+     }
+@@ -164,6 +166,20 @@ pub const Forward = struct {
+         try f.k.go(.unrotate, f.stream, .{ .x = @intCast(pairs), .y = @intCast(m.n / 128) }, 32, .{ f.s.z, f.s.picks, m.svh, output, int(pairs), int(m.n), int(splits), int(count) });
+     }
+ 
++    /// Between requests: whether the next one takes the refusal edit (it must be loaded to take it).
++    pub fn setEdit(f: *Forward, on: bool) !void {
++        if (on and f.edit == null) return error.InklingNoEdit;
++        f.editing = on;
++    }
++
++    /// While the request takes the edit: y -= s E (Eᵀ y) on this layer's summed site (0: attention output, 1: MoE).
++    fn applyEdit(f: *Forward, index: usize, site: usize, y: u64, rows: usize) !void {
++        if (!f.editing) return;
++        const e = f.edit.?;
++        const s = e.s[index][site];
++        if (s != 0) try f.k.go(.edit, f.stream, .{ .x = @intCast(rows) }, 512, .{ y, @as(i32, cfg.hidden), e.e(), @as(i32, @intCast(e.rank)), s });
++    }
++
+     fn layer(f: *Forward, l: wt.Layer, index: usize, rows: usize) !void {
+         const h = cfg.hidden;
+         const s = f.s;
+@@ -229,6 +245,7 @@ pub const Forward = struct {
+         try f.product(l.o, s.attn_heads, mine, rows, .f32);
+         try f.gather(mine, s.parts, part_bytes);
+         try f.k.go(.rank_sum, stream, .{ .x = ceil(rows * h, 256) }, 256, .{ s.parts, s.conv_temp, int(rows * h), int(share.world) });
++        try f.applyEdit(index, 0, s.conv_temp, rows);
+         try f.conv(l.attn_conv, s.conv_temp, 0, cache.conv[2], s.attention, rows);
+         try f.k.go(.mix, stream, .{ .x = @intCast(rows) }, kern.mix_threads, .{kern.Mix{ .partial = s.partial, .blocks = s.blocks, .attention = s.attention, .query = l.mlp_query, .norm = l.mlp_norm, .out = s.mlp_input, .rows = int(rows), .width = h, .block_stride = int(s.rows * h), .blocks_count = int(blocks), .queries = 1, .mode = if (index % cfg.block_size == 0) 1 else 2 }});
+         try f.product(l.router, s.mlp_input, s.router, rows, .f32);
+@@ -244,6 +261,7 @@ pub const Forward = struct {
+         try f.projectExperts(l.w2, s.quant_down, 0, s.down, rows, 1);
+         try f.gather(s.down, s.gathered, pairs * h * 2);
+         try f.k.go(.moe_sum, stream, .{ .x = ceil(rows * h, 256) }, 256, .{ s.gathered, s.conv_temp, int(rows), @as(i32, h), int(share.world) });
++        try f.applyEdit(index, 1, s.conv_temp, rows);
+         try f.conv(l.mlp_conv, s.conv_temp, 0, cache.conv[3], s.mlp, rows);
+         try f.k.go(.finish, stream, .{ .x = ceil(rows * h, 256) }, 256, .{ s.partial, s.blocks + blocks * s.rows * h * 2, s.attention, s.mlp, int(rows * h), @as(i32, @intFromBool(index % cfg.block_size == 0)) });
+     }
+@@ -255,7 +273,7 @@ pub const Forward = struct {
+         if (rows == 0 or rows > s.rows or rows + s.pos > s.context) return error.InklingContext;
+         for (ids) |id| if (id >= cfg.vocabulary) return error.InklingToken;
+         // a one-token step, or a verify window, replays its captured graph (a plain step with a drafter ingests on the host)
+-        if (f.graphs_on and final and rows < f.graphs.len and (f.verifying or f.drafter == null) and !f.verify_check) return f.replay(ids);
++        if (f.graphs_on and final and rows < f.graphs[0].len and (f.verifying or f.drafter == null) and !f.verify_check) return f.replay(ids);
+         return f.body(ids, final);
+     }
+ 
+@@ -267,7 +285,7 @@ pub const Forward = struct {
+         try cuda.copy_source.enqueue(f.d, s.ids, std.mem.sliceAsBytes(ids), f.stream);
+         const p32: i32 = @intCast(pos);
+         try cuda.copy_source.enqueue(f.d, f.pos_dev.?.ptr, std.mem.asBytes(&p32), f.stream);
+-        const slot = &f.graphs[ids.len][@intFromBool(f.verifying)];
++        const slot = &f.graphs[@intFromBool(f.editing)][ids.len][@intFromBool(f.verifying)];
+         if (slot.* == null) {
+             f.graphing = true;
+             defer f.graphing = false;
+diff --git a/zig/src/families/inkling2/kernels.zig b/zig/src/families/inkling2/kernels.zig
+index 7452cd52..5eb6ffa0 100644
+--- a/zig/src/families/inkling2/kernels.zig
++++ b/zig/src/families/inkling2/kernels.zig
+@@ -2,7 +2,7 @@
+ const std = @import("std");
+ const cuda = @import("cuda");
+ 
+-pub const Op = enum { mix, finish, rank_sum, logits, quant, swiglu, route, moe_sum, conv, conv_commit, prep, relative, attention, attention_decode, rotate, unrotate, embed, norm, top1, fp4_amax, fp4_quant, embed_shard, embed_pick, split, attention_part, attention_merge, restore, top1p };
++pub const Op = enum { mix, finish, rank_sum, logits, quant, swiglu, route, moe_sum, conv, conv_commit, prep, relative, attention, attention_decode, rotate, unrotate, embed, norm, top1, fp4_amax, fp4_quant, embed_shard, embed_pick, split, attention_part, attention_merge, restore, top1p, edit };
+ 
+ pub const Mix = extern struct {
+     partial: u64,
+diff --git a/zig/src/families/inkling2/link.zig b/zig/src/families/inkling2/link.zig
+index d989ed85..a5034401 100644
+--- a/zig/src/families/inkling2/link.zig
++++ b/zig/src/families/inkling2/link.zig
+@@ -54,8 +54,10 @@ pub const Link = struct {
+             const kind = std.enums.fromInt(Kind, header.kind) orelse return error.InklingCommand;
+             switch (kind) {
+                 .begin => {
+-                    if (header.rows != 0) return error.InklingCommand;
++                    // its one id: whether this request takes the refusal edit
++                    if (header.rows != 1 or header.ids[0] > 1) return error.InklingCommand;
+                     try f.clear();
++                    try f.setEdit(header.ids[0] == 1);
+                 },
+                 .rows, .verify, .keep, .draft, .keep_draft => {
+                     if (header.rows == 0 or header.rows > ids.len or header.final > 1) return error.InklingCommand;
+diff --git a/zig/src/families/inkling2/native.zig b/zig/src/families/inkling2/native.zig
+index ff428d8a..b1d67bd2 100644
+--- a/zig/src/families/inkling2/native.zig
++++ b/zig/src/families/inkling2/native.zig
+@@ -48,6 +48,7 @@ const Owned = struct {
+     group: ?cuda.tp_group.Group = null,
+     peer: ?link.Link = null,
+     draft: ?@import("draft.zig").Draft = null,
++    edit: ?@import("edit.zig").Edit = null,
+ };
+ 
+ pub fn place() !cfg.Share {
+@@ -61,6 +62,13 @@ fn draftFloor() !f64 {
+     return environment.read(f64, "TF_INKLING_DRAFT_FLOOR", 0.6);
+ }
+ 
++fn editDir() !?[]const u8 {
++    return environment.path("TF_INKLING_EDIT", @import("sys").getenv("TF_INKLING_EDIT")) catch {
++        std.log.err("TF_INKLING_EDIT: expected tools/export_edit.py's folder", .{});
++        return error.InvalidEnvironment;
++    };
++}
++
+ fn expertsDir() !?[]const u8 {
+     return environment.path("TF_INKLING_EXPERTS", @import("sys").getenv("TF_INKLING_EXPERTS")) catch {
+         std.log.err("TF_INKLING_EXPERTS: expected the full checkpoint's folder", .{});
+@@ -153,6 +161,12 @@ fn openPair(gpa: std.mem.Allocator, io: std.Io, ctx: *const cuda.Context, dir: [
+     own.f = .{ .gpa = gpa, .d = ctx.d, .stream = own.stream, .w = &own.w, .s = &own.s, .k = &own.k, .lt = &own.lt, .exchange = .{ .lib = &own.lib.?, .comm = own.comm, .group = &own.group.? } };
+     errdefer own.f.deinit();
+     own.f.graphs_on = try environment.read(bool, "TF_INKLING_GRAPHS", true);
++    if (try editDir()) |path| {
++        own.edit = try @import("edit.zig").Edit.load(gpa, io, ctx.d, path);
++        own.f.edit = &own.edit.?;
++        std.log.info("inkling2 rank {d}: refusal edit from {s}, for requests that ask", .{ share.rank, path });
++    }
++    errdefer if (own.edit) |*e| e.deinit();
+     errdefer if (own.draft) |*d| d.deinit();
+     if (o.drafts) {
+         own.draft = try @import("draft.zig").Draft.init(gpa, io, ctx.d, dir, share, o.context, own.s.rows, if (quant) |*q| q else null);
+@@ -190,6 +204,7 @@ fn release(p: *anyopaque) void {
+     if (o.peer) |*l| l.deinit();
+     if (o.group) |*g| if (g.fast) |f| f.deinit();
+     if (o.draft) |*d| d.deinit();
++    if (o.edit) |*e| e.deinit();
+     o.s.deinit();
+     o.w.deinit();
+     o.lt.close();
+@@ -216,6 +231,7 @@ pub fn explain(_: ?*anyopaque, err: anyerror) ?[]const u8 {
+         error.InklingGreedyOnly => "Inkling's initial native profile supports greedy decoding; set temperature to 0",
+         error.InklingDraftPosition => "Inkling draft features do not match the committed target prefix",
+         error.InklingVerifyMismatch => "Inkling batched verification differs from the plain target; the audit refused generation",
++        error.InklingNoEdit => "this model name asks for the refusal edit, but the server started without TF_INKLING_EDIT",
+         error.InklingNoDrafts => "Inkling's native profile has no qualified draft head or copy windows",
+         error.InklingNoStructures => "Inkling's initial native profile has no structured-output path",
+         error.NonFiniteLogits => "Inkling produced non-finite logits; generation stopped",
+diff --git a/zig/src/platform/environment.zig b/zig/src/platform/environment.zig
+index 0872392e..0c2fb683 100644
+--- a/zig/src/platform/environment.zig
++++ b/zig/src/platform/environment.zig
+@@ -32,6 +32,7 @@ pub fn isReal(kind: Kind) bool {
+ pub const rules = [_]Rule{
+     .{ .name = "TF_INKLING_FP4", .scope = .cuda, .kind = .word, .words = &.{ "off", "attn", "all" }, .forms = "off, attn (Q, K, V, R, gate and O as NVFP4) or all (also the output head)" },
+     .{ .name = "TF_INKLING_EXPERTS", .scope = .cuda, .kind = .path, .forms = "the full Inkling checkpoint folder without control characters (every rank then runs half of every expert)" },
++    .{ .name = "TF_INKLING_EDIT", .scope = .cuda, .kind = .path, .forms = "tools/export_edit.py's refusal-edit folder without control characters (requests naming TENSORFOLD_KEYS_MODEL take it)" },
+     .{ .name = "TF_INKLING_DRAFT_FLOOR", .scope = .cuda, .kind = .real, .max = 1, .forms = "a chained draft chance from 0 to 1 (default 0.6: drafts under it are not verified or drafted further; 0 keeps the acceptance-rate depth rule)" },
+     .{ .name = "TF_INKLING_GRAPHS", .scope = .cuda, .kind = .flag, .forms = "0 or 1 (default 1: one-token and verify steps replay CUDA graphs)" },
+     .{ .name = "TF_INKLING_VERIFY_CHECK", .scope = .cuda, .kind = .flag, .forms = "0 or 1" },
+diff --git a/zig/src/platform/environment_test.zig b/zig/src/platform/environment_test.zig
+index b150590f..d47c1bcc 100644
+--- a/zig/src/platform/environment_test.zig
++++ b/zig/src/platform/environment_test.zig
+@@ -75,6 +75,7 @@ const valid = [_]Case{
+     .{ .name = "TF_INKLING_EXPERTS", .raw = "/models/inkling2/exl3", .n = 0 },
+     .{ .name = "TF_INKLING_GRAPHS", .raw = "0", .n = 0 },
+     .{ .name = "TF_INKLING_GRAPHS", .raw = "1", .n = 1 },
++    .{ .name = "TF_INKLING_EDIT", .raw = "/models/inkling2/edit", .n = 0 },
+     .{ .name = "TF_INKLING_DRAFT_FLOOR", .raw = "0", .n = 0 },
+     .{ .name = "TF_INKLING_DRAFT_FLOOR", .raw = "0.6", .n = @bitCast(@as(f64, 0.6)) },
+     .{ .name = "TF_INKLING_RANK", .raw = "0", .n = 0 },
+-- 
+2.56.1
+
+
+From ba9c87428a457f48d95a949e4a360b9ccb36d1b8 Mon Sep 17 00:00:00 2001
+From: LPFchan <me@lost.plus>
+Date: Wed, 18 Nov 2026 05:35:06 +0900
+Subject: [PATCH 17/17] server: TENSORFOLD_GREEDY_FALLBACK=1 decodes a sampling
+ request greedily on a greedy-only engine instead of refusing it
+
+---
+ zig/src/server/serve.zig  | 1 +
+ zig/src/server/server.zig | 4 ++++
+ 2 files changed, 5 insertions(+)
+
+diff --git a/zig/src/server/serve.zig b/zig/src/server/serve.zig
+index d5b02cfc..a4601b7e 100644
+--- a/zig/src/server/serve.zig
++++ b/zig/src/server/serve.zig
+@@ -190,6 +190,7 @@ pub fn run(gpa: Allocator, io: std.Io, args: cli.Args, s: Setup) u8 {
+         .default_voice = args.default_voice,
+         .model_ids = ids.items,
+         .keys_model = keys_model,
++        .greedy_fallback = std.mem.eql(u8, std.mem.trim(u8, env(s, "TENSORFOLD_GREEDY_FALLBACK") orelse "", " \t\r\n"), "1"),
+         .background_ids = backgrounds,
+         .default_max_tokens = args.max_tokens,
+         .enable_thinking = args.thinking,
+diff --git a/zig/src/server/server.zig b/zig/src/server/server.zig
+index 872b9c1b..2dc2cf17 100644
+--- a/zig/src/server/server.zig
++++ b/zig/src/server/server.zig
+@@ -52,6 +52,9 @@ pub const Config = struct {
+     /// TENSORFOLD_KEYS_MODEL: the model id whose requests take the engine's per-request edit (listed in model_ids);
+     /// empty: none.
+     keys_model: []const u8 = "",
++    /// TENSORFOLD_GREEDY_FALLBACK=1: on a greedy-only engine, a request that asks to sample decodes greedily instead of
++    /// being refused (for clients that always send a temperature).
++    greedy_fallback: bool = false,
+     /// Ids a request may name for background priority by default (--name-priority); each is in model_ids.
+     background_ids: []const []const u8 = &.{},
+     default_max_tokens: i64 = 4096,
+@@ -306,6 +309,7 @@ pub const Server = struct {
+         try merge(options, cx, supplied);
+         const temp = number(options.get("temperature")) orelse 0;
+         if (temp <= 0) return null;
++        if (srv.info.capability(.greedy_only) and srv.config.greedy_fallback) return null;
+         if (srv.info.capability(.greedy_only)) return cx.refuse(if ((if (defaults) |d| number(d.get("temperature")) else null) orelse 0 > 0)
+             "this engine decodes greedily only and this server samples by default: send temperature 0, or serve with --temperature 0"
+         else
+-- 
+2.56.1
+
