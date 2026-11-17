@@ -1,7 +1,7 @@
 From ab85a9bf58392c5c08b6c055247d51880eb07aee Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Tue, 17 Nov 2026 22:24:16 +0900
-Subject: [PATCH 01/17] Quantize Inkling's BF16 attention and head projections
+Subject: [PATCH 01/18] Quantize Inkling's BF16 attention and head projections
  to NVFP4 at load (TF_INKLING_FP4)
 
 TF_INKLING_FP4=attn keeps Q, K, V, R, gate and O as NVFP4 lane weights; =all adds the output head.
@@ -371,7 +371,7 @@ index 2045cb01..171bd7c8 100644
 From e893996207418a3e9be28bb35b1baa2e77cf1084 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Tue, 17 Nov 2026 23:19:05 +0900
-Subject: [PATCH 02/17] Inkling decode: latency-bound mix and quant kernels
+Subject: [PATCH 02/18] Inkling decode: latency-bound mix and quant kernels
  issue all loads at once; NVFP4 drafter projections under FP4=all
 
 tf_ik_mix: one 576-thread CTA a row, each thread one 16-byte chunk of every source, one combined
@@ -808,7 +808,7 @@ index 8da5834f..cb578b05 100644
 From 96948dfd43770dbe0bf6447a20a5e9d280704bfc Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Tue, 17 Nov 2026 23:29:20 +0900
-Subject: [PATCH 03/17] Inkling verification: one attention launch and one
+Subject: [PATCH 03/18] Inkling verification: one attention launch and one
  small BF16 projection call for every verified row
 
 The decode attention kernel already masks each row's own causal window, so batching keeps each row's
@@ -860,7 +860,7 @@ index 7915e8fa..f4e4c249 100644
 From 3a6b5504d561d17f420582133ed40be48582795d Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 00:03:41 +0900
-Subject: [PATCH 04/17] Inkling: replay one CUDA graph per one-token step and
+Subject: [PATCH 04/18] Inkling: replay one CUDA graph per one-token step and
  verify window (TF_INKLING_GRAPHS, default on)
 
 Prep and attention read the step position from the device when a graph replays; draft mode's
@@ -1175,7 +1175,7 @@ index 171bd7c8..fe3f9ca5 100644
 From 377844b40b29a1f6383f57ff1f2f860506b6df50 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 00:32:24 +0900
-Subject: [PATCH 05/17] Inkling: split experts across the pair
+Subject: [PATCH 05/18] Inkling: split experts across the pair
  (TF_INKLING_EXPERTS=<full checkpoint>)
 
 Every rank runs half of every routed expert: w13's output tile columns (its gate/up pairs) and
@@ -1373,7 +1373,7 @@ index fe3f9ca5..2351961d 100644
 From 789e179ab26119d5a6de7b898a10edc605b2c499 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 01:00:07 +0900
-Subject: [PATCH 06/17] inkling2: Q, gate, R (and local K, V) as one NVFP4
+Subject: [PATCH 06/18] inkling2: Q, gate, R (and local K, V) as one NVFP4
  projection per layer
 
 ---
@@ -1578,7 +1578,7 @@ index cd581e8e..24d790ac 100644
 From a3c3d0a78b38b334b3f7742e7951ea85e6fbc57a Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 01:28:35 +0900
-Subject: [PATCH 07/17] inkling2: decode attention split over 16 key-tile sets
+Subject: [PATCH 07/18] inkling2: decode attention split over 16 key-tile sets
  per head, merged in order; row-invariant, 5x faster at 8k
 
 ---
@@ -1856,7 +1856,7 @@ index bd866c21..61429166 100644
 From ab0010657824d26cf3c308235d70494933fcbd00 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 01:28:35 +0900
-Subject: [PATCH 08/17] inkling2: TF_INKLING_EXPERTS also takes a pack already
+Subject: [PATCH 08/18] inkling2: TF_INKLING_EXPERTS also takes a pack already
  cut to this rank's half
 
 ---
@@ -1906,7 +1906,7 @@ index 24d790ac..99b00b99 100644
 From 043a53a41eca9204af6e89600af96d9eb50453e3 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 01:51:21 +0900
-Subject: [PATCH 09/17] inkling2: build the glue and drafter kernels
+Subject: [PATCH 09/18] inkling2: build the glue and drafter kernels
  arch-specific (sm_121a): native FP4/FP8 conversions
 
 ---
@@ -1937,7 +1937,7 @@ index 9b4f6c77..688b055f 100644
 From b71cf55b766fb07d42dc314522b0f3978cc6dbba Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 02:20:32 +0900
-Subject: [PATCH 10/17] inkling2: forward graph in pieces; warp-level route
+Subject: [PATCH 10/18] inkling2: forward graph in pieces; warp-level route
  top-8 and mix reductions; drafter rnn and fold as NVFP4
 
 ---
@@ -2256,7 +2256,7 @@ index 8ff38eff..08a3f9c4 100644
 From 427a874ffca07c1770318912cc1a76cbfb0665e7 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 02:32:26 +0900
-Subject: [PATCH 11/17] inkling2: keep() restores every conv history in one
+Subject: [PATCH 11/18] inkling2: keep() restores every conv history in one
  launch
 
 ---
@@ -2364,7 +2364,7 @@ index dcae77b3..52a87e1c 100644
 From d910d2b7cf40eb1b0d327cd464f3ee38afdfb217 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 04:36:01 +0900
-Subject: [PATCH 12/17] inkling2: verify drafts while their chained chance
+Subject: [PATCH 12/18] inkling2: verify drafts while their chained chance
  stays at least TF_INKLING_DRAFT_FLOOR (default 0.6), up to 5 deep
 
 The drafter reports each pick's probability (tf_ik_top1p: one 1024-thread block, float4 loads, online
@@ -2686,7 +2686,7 @@ index 2351961d..0872392e 100644
 From b723bd4b0aaa55e93437decdc35f0e9e045f265d Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 04:36:01 +0900
-Subject: [PATCH 13/17] environment tests: valid forms for TF_INKLING_FP4,
+Subject: [PATCH 13/18] environment tests: valid forms for TF_INKLING_FP4,
  EXPERTS, GRAPHS and DRAFT_FLOOR
 
 ---
@@ -2718,7 +2718,7 @@ index 046db04f..b150590f 100644
 From afec536d2fca51b7496bfe1638b53892f571c90b Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 04:50:40 +0900
-Subject: [PATCH 14/17] inkling2: peer records carry up to 12 ids in the header
+Subject: [PATCH 14/18] inkling2: peer records carry up to 12 ids in the header
  (one broadcast each); keep rides with the next draft
 
 Rank 1 no longer drains its stream between the keep and the draft, so it queues ingest and drafting back to
@@ -2884,7 +2884,7 @@ index 12481774..d989ed85 100644
 From e4ca0d94d29e48cd30505322736329ef395e43dd Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 05:23:05 +0900
-Subject: [PATCH 15/17] server: TENSORFOLD_KEYS_MODEL, a model id whose
+Subject: [PATCH 15/18] server: TENSORFOLD_KEYS_MODEL, a model id whose
  requests carry keys to the engine for its per-request edit
 
 The same plumbing as our DeepSeek keys switch: the id is listed beside the served name, its requests set
@@ -3068,7 +3068,7 @@ index 820d6556..872b9c1b 100644
 From 2fe1103f1c0877e578abdfc1d6cda853c2af9594 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 05:23:05 +0900
-Subject: [PATCH 16/17] inkling2: TF_INKLING_EDIT, OpenUncensored's refusal
+Subject: [PATCH 16/18] inkling2: TF_INKLING_EDIT, OpenUncensored's refusal
  edit for requests that ask (TENSORFOLD_KEYS_MODEL)
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
@@ -3398,7 +3398,7 @@ index b150590f..d47c1bcc 100644
 From ba9c87428a457f48d95a949e4a360b9ccb36d1b8 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 05:35:06 +0900
-Subject: [PATCH 17/17] server: TENSORFOLD_GREEDY_FALLBACK=1 decodes a sampling
+Subject: [PATCH 17/18] server: TENSORFOLD_GREEDY_FALLBACK=1 decodes a sampling
  request greedily on a greedy-only engine instead of refusing it
 
 ---
@@ -3440,6 +3440,264 @@ index 872b9c1b..2dc2cf17 100644
          if (srv.info.capability(.greedy_only)) return cx.refuse(if ((if (defaults) |d| number(d.get("temperature")) else null) orelse 0 > 0)
              "this engine decodes greedily only and this server samples by default: send temperature 0, or serve with --temperature 0"
          else
+-- 
+2.56.1
+
+
+From 22d3c966619c259ab9b3c18a8d6f751af79d95a6 Mon Sep 17 00:00:00 2001
+From: LPFchan <me@lost.plus>
+Date: Wed, 18 Nov 2026 05:57:25 +0900
+Subject: [PATCH 18/18] server: read Inkling 2's messages natively: text,
+ thinking as reasoning_content, JSON invokes as tool_calls; only end of
+ sampling ends a turn; reasoning_effort switches thinking
+
+---
+ zig/src/server/chat.zig            |   5 +-
+ zig/src/server/chat_generation.zig |   3 +-
+ zig/src/server/chat_inkling.zig    |  32 ++++++++
+ zig/src/server/inkling_reply.zig   | 122 +++++++++++++++++++++++++++++
+ zig/src/server/server.zig          |   9 +++
+ 5 files changed, 168 insertions(+), 3 deletions(-)
+ create mode 100644 zig/src/server/chat_inkling.zig
+ create mode 100644 zig/src/server/inkling_reply.zig
+
+diff --git a/zig/src/server/chat.zig b/zig/src/server/chat.zig
+index 183025e3..da1333f2 100644
+--- a/zig/src/server/chat.zig
++++ b/zig/src/server/chat.zig
+@@ -157,7 +157,8 @@ pub fn prepare(srv: *Server, cx: *Cx, input: Input, gone: anytype) Failure!Prepa
+     if (preparing) _ = srv.preparing.fetchAdd(1, .acq_rel);
+     errdefer srv.release(preparing, null);
+     if (gone.check()) return error.Cancelled;
+-    const thinking = input.prompt == null and (flag(f, "enable_thinking") orelse srv.config.enable_thinking);
++    const asked_effort: ?bool = if (srv.inkling) (if (f.get("reasoning_effort")) |e| (if (e == .string) !std.mem.eql(u8, e.string, "none") else null) else null) else null; // Inkling: an effort is the switch
++    const thinking = input.prompt == null and (flag(f, "enable_thinking") orelse asked_effort orelse srv.config.enable_thinking);
+     const instruct = input.prompt == null and !thinking and !input.own; // a client's chat with thinking off may take --instruct-sampling's set
+     const reasoning = thinking and srv.info.capability(.reasoning) and (srv.text.vtable.format != .kimi or input.prompt == null); // the prompt renders `thinking`; the reply reads `reasoning`
+     const effort = srv.effortFor(if (f.get("reasoning_effort")) |e| (if (e == .string) e.string else null) else null);
+@@ -282,7 +283,7 @@ pub fn generate(srv: *Server, cx: *Cx, prepared: Prepared, sink: ?Sink, gone: an
+     errdefer if (!gen.engine_done) gen.cancel(); // the engine writes to the mailbox until it says finished
+     const result: Failure!Reply = blk: {
+         if (sink) |s| if (s.begin) |begin| begin(s.ctx, prepared.prompt_len) catch break :blk error.Cancelled;
+-        if (sink != null and input.tools.len > 0 and srv.text.vtable.format != .kimi) gen.calls = tool_stream.Streamer.init(a, input.tools) catch |e| break :blk e;
++        if (sink != null and input.tools.len > 0 and srv.text.vtable.format != .kimi and !srv.inkling) gen.calls = tool_stream.Streamer.init(a, input.tools) catch |e| break :blk e;
+         gen.loop(gone) catch |e| break :blk e;
+         break :blk gen.finish(cx, prepared.prompt_len, received, prepared.thinking, prepared.reasoning, effort, prepared.sampled, prepared.drafts);
+     };
+diff --git a/zig/src/server/chat_generation.zig b/zig/src/server/chat_generation.zig
+index dc65688a..174ae637 100644
+--- a/zig/src/server/chat_generation.zig
++++ b/zig/src/server/chat_generation.zig
+@@ -110,6 +110,7 @@ pub const Generation = struct {
+         const all = try g.visible.extend(g.a, g.srv.text, reply_text.decodeText, fresh.items);
+         if (g.visible.pending()) return; // a character still split across tokens
+         if (g.srv.text.vtable.format == .kimi) return @import("chat_kimi.zig").stream(g, sink);
++        if (g.srv.inkling) return @import("chat_inkling.zig").stream(g, sink);
+         const raw_visible = g.stops.visible(all, true);
+         const text = try @import("tool_minimax.zig").dsml(g.a, raw_visible, g.tools); // MiniMax-M3's calls as DSML
+         var answer = text;
+@@ -238,7 +239,7 @@ pub const Generation = struct {
+         const finished_ns = nowNs(g.srv.io);
+         const content_tokens = if (g.ignore_eos) g.collected.items else reply_text.stripTrailing(g.collected.items, g.srv.eos);
+         const raw = try g.srv.text.decode(a, content_tokens);
+-        const native = if (g.srv.text.vtable.format == .kimi) try @import("chat_kimi.zig").read(g, content_tokens, true) else null;
++        const native = if (g.srv.text.vtable.format == .kimi) try @import("chat_kimi.zig").read(g, content_tokens, true) else if (g.srv.inkling) try @import("chat_inkling.zig").read(g, content_tokens, true) else null;
+         const raw_visible = g.stops.visible(raw, false);
+         const visible = if (native) |n| n.content else try @import("tool_minimax.zig").dsml(a, raw_visible, g.tools);
+         // closed before the think split, so a call ending an unclosed think block is the answer
+diff --git a/zig/src/server/chat_inkling.zig b/zig/src/server/chat_inkling.zig
+new file mode 100644
+index 00000000..04e00ea2
+--- /dev/null
++++ b/zig/src/server/chat_inkling.zig
+@@ -0,0 +1,32 @@
++//! Inkling 2's messages bypass the generic prose-to-tool parser, including in streamed replies (inkling_reply.zig).
++const std = @import("std");
++const reply_text = @import("reply_text.zig");
++const native = @import("inkling_reply.zig");
++const chat = @import("chat.zig");
++
++pub fn read(g: anytype, ids: []const u32, finished: bool) std.mem.Allocator.Error!@import("kimi_reply.zig").Result {
++    var result = if (g.chat) try native.parse(g.a, g.srv.text, ids, g.tools, finished) else @import("kimi_reply.zig").Result{ .content = try g.srv.text.decode(g.a, ids), .reasoning = "", .calls = null, .reasoning_tokens = 0 };
++    result.content = g.stops.visible(result.content, !finished);
++    result.reasoning = g.stops.visible(result.reasoning, !finished);
++    if (g.stops.strings.len > 0) {
++        const raw = try g.srv.text.decode(g.a, ids);
++        if (g.stops.matched(raw) != null) result.calls = null;
++    }
++    return result;
++}
++
++pub fn stream(g: anytype, sink: chat.Sink) chat.Failure!void {
++    const result = try read(g, reply_text.stripTrailing(g.collected.items, g.srv.eos), false);
++    const thought = reply_text.pyStrip(result.reasoning);
++    const reason = g.streamed_reasoning.after(thought, true);
++    if (reason.len > 0) {
++        try g.streamed_reasoning.set(g.a, thought, reason);
++        try g.emit(sink, try reply_text.deltaOf(g.a, "reasoning_content", reason));
++    }
++    const delta = g.streamed.after(result.content, true);
++    if (delta.len > 0) {
++        try g.streamed.set(g.a, result.content, delta);
++        try g.emit(sink, .{ .string = delta });
++    }
++    // Calls wait for the finished parse, as Kimi's do: a call is sent whole or not at all.
++}
+diff --git a/zig/src/server/inkling_reply.zig b/zig/src/server/inkling_reply.zig
+new file mode 100644
+index 00000000..98adec7c
+--- /dev/null
++++ b/zig/src/server/inkling_reply.zig
+@@ -0,0 +1,122 @@
++//! Inkling 2's replies: a turn is a run of model messages (`<|message_model|>NAME?<|content_KIND|>…<|end_message|>`)
++//! ended by `<|content_model_end_sampling|>`. Text blocks are the answer, thinking blocks the reasoning, and
++//! `<|content_invoke_tool_json|>{"name":…,"args":{…}}` blocks the calls. Controls are read by id: ordinary text that
++//! spells a control stays text (SGLang's parser/inkling_output.py reads them the same way).
++const std = @import("std");
++const json = @import("json");
++const mt = @import("model_text.zig");
++const specs = @import("tool_specs.zig");
++const ids_mod = @import("ids.zig");
++const Result = @import("kimi_reply.zig").Result;
++const V = json.Value;
++const A = std.mem.Allocator;
++
++/// The control ids a reply is read by; null when the tokenizer is not Inkling's.
++pub const Ids = struct {
++    model: u32,
++    end: u32,
++    end_sampling: u32,
++    text: u32,
++    thinking: u32,
++    call: u32,
++
++    pub fn of(text: mt.Text) ?Ids {
++        return .{
++            .model = text.tokenId("<|message_model|>") orelse return null,
++            .end = text.tokenId("<|end_message|>") orelse return null,
++            .end_sampling = text.tokenId("<|content_model_end_sampling|>") orelse return null,
++            .text = text.tokenId("<|content_text|>") orelse return null,
++            .thinking = text.tokenId("<|content_thinking|>") orelse return null,
++            .call = text.tokenId("<|content_invoke_tool_json|>") orelse return null,
++        };
++    }
++};
++
++const Kind = enum { none, text, thinking, call, other };
++
++/// ``ids`` is the reply as sampled (the prompt ends before the model's header). ``finished``: a block still open at
++/// the end (max_tokens) is closed, its text kept; while streaming an open call stays hidden until its block closes.
++pub fn parse(a: A, text: mt.Text, ids: []const u32, offered: []const V, finished: bool) A.Error!Result {
++    const k = Ids.of(text) orelse return .{ .content = try text.decode(a, ids), .reasoning = "", .calls = null, .reasoning_tokens = 0, .rejected = true };
++    var content: std.ArrayList(u8) = .empty;
++    var thought: std.ArrayList(u8) = .empty;
++    var calls: std.ArrayList(V) = .empty;
++    var reasoning_tokens: usize = 0;
++    var rejected = false;
++    var kind: Kind = .none;
++    var in_header = false; // after <|message_model|>, before its content kind: the author's name
++    var start: usize = 0; // the open block's first payload token
++    var at: usize = 0;
++    while (at < ids.len) : (at += 1) {
++        const t = ids[at];
++        if (t == k.end_sampling and kind == .none) break;
++        if (kind == .none) {
++            if (t == k.model) {
++                in_header = true;
++            } else if (in_header and text.isSpecial(t)) {
++                in_header = false;
++                kind = if (t == k.text) .text else if (t == k.thinking) .thinking else if (t == k.call) .call else .other;
++                start = at + 1;
++            } else if (!in_header and !text.isSpecial(t)) {
++                // a headerless reply is text, as SGLang synthesizes its opener
++                kind = .text;
++                start = at;
++            }
++            continue;
++        }
++        if (t != k.end) continue;
++        try close(a, text, kind, ids[start..at], offered, &content, &thought, &calls, &reasoning_tokens, &rejected);
++        kind = .none;
++    }
++    if (kind != .none and (finished or kind != .call)) {
++        const open = ids[start..@min(at, ids.len)];
++        if (kind == .call) {
++            // cut by max_tokens: not executable, so its payload is the answer's text
++            try content.appendSlice(a, try text.decode(a, open));
++            rejected = true;
++        } else try close(a, text, kind, open, offered, &content, &thought, &calls, &reasoning_tokens, &rejected);
++    }
++    return .{ .content = content.items, .reasoning = thought.items, .calls = if (calls.items.len > 0) calls.items else null, .reasoning_tokens = reasoning_tokens, .rejected = rejected };
++}
++
++fn close(a: A, text: mt.Text, kind: Kind, payload: []const u32, offered: []const V, content: *std.ArrayList(u8), thought: *std.ArrayList(u8), calls: *std.ArrayList(V), reasoning_tokens: *usize, rejected: *bool) A.Error!void {
++    const s = try text.decode(a, payload);
++    switch (kind) {
++        .none => {},
++        .text, .other => try content.appendSlice(a, s),
++        .thinking => {
++            try thought.appendSlice(a, s);
++            reasoning_tokens.* += payload.len;
++        },
++        .call => if (try call(a, s, offered)) |c| try calls.append(a, c) else {
++            try content.appendSlice(a, s);
++            rejected.* = true;
++        },
++    }
++}
++
++/// `{"name": NAME, "args": {…}}` for an offered tool, as an OpenAI call; null when it is anything else.
++fn call(a: A, payload: []const u8, offered: []const V) A.Error!?V {
++    const parsed = switch (try json.parse(a, payload)) {
++        .ok => |v| v,
++        .err => return null,
++    };
++    if (parsed != .object) return null;
++    const name = parsed.object.get("name") orelse return null;
++    if (name != .string) return null;
++    var known = false;
++    for (offered) |tool| if (std.mem.eql(u8, try specs.toolName(a, tool), name.string)) {
++        known = true;
++    };
++    if (!known) return null;
++    const args = parsed.object.get("args") orelse V{ .object = try json.newObject(a) };
++    if (args != .object) return null;
++    const f = try json.newObject(a);
++    try f.put(a, "name", name);
++    try f.put(a, "arguments", .{ .string = try json.stringify(a, args, .{ .ascii = false, .compact = true }) });
++    const c = try json.newObject(a);
++    try c.put(a, "id", .{ .string = try ids_mod.make(a, "call_", 24) });
++    try c.put(a, "type", .{ .string = "function" });
++    try c.put(a, "function", .{ .object = f });
++    return .{ .object = c };
++}
+diff --git a/zig/src/server/server.zig b/zig/src/server/server.zig
+index 2dc2cf17..0778579c 100644
+--- a/zig/src/server/server.zig
++++ b/zig/src/server/server.zig
+@@ -156,6 +156,7 @@ pub const Server = struct {
+     effort_levels: []const []const u8 = &.{},
+     thinking_switch: bool = false,
+     eos: []const u32 = &.{},
++    inkling: bool = false, // Inkling 2's messages: the reply is read by chat_inkling.zig
+     think_close: []const u32 = &.{},
+     think_close_end: ?u32 = null,
+     metrics: metrics.Metrics,
+@@ -232,6 +233,14 @@ pub const Server = struct {
+         };
+         const a = srv.arena.allocator();
+         srv.eos = try a.dupe(u32, text.eosIds());
++        if (@import("inkling_reply.zig").Ids.of(text)) |k| {
++            // a turn is many messages: only the end of sampling ends it, not each message's end
++            srv.inkling = true;
++            var kept: std.ArrayList(u32) = .empty;
++            for (srv.eos) |t| if (t != k.end) try kept.append(a, t);
++            if (std.mem.indexOfScalar(u32, kept.items, k.end_sampling) == null) try kept.append(a, k.end_sampling);
++            srv.eos = kept.items;
++        }
+         if (text.tokenId(reply_text.channel_markers.close) != null) srv.markers = reply_text.channel_markers;
+         const minimax = text.tokenId(reply_text.mm_markers.close) != null;
+         if (minimax) srv.markers = reply_text.mm_markers;
 -- 
 2.56.1
 

@@ -6,7 +6,8 @@ through kortexa's TensorFold fork (branch `kortexa-ai/inkling2-draft`, `e2614feb
 
 | File | What it is |
 | --- | --- |
-| `0001-inkling2-spark.patch` | Our 17 engine commits on `e2614feb` (`git am`): speed, the refusal edit per request, greedy fallback. |
+| `0001-inkling2-spark.patch` | Our 18 engine commits on `e2614feb` (`git am`): speed, the refusal edit per request, greedy fallback, Inkling's reply messages (thinking, tool calls). |
+| `inkling2.jinja` | The chat template `serve-rank.sh` passes: kortexa's, without the forced text opener, so the model writes its own message headers. |
 | `serve-rank.sh` | One rank, natively (no Docker). Rank 0 on spark2 serves the API; rank 1 on spark1 reads spark2's models over NFS. |
 | `pair.sh` | Both ranks from spark2: ships the binary to spark1, starts rank 1 there, runs rank 0 in the foreground. |
 | `inkling2-tensorfold.service` | The systemd user unit on spark2 that runs `pair.sh` on port 8889. |
@@ -37,7 +38,7 @@ so the stock model's kernels and outputs are unchanged.
 ## Install
 
 1. On spark2: check out kortexa's TensorFold at `e2614feb`, `git am 0001-inkling2-spark.patch`, build as above.
-2. Copy the scripts to `~/inkling-2-small/scripts` on both Sparks.
+2. Copy the scripts to `~/inkling-2-small/scripts` and `inkling2.jinja` to `~/inkling-2-small/templates` on both Sparks.
 3. `cp inkling2-tensorfold.service ~/.config/systemd/user/ && systemctl --user daemon-reload &&
    systemctl --user enable --now inkling2-tensorfold`. It conflicts with `dsv41-tensorfold.service`: each pair needs
    nearly all of both Sparks' memory.
@@ -50,7 +51,10 @@ so the stock model's kernels and outputs are unchanged.
   short prompts. The uncensored name runs 36-39 on prose.
 - The engine decodes greedily only. `TENSORFOLD_GREEDY_FALLBACK=1` makes a request with a temperature decode greedily
   instead of failing.
-- Thinking is off and tool calls are not parsed. kortexa's server has no reader for Inkling's reply messages
-  (`<|content_thinking|>`, `<|content_invoke_tool_json|>`), and the checkpoint's stop tokens end the reply at the
-  first `<|end_message|>`.
+- Tool calls come back as OpenAI `tool_calls` (parallel calls too, streamed whole once each call's message closes).
+  Thinking comes back as `reasoning_content`. The server reads Inkling's messages by token id
+  (`zig/src/server/inkling_reply.zig`), and only `<|content_model_end_sampling|>` ends a reply.
+- Thinking is off by default (`--no-thinking`). A request turns it on with `reasoning_effort` (`low`, `medium`,
+  `high`, ...) or `chat_template_kwargs: {"enable_thinking": true}` (effort 0.9). With tools offered the model often
+  writes a one-line thought before a call even with thinking off.
 - Text only: no images.

@@ -6,6 +6,7 @@
 #   FP4=off/attn/all (NVFP4 dense; default all), API_HOST/API_PORT (rank 0; default 127.0.0.1:8000),
 #   EDIT (default 1: OpenUncensored's refusal edit, per request: NAME takes it, NAME-Stock is the model as released),
 #   NAME (default Inkling-2-Small). A request with a temperature decodes greedily (TENSORFOLD_GREEDY_FALLBACK).
+#   TEMPLATE (default templates/inkling2.jinja: the model writes its own headers, so it thinks and calls tools).
 set -euo pipefail
 rank=${1:?rank 0 or 1}; shift
 master=192.168.100.1
@@ -22,6 +23,7 @@ cut=$HOME/models/inkling2/split/rank$rank
 [[ ${SPLIT:-1} == 1 ]] && export TF_INKLING_EXPERTS=$full
 drafts=(--no-drafts)
 [[ ${DRAFTS:-1} == 1 ]] && drafts=()
+template=(--chat-template "${TEMPLATE:-$HOME/inkling-2-small/templates/inkling2.jinja}")
 name=${NAME:-Inkling-2-Small}
 if [[ ${EDIT:-1} == 1 ]]; then
   export TF_INKLING_EDIT=$models/inkling2/uncensored-edit/tf TENSORFOLD_KEYS_MODEL=$name
@@ -34,6 +36,6 @@ export TF_INKLING_RANK=$rank TF_INKLING_WORLD=2 TF_INKLING_VERIFY_CHECK=0 \
   LD_LIBRARY_PATH=$HOME/inkling-2-small/lib:/usr/local/cuda/lib64 \
   TF_ROCE=${TF_ROCE:-1} TENSORFOLD_GREEDY_FALLBACK=1 TENSORFOLD_MEMORY_RESERVE_GIB=${RESERVE_GIB:-6} TF_INKLING_FP4=${FP4:-all}
 exec "$bin" serve "$model" --backend cuda --device 0 --context "${CONTEXT:-131072}" \
-  --parallel 1 "${drafts[@]}" --no-thinking --temperature 0 --prompt-cache-gib 0 \
+  --parallel 1 "${drafts[@]}" "${template[@]}" --no-thinking --temperature 0 --prompt-cache-gib 0 \
   --host "${API_HOST:-127.0.0.1}" --port "${API_PORT:-8000}" --name "$name" \
   --no-update-check "$@"
