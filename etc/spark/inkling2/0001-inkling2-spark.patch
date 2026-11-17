@@ -1,7 +1,7 @@
 From ab85a9bf58392c5c08b6c055247d51880eb07aee Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Tue, 17 Nov 2026 22:24:16 +0900
-Subject: [PATCH 01/18] Quantize Inkling's BF16 attention and head projections
+Subject: [PATCH 01/20] Quantize Inkling's BF16 attention and head projections
  to NVFP4 at load (TF_INKLING_FP4)
 
 TF_INKLING_FP4=attn keeps Q, K, V, R, gate and O as NVFP4 lane weights; =all adds the output head.
@@ -371,7 +371,7 @@ index 2045cb01..171bd7c8 100644
 From e893996207418a3e9be28bb35b1baa2e77cf1084 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Tue, 17 Nov 2026 23:19:05 +0900
-Subject: [PATCH 02/18] Inkling decode: latency-bound mix and quant kernels
+Subject: [PATCH 02/20] Inkling decode: latency-bound mix and quant kernels
  issue all loads at once; NVFP4 drafter projections under FP4=all
 
 tf_ik_mix: one 576-thread CTA a row, each thread one 16-byte chunk of every source, one combined
@@ -808,7 +808,7 @@ index 8da5834f..cb578b05 100644
 From 96948dfd43770dbe0bf6447a20a5e9d280704bfc Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Tue, 17 Nov 2026 23:29:20 +0900
-Subject: [PATCH 03/18] Inkling verification: one attention launch and one
+Subject: [PATCH 03/20] Inkling verification: one attention launch and one
  small BF16 projection call for every verified row
 
 The decode attention kernel already masks each row's own causal window, so batching keeps each row's
@@ -860,7 +860,7 @@ index 7915e8fa..f4e4c249 100644
 From 3a6b5504d561d17f420582133ed40be48582795d Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 00:03:41 +0900
-Subject: [PATCH 04/18] Inkling: replay one CUDA graph per one-token step and
+Subject: [PATCH 04/20] Inkling: replay one CUDA graph per one-token step and
  verify window (TF_INKLING_GRAPHS, default on)
 
 Prep and attention read the step position from the device when a graph replays; draft mode's
@@ -1175,7 +1175,7 @@ index 171bd7c8..fe3f9ca5 100644
 From 377844b40b29a1f6383f57ff1f2f860506b6df50 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 00:32:24 +0900
-Subject: [PATCH 05/18] Inkling: split experts across the pair
+Subject: [PATCH 05/20] Inkling: split experts across the pair
  (TF_INKLING_EXPERTS=<full checkpoint>)
 
 Every rank runs half of every routed expert: w13's output tile columns (its gate/up pairs) and
@@ -1373,7 +1373,7 @@ index fe3f9ca5..2351961d 100644
 From 789e179ab26119d5a6de7b898a10edc605b2c499 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 01:00:07 +0900
-Subject: [PATCH 06/18] inkling2: Q, gate, R (and local K, V) as one NVFP4
+Subject: [PATCH 06/20] inkling2: Q, gate, R (and local K, V) as one NVFP4
  projection per layer
 
 ---
@@ -1578,7 +1578,7 @@ index cd581e8e..24d790ac 100644
 From a3c3d0a78b38b334b3f7742e7951ea85e6fbc57a Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 01:28:35 +0900
-Subject: [PATCH 07/18] inkling2: decode attention split over 16 key-tile sets
+Subject: [PATCH 07/20] inkling2: decode attention split over 16 key-tile sets
  per head, merged in order; row-invariant, 5x faster at 8k
 
 ---
@@ -1856,7 +1856,7 @@ index bd866c21..61429166 100644
 From ab0010657824d26cf3c308235d70494933fcbd00 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 01:28:35 +0900
-Subject: [PATCH 08/18] inkling2: TF_INKLING_EXPERTS also takes a pack already
+Subject: [PATCH 08/20] inkling2: TF_INKLING_EXPERTS also takes a pack already
  cut to this rank's half
 
 ---
@@ -1906,7 +1906,7 @@ index 24d790ac..99b00b99 100644
 From 043a53a41eca9204af6e89600af96d9eb50453e3 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 01:51:21 +0900
-Subject: [PATCH 09/18] inkling2: build the glue and drafter kernels
+Subject: [PATCH 09/20] inkling2: build the glue and drafter kernels
  arch-specific (sm_121a): native FP4/FP8 conversions
 
 ---
@@ -1937,7 +1937,7 @@ index 9b4f6c77..688b055f 100644
 From b71cf55b766fb07d42dc314522b0f3978cc6dbba Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 02:20:32 +0900
-Subject: [PATCH 10/18] inkling2: forward graph in pieces; warp-level route
+Subject: [PATCH 10/20] inkling2: forward graph in pieces; warp-level route
  top-8 and mix reductions; drafter rnn and fold as NVFP4
 
 ---
@@ -2256,7 +2256,7 @@ index 8ff38eff..08a3f9c4 100644
 From 427a874ffca07c1770318912cc1a76cbfb0665e7 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 02:32:26 +0900
-Subject: [PATCH 11/18] inkling2: keep() restores every conv history in one
+Subject: [PATCH 11/20] inkling2: keep() restores every conv history in one
  launch
 
 ---
@@ -2364,7 +2364,7 @@ index dcae77b3..52a87e1c 100644
 From d910d2b7cf40eb1b0d327cd464f3ee38afdfb217 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 04:36:01 +0900
-Subject: [PATCH 12/18] inkling2: verify drafts while their chained chance
+Subject: [PATCH 12/20] inkling2: verify drafts while their chained chance
  stays at least TF_INKLING_DRAFT_FLOOR (default 0.6), up to 5 deep
 
 The drafter reports each pick's probability (tf_ik_top1p: one 1024-thread block, float4 loads, online
@@ -2686,7 +2686,7 @@ index 2351961d..0872392e 100644
 From b723bd4b0aaa55e93437decdc35f0e9e045f265d Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 04:36:01 +0900
-Subject: [PATCH 13/18] environment tests: valid forms for TF_INKLING_FP4,
+Subject: [PATCH 13/20] environment tests: valid forms for TF_INKLING_FP4,
  EXPERTS, GRAPHS and DRAFT_FLOOR
 
 ---
@@ -2718,7 +2718,7 @@ index 046db04f..b150590f 100644
 From afec536d2fca51b7496bfe1638b53892f571c90b Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 04:50:40 +0900
-Subject: [PATCH 14/18] inkling2: peer records carry up to 12 ids in the header
+Subject: [PATCH 14/20] inkling2: peer records carry up to 12 ids in the header
  (one broadcast each); keep rides with the next draft
 
 Rank 1 no longer drains its stream between the keep and the draft, so it queues ingest and drafting back to
@@ -2884,7 +2884,7 @@ index 12481774..d989ed85 100644
 From e4ca0d94d29e48cd30505322736329ef395e43dd Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 05:23:05 +0900
-Subject: [PATCH 15/18] server: TENSORFOLD_KEYS_MODEL, a model id whose
+Subject: [PATCH 15/20] server: TENSORFOLD_KEYS_MODEL, a model id whose
  requests carry keys to the engine for its per-request edit
 
 The same plumbing as our DeepSeek keys switch: the id is listed beside the served name, its requests set
@@ -3068,7 +3068,7 @@ index 820d6556..872b9c1b 100644
 From 2fe1103f1c0877e578abdfc1d6cda853c2af9594 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 05:23:05 +0900
-Subject: [PATCH 16/18] inkling2: TF_INKLING_EDIT, OpenUncensored's refusal
+Subject: [PATCH 16/20] inkling2: TF_INKLING_EDIT, OpenUncensored's refusal
  edit for requests that ask (TENSORFOLD_KEYS_MODEL)
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
@@ -3398,7 +3398,7 @@ index b150590f..d47c1bcc 100644
 From ba9c87428a457f48d95a949e4a360b9ccb36d1b8 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 05:35:06 +0900
-Subject: [PATCH 17/18] server: TENSORFOLD_GREEDY_FALLBACK=1 decodes a sampling
+Subject: [PATCH 17/20] server: TENSORFOLD_GREEDY_FALLBACK=1 decodes a sampling
  request greedily on a greedy-only engine instead of refusing it
 
 ---
@@ -3447,7 +3447,7 @@ index 872b9c1b..2dc2cf17 100644
 From 22d3c966619c259ab9b3c18a8d6f751af79d95a6 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 05:57:25 +0900
-Subject: [PATCH 18/18] server: read Inkling 2's messages natively: text,
+Subject: [PATCH 18/20] server: read Inkling 2's messages natively: text,
  thinking as reasoning_content, JSON invokes as tool_calls; only end of
  sampling ends a turn; reasoning_effort switches thinking
 
@@ -3698,6 +3698,712 @@ index 2dc2cf17..0778579c 100644
          if (text.tokenId(reply_text.channel_markers.close) != null) srv.markers = reply_text.channel_markers;
          const minimax = text.tokenId(reply_text.mm_markers.close) != null;
          if (minimax) srv.markers = reply_text.mm_markers;
+-- 
+2.56.1
+
+
+From 0709576ac8dfe65568a99bfc1f6eedaf659b515c Mon Sep 17 00:00:00 2001
+From: LPFchan <me@lost.plus>
+Date: Wed, 18 Nov 2026 07:55:06 +0900
+Subject: [PATCH 19/20] inkling2: prompt passes take tf_ik_prompt_dot (the
+ common EXL3 prompt path at any trellis width, 64 members a block, whole K)
+ and TF_INKLING_PROMPT_ROWS (default 256)
+
+---
+ zig/kernels/cuda/inkling2_exl3.cuh      | 142 ++++++++++++++++++++++++
+ zig/src/families/inkling2/dump_main.zig |   2 +-
+ zig/src/families/inkling2/forward.zig   |  14 ++-
+ zig/src/families/inkling2/kernels.zig   |   9 +-
+ zig/src/families/inkling2/native.zig    |   2 +-
+ zig/src/families/inkling2/state.zig     |   4 +-
+ zig/src/platform/environment.zig        |   1 +
+ zig/src/platform/environment_test.zig   |   1 +
+ 8 files changed, 166 insertions(+), 9 deletions(-)
+
+diff --git a/zig/kernels/cuda/inkling2_exl3.cuh b/zig/kernels/cuda/inkling2_exl3.cuh
+index 2cd50aa2..72624f24 100644
+--- a/zig/kernels/cuda/inkling2_exl3.cuh
++++ b/zig/kernels/cuda/inkling2_exl3.cuh
+@@ -31,3 +31,145 @@ extern "C" __global__ void tf_ik_unrotate(const float* z, const int* picks, cons
+     for (int j = 0; j < 4; ++j) out[(size_t)pair * width + c + j] =
+         b((v[j] * tf_exl3::HAD_SCALE) * __half2float(svh[(size_t)expert * width + c + j]));
+ }
++
++
++// Prompt rows of the routed EXL3 dot, after the common prompt path (exl3_prompt.cuh) at any trellis width: a block
++// takes 256 columns of one expert for up to 64 members over the whole K, weights and rows staged through shared
++// memory; each decoded weight tile is the A operand of every member block's MMA. z[p][col] gets the fp32 sum.
++#include "exl3_grouped.cuh"
++#include "exl3_prompt.cuh"
++namespace inkling2 {
++using namespace tf_exl3_prompt;
++template <int K2>
++constexpr int pd_stage() { return TPM * TXS + 2 * 16 * TKT * tf_exl3::tile_words<K2>(); }  // halves a stage
++
++template <int K2, int CB>
++__device__ __forceinline__ void pd_decode(const uint32_t* tile, int lane, uint32_t (&b0)[2], uint32_t (&b1)[2]) {
++    uint32_t w[tf_exl3::lane_words<K2>()];
++    int word, offset;
++    tf_exl3::lane_start<K2>(lane, word, offset);
++#pragma unroll
++    for (int i = 0; i < tf_exl3::lane_words<K2>(); ++i) w[i] = tile[(word + i) % tf_exl3::tile_words<K2>()];
++    tf_exl3::decode_lane<K2, CB>(w, lane, b0, b1);
++}
++
++template <int K2, int CB>
++__device__ __forceinline__ void pd_main(const half* __restrict__ X, const uint32_t* __restrict__ T, const int* rows_sh, int cnt,
++                                        int K, int NTILES, int cb, half* stage, float (&acc)[TMT][TNB][4]) {
++    constexpr int TWD = tf_exl3::tile_words<K2>(), PIECES = TWD / 4, SH = pd_stage<K2>();
++    const int warp = threadIdx.x >> 5, lane = threadIdx.x & 31;
++    const int chunks = K / TBK;
++    const int nblocks = (cnt + 15) >> 4;
++#pragma unroll
++    for (int i = 0; i < TMT; ++i)
++#pragma unroll
++        for (int j = 0; j < TNB; ++j)
++#pragma unroll
++            for (int c = 0; c < 4; ++c) acc[i][j][c] = 0.f;
++    auto load = [&](int chunk) {
++        half* dst = stage + (size_t)(chunk % TSTAGES) * SH;
++        const int k0 = chunk * TBK;
++        for (int idx = threadIdx.x; idx < TPM * (TBK / 8); idx += TT) {
++            const int i = idx / (TBK / 8), j = idx % (TBK / 8);
++            if (i >= nblocks * 16) continue;
++            const int r = rows_sh[i];
++            cp_async16(dst + (size_t)i * TXS + j * 8, X + (size_t)(r < 0 ? 0 : r) * K + k0 + j * 8, r >= 0);
++        }
++        uint32_t* wdst = reinterpret_cast<uint32_t*>(dst + (size_t)TPM * TXS);
++        for (int idx = threadIdx.x; idx < 16 * TKT * PIECES; idx += TT) {
++            const int q = idx / (TKT * PIECES), kk = (idx / PIECES) % TKT, part = idx % PIECES;
++            const uint32_t* src = T + (((size_t)chunk * TKT + kk) * NTILES + cb * 16 + q) * TWD + part * 4;
++            cp_async16(wdst + ((size_t)q * TKT + kk) * TWD + part * 4, src, true);
++        }
++    };
++#pragma unroll
++    for (int c = 0; c < TSTAGES - 1; ++c) {
++        if (c < chunks) load(c);
++        cp_commit();
++    }
++    for (int c = 0; c < chunks; ++c) {
++        cp_wait<TSTAGES - 2>();
++        __syncthreads();
++        if (c + TSTAGES - 1 < chunks) load(c + TSTAGES - 1);
++        cp_commit();
++        const half* xs = stage + (size_t)(c % TSTAGES) * SH;
++        const uint32_t* ws = reinterpret_cast<const uint32_t*>(xs + (size_t)TPM * TXS);
++#pragma unroll
++        for (int kk = 0; kk < TKT; ++kk) {
++            uint32_t a[TMT][4];
++#pragma unroll
++            for (int i = 0; i < TMT; ++i) {
++                uint32_t b0[2], b1[2];
++                pd_decode<K2, CB>(ws + ((size_t)(warp * TMT + i) * TKT + kk) * TWD, lane, b0, b1);
++                a[i][0] = b0[0]; a[i][1] = b1[0]; a[i][2] = b0[1]; a[i][3] = b1[1];
++            }
++#pragma unroll
++            for (int jb = 0; jb < TPM / 16; ++jb) {
++                if (jb < nblocks) {
++                    uint32_t r[4];
++                    const int row = jb * 16 + (lane & 7) + ((lane >> 4) & 1) * 8;
++                    ldmatrix4(r, xs + (size_t)row * TXS + kk * 16 + ((lane >> 3) & 1) * 8);
++                    const uint32_t bl[2] = {r[0], r[1]}, bh[2] = {r[2], r[3]};
++#pragma unroll
++                    for (int i = 0; i < TMT; ++i) {
++                        mma16816(acc[i][2 * jb], a[i], bl);
++                        mma16816(acc[i][2 * jb + 1], a[i], bh);
++                    }
++                }
++            }
++        }
++    }
++    cp_wait<0>();
++}
++}  // namespace inkling2
++
++// Grid (n / 256, item), 256 threads; standard plans of up to 64 members (items of expert, first, count); z split 0.
++extern "C" __global__ void __launch_bounds__(256) tf_ik_prompt_dot(const tf_exl3::GroupedArgs a) {
++    using namespace tf_exl3_prompt;
++    const int cb = blockIdx.x, item = blockIdx.y;
++    if (item >= a.ucount[0]) return;
++    const int e = a.uids[3 * item];
++    if (e == a.skip) return;
++    const int first = a.uids[3 * item + 1], cnt = a.uids[3 * item + 2];
++    __shared__ int rows_sh[TPM];
++    __shared__ __align__(16) half stage[TSTAGES * inkling2::pd_stage<8>()];
++    if (threadIdx.x < TPM) rows_sh[threadIdx.x] = (int)threadIdx.x < cnt ? a.members[first + threadIdx.x] : -1;
++    __syncthreads();
++    const uint32_t* T = reinterpret_cast<const uint32_t*>(a.tp0[e]);
++    float acc[TMT][TNB][4];
++    switch (a.k2_0[e]) {
++#define TF_IK_PD_CASE(K2_)                                                                           \
++    case K2_:                                                                                        \
++        inkling2::pd_main<K2_, 2>(a.x0, T, rows_sh, cnt, a.k, a.n >> 4, cb, stage, acc);             \
++        break;
++        TF_IK_PD_CASE(2)
++        TF_IK_PD_CASE(3)
++        TF_IK_PD_CASE(4)
++        TF_IK_PD_CASE(5)
++        TF_IK_PD_CASE(6)
++        TF_IK_PD_CASE(7)
++        TF_IK_PD_CASE(8)
++#undef TF_IK_PD_CASE
++        default:
++            __trap();
++    }
++    const int warp = threadIdx.x >> 5, lane = threadIdx.x & 31, g = lane >> 2, t = lane & 3;
++    const int nblocks = (cnt + 15) >> 4;
++#pragma unroll
++    for (int i = 0; i < TMT; ++i) {
++        const int col = (cb * 16 + warp * TMT + i) * 16 + g;
++#pragma unroll
++        for (int nb = 0; nb < TNB; ++nb) {
++            if (nb / 2 >= nblocks) continue;
++            const int r0 = rows_sh[nb * 8 + 2 * t], r1 = rows_sh[nb * 8 + 2 * t + 1];
++            if (r0 >= 0) {
++                a.z[(size_t)r0 * a.n + col] = acc[i][nb][0];
++                a.z[(size_t)r0 * a.n + col + 8] = acc[i][nb][2];
++            }
++            if (r1 >= 0) {
++                a.z[(size_t)r1 * a.n + col] = acc[i][nb][1];
++                a.z[(size_t)r1 * a.n + col + 8] = acc[i][nb][3];
++            }
++        }
++    }
++}
+diff --git a/zig/src/families/inkling2/dump_main.zig b/zig/src/families/inkling2/dump_main.zig
+index 901c0733..77ac75b8 100644
+--- a/zig/src/families/inkling2/dump_main.zig
++++ b/zig/src/families/inkling2/dump_main.zig
+@@ -36,7 +36,7 @@ pub fn main(init: std.process.Init) !u8 {
+     defer lt.close();
+     var w = try ik.weights.load(gpa, io, &driver, args[1], try ik.config.Share.init(0, 1), count);
+     defer w.deinit();
+-    var s = try ik.state.State.init(gpa, &driver, &w, @max(ids.len, 32));
++    var s = try ik.state.State.init(gpa, &driver, &w, @max(ids.len, 32), ik.state.prompt_rows);
+     defer s.deinit();
+     var f: ik.forward.Forward = .{ .gpa = gpa, .d = &driver, .stream = stream, .w = &w, .s = &s, .k = &kernels, .lt = &lt };
+     defer f.deinit();
+diff --git a/zig/src/families/inkling2/forward.zig b/zig/src/families/inkling2/forward.zig
+index 741d8526..aacc307c 100644
+--- a/zig/src/families/inkling2/forward.zig
++++ b/zig/src/families/inkling2/forward.zig
+@@ -157,13 +157,19 @@ pub const Forward = struct {
+         try f.k.go(.conv_commit, f.stream, .{ .x = ceil(c.width, 256) }, 256, .{ input, history, int(rows), int(c.width) });
+     }
+ 
++    fn planTile(rows: usize) usize {
++        return if (rows >= kern.prompt_tile_rows) kern.prompt_tile else 16;
++    }
++
+     fn projectExperts(f: *Forward, m: wt.Matrix, input: u64, input_slots: usize, output: u64, rows: usize, splits: usize) !void {
+         const pairs = rows * cfg.topk;
+         const count = f.w.share.expertCount();
+-        const items = cuda.grouped.maxItems(pairs, count + 1, 16);
++        const tile = planTile(rows);
++        const sk = if (tile == kern.prompt_tile) 1 else splits; // the prompt dot sums the whole K in one block
++        const items = cuda.grouped.maxItems(pairs, count + 1, tile);
+         try f.k.go(.rotate, f.stream, .{ .x = @intCast(pairs), .y = @intCast(m.k / 128) }, 32, .{ input, f.s.picks, m.suh, f.s.rotated, int(m.k), int(input_slots), int(count) });
+-        try f.k.dot(f.stream, .{ .x0 = f.s.rotated, .x1 = f.s.rotated, .tp0 = m.ptrs, .tp1 = m.ptrs, .k2_0 = m.bits, .k2_1 = m.bits, .uids = f.s.plan.items, .ucount = f.s.plan.counts, .members = f.s.plan.members, .z = f.s.z, .k = int(m.k), .n = int(m.n), .p = int(pairs), .sk = int(splits), .maxm = 16, .slots = cfg.topk, .nu = int(items), .mats = 1, .ns = 0, .standard = 1, .skip = int(count) });
+-        try f.k.go(.unrotate, f.stream, .{ .x = @intCast(pairs), .y = @intCast(m.n / 128) }, 32, .{ f.s.z, f.s.picks, m.svh, output, int(pairs), int(m.n), int(splits), int(count) });
++        try f.k.dot(f.stream, .{ .x0 = f.s.rotated, .x1 = f.s.rotated, .tp0 = m.ptrs, .tp1 = m.ptrs, .k2_0 = m.bits, .k2_1 = m.bits, .uids = f.s.plan.items, .ucount = f.s.plan.counts, .members = f.s.plan.members, .z = f.s.z, .k = int(m.k), .n = int(m.n), .p = int(pairs), .sk = int(sk), .maxm = int(tile), .slots = cfg.topk, .nu = int(items), .mats = 1, .ns = 0, .standard = 1, .skip = int(count) });
++        try f.k.go(.unrotate, f.stream, .{ .x = @intCast(pairs), .y = @intCast(m.n / 128) }, 32, .{ f.s.z, f.s.picks, m.svh, output, int(pairs), int(m.n), int(sk), int(count) });
+     }
+ 
+     /// Between requests: whether the next one takes the refusal edit (it must be loaded to take it).
+@@ -252,7 +258,7 @@ pub const Forward = struct {
+         try f.k.go(.route, stream, .{ .x = @intCast(rows) }, 512, .{ s.router, l.router_bias, s.picks, s.gamma, int(share.expertStart()), int(share.expertCount()) });
+         try f.k.go(.quant, stream, .{ .x = @intCast(rows) }, kern.quantThreads(h), .{ s.mlp_input, s.quant_up, int(h), @as(i32, @intFromBool(index < 40)) });
+         const pairs = rows * cfg.topk;
+-        try f.k.plan.route(stream, s.picks, pairs, share.expertCount() + 1, 16, s.plan);
++        try f.k.plan.route(stream, s.picks, pairs, share.expertCount() + 1, planTile(rows), s.plan);
+         try f.zero(s.gu, pairs * h * 2);
+         try f.zero(s.down, pairs * h * 2);
+         try f.projectExperts(l.w13, s.quant_up, cfg.topk, s.gu, rows, 4);
+diff --git a/zig/src/families/inkling2/kernels.zig b/zig/src/families/inkling2/kernels.zig
+index 5eb6ffa0..ea53c710 100644
+--- a/zig/src/families/inkling2/kernels.zig
++++ b/zig/src/families/inkling2/kernels.zig
+@@ -2,7 +2,7 @@
+ const std = @import("std");
+ const cuda = @import("cuda");
+ 
+-pub const Op = enum { mix, finish, rank_sum, logits, quant, swiglu, route, moe_sum, conv, conv_commit, prep, relative, attention, attention_decode, rotate, unrotate, embed, norm, top1, fp4_amax, fp4_quant, embed_shard, embed_pick, split, attention_part, attention_merge, restore, top1p, edit };
++pub const Op = enum { mix, finish, rank_sum, logits, quant, swiglu, route, moe_sum, conv, conv_commit, prep, relative, attention, attention_decode, rotate, unrotate, embed, norm, top1, fp4_amax, fp4_quant, embed_shard, embed_pick, split, attention_part, attention_merge, restore, top1p, edit, prompt_dot };
+ 
+ pub const Mix = extern struct {
+     partial: u64,
+@@ -57,6 +57,11 @@ pub const Dot = extern struct {
+     standard: i32,
+     skip: i32,
+ };
++/// The plan tile of prompt passes (tf_ik_prompt_dot, one K split); decode and verify rows keep 16.
++pub const prompt_tile = 64;
++/// Passes with at least this many rows take the prompt tile.
++pub const prompt_tile_rows = 32;
++
+ pub const Pick = extern struct { value: f32, token: u32, nonfinite: u32, pad: u32 };
+ 
+ pub const Kernels = struct {
+@@ -104,6 +109,8 @@ pub const Kernels = struct {
+     pub fn dot(k: *const Kernels, s: cuda.Stream, a: Dot) !void {
+         var args: cuda.Args = .{};
+         args.add(a);
++        if (a.maxm == prompt_tile) // tf_ik_prompt_dot: 256 columns of one expert for up to 64 members, the whole K a block
++            return cuda.launch.launch(k.functions.get(.prompt_dot), .{ .grid = .{ .x = @intCast(@divExact(a.n, 256)), .y = @intCast(a.nu) }, .block = .{ .x = 256 } }, s, &args);
+         try cuda.launch.launch(k.x3.grouped[2], .{ .grid = .{ .x = @intCast(a.nu), .y = @intCast(@divExact(a.n, 128)), .z = @intCast(a.sk * @divTrunc(a.maxm + 15, 16)) }, .block = .{ .x = 128 } }, s, &args);
+     }
+ };
+diff --git a/zig/src/families/inkling2/native.zig b/zig/src/families/inkling2/native.zig
+index b1d67bd2..400014e4 100644
+--- a/zig/src/families/inkling2/native.zig
++++ b/zig/src/families/inkling2/native.zig
+@@ -151,7 +151,7 @@ fn openPair(gpa: std.mem.Allocator, io: std.Io, ctx: *const cuda.Context, dir: [
+     errdefer own.w.deinit();
+     const kv = try share.kvBytes(o.context) + if (o.drafts) try @import("draft_config.zig").kvBytes(share, o.context) else 0;
+     if (o.room) |r| if ((r.read(r.ctx) orelse 0) < kv + (1 << 30)) return error.InklingKvRoom;
+-    own.s = try state.State.init(gpa, ctx.d, &own.w, o.context);
++    own.s = try state.State.init(gpa, ctx.d, &own.w, o.context, try environment.read(usize, "TF_INKLING_PROMPT_ROWS", state.prompt_rows));
+     errdefer own.s.deinit();
+     own.group = .{ .lib = own.lib.?, .comm = own.comm, .rank = share.rank, .world = 2 };
+     try own.group.?.openRoce(gpa, io, ctx.d, own.stream, 1 << 20);
+diff --git a/zig/src/families/inkling2/state.zig b/zig/src/families/inkling2/state.zig
+index 61429166..f4380056 100644
+--- a/zig/src/families/inkling2/state.zig
++++ b/zig/src/families/inkling2/state.zig
+@@ -60,9 +60,9 @@ pub const State = struct {
+         return b.ptr;
+     }
+ 
+-    pub fn init(gpa: std.mem.Allocator, d: *const cuda.Driver, w: *const weights.Weights, context: usize) !State {
++    pub fn init(gpa: std.mem.Allocator, d: *const cuda.Driver, w: *const weights.Weights, context: usize, rows: usize) !State {
+         if (context == 0 or context > cfg.maximum_context) return error.InklingContext;
+-        var s: State = .{ .gpa = gpa, .d = d, .context = context, .rows = @min(context, prompt_rows) };
++        var s: State = .{ .gpa = gpa, .d = d, .context = context, .rows = @min(context, rows) };
+         errdefer s.deinit();
+         const r = s.rows;
+         const h = cfg.hidden;
+diff --git a/zig/src/platform/environment.zig b/zig/src/platform/environment.zig
+index 0c2fb683..2fd9c43b 100644
+--- a/zig/src/platform/environment.zig
++++ b/zig/src/platform/environment.zig
+@@ -35,6 +35,7 @@ pub const rules = [_]Rule{
+     .{ .name = "TF_INKLING_EDIT", .scope = .cuda, .kind = .path, .forms = "tools/export_edit.py's refusal-edit folder without control characters (requests naming TENSORFOLD_KEYS_MODEL take it)" },
+     .{ .name = "TF_INKLING_DRAFT_FLOOR", .scope = .cuda, .kind = .real, .max = 1, .forms = "a chained draft chance from 0 to 1 (default 0.6: drafts under it are not verified or drafted further; 0 keeps the acceptance-rate depth rule)" },
+     .{ .name = "TF_INKLING_GRAPHS", .scope = .cuda, .kind = .flag, .forms = "0 or 1 (default 1: one-token and verify steps replay CUDA graphs)" },
++    .{ .name = "TF_INKLING_PROMPT_ROWS", .scope = .cuda, .kind = .u32, .min = 1, .max = 4096, .forms = "prompt rows a pass, 1 to 4096 (default 256; scratch grows about 1.5 MB a row)" },
+     .{ .name = "TF_INKLING_VERIFY_CHECK", .scope = .cuda, .kind = .flag, .forms = "0 or 1" },
+     .{ .name = "TF_INKLING_RANK", .scope = .cuda, .kind = .u32, .max = 1, .forms = "rank 0 or 1" },
+     .{ .name = "TF_INKLING_WORLD", .scope = .cuda, .kind = .u32, .only = &.{ 1, 2 }, .forms = "one rank for operator checks or two for serving" },
+diff --git a/zig/src/platform/environment_test.zig b/zig/src/platform/environment_test.zig
+index d47c1bcc..749ab179 100644
+--- a/zig/src/platform/environment_test.zig
++++ b/zig/src/platform/environment_test.zig
+@@ -68,6 +68,7 @@ const valid = [_]Case{
+     .{ .name = "TF_PROMPT_INTERMEDIATE", .raw = "0", .n = 0 },
+     .{ .name = "TF_PROMPT_INTERMEDIATE", .raw = "1", .n = 1 },
+     .{ .name = "TF_ROCE_GID_INDEX", .raw = "2147483647", .n = 2147483647 },
++    .{ .name = "TF_INKLING_PROMPT_ROWS", .raw = "1024", .n = 1024 },
+     .{ .name = "TF_INKLING_VERIFY_CHECK", .raw = "0", .n = 0 },
+     .{ .name = "TF_INKLING_VERIFY_CHECK", .raw = "1", .n = 1 },
+     .{ .name = "TF_INKLING_FP4", .raw = "off", .n = 0 },
+-- 
+2.56.1
+
+
+From e6dc7e6ff2e56509e45ad218151ce708acf24428 Mon Sep 17 00:00:00 2001
+From: LPFchan <me@lost.plus>
+Date: Wed, 18 Nov 2026 08:29:54 +0900
+Subject: [PATCH 20/20] inkling2: turn reuse: a prompt resumes from the
+ furthest kept turn that starts it (the last prompt's end, or the server's
+ system-prompt cuts); a kept turn copies each local ring's last 1024 rows,
+ every conv history and the drafter's local rings, and reads the one live set
+ of global caches, so a pass drops the turns past its start
+
+---
+ zig/src/families/inkling2/backend.zig  |  34 +++++++--
+ zig/src/families/inkling2/draft.zig    |   2 +
+ zig/src/families/inkling2/forward.zig  |  55 ++++++++++++-
+ zig/src/families/inkling2/inkling2.zig |   1 +
+ zig/src/families/inkling2/link.zig     |  15 ++--
+ zig/src/families/inkling2/native.zig   |   4 +-
+ zig/src/families/inkling2/state.zig    |   3 +
+ zig/src/families/inkling2/turns.zig    | 102 +++++++++++++++++++++++++
+ 8 files changed, 200 insertions(+), 16 deletions(-)
+ create mode 100644 zig/src/families/inkling2/turns.zig
+
+diff --git a/zig/src/families/inkling2/backend.zig b/zig/src/families/inkling2/backend.zig
+index 2d4afbc6..69ddeb7f 100644
+--- a/zig/src/families/inkling2/backend.zig
++++ b/zig/src/families/inkling2/backend.zig
+@@ -3,6 +3,7 @@ const std = @import("std");
+ const lanes = @import("lanes");
+ const forward = @import("forward.zig");
+ const link = @import("link.zig");
++const turns = @import("turns.zig");
+ const be = lanes.backend;
+ 
+ pub const Backend = struct {
+@@ -18,6 +19,9 @@ pub const Backend = struct {
+     pending_keep: u32 = 0, // a keep not yet sent to the peer: it rides with the next draft as one record
+     rounds: usize = 0,
+     verified: usize = 0,
++    kept: [turns.slots]turns.Kept = @splat(.{}), // turns.zig: where earlier prompts' state was kept
++    keys: bool = false, // the edit the global caches were last filled with
++    marks: [turns.slots]usize = @splat(0), // where this prompt pass keeps its state, by slot
+ 
+     pub fn backend(b: *Backend) be.Backend {
+         return .{ .ptr = b, .vtable = &vtable };
+@@ -64,15 +68,21 @@ pub const Backend = struct {
+         if (s.sampling) |sp| if (sp.temperature > 0) return error.InklingGreedyOnly;
+         if (s.prompt().len == 0 or s.prompt().len + s.max_new > b.f.s.context) return error.InklingContext;
+         if (s.keys and b.f.edit == null) return error.InklingNoEdit;
+-        try b.tell(.begin, &.{@intFromBool(s.keys)}, false);
+-        try b.f.clear();
+-        try b.f.setEdit(s.keys);
++        const prompt = s.prompt();
++        const slot = if (s.keys == b.keys) turns.find(&b.kept, prompt) else null;
++        const at = if (slot) |i| b.kept[i].at else 0;
++        turns.drop(&b.kept, at);
++        b.keys = s.keys;
++        b.marks = turns.marks(prompt.len, s.shared_prefixes, at);
++        const from: u32 = if (slot) |i| @intCast(i + 1) else 0;
++        try b.tell(.begin, &.{ @intFromBool(s.keys), from, @intCast(at) }, false);
++        try b.f.begin(s.keys, from, at);
+         b.active = s;
+-        b.filling = 0;
++        b.filling = at;
+         b.held_n = 0;
+         b.rounds = 0;
+         b.verified = 0;
+-        s.cached = 0;
++        s.cached = @intCast(at);
+         if (s.reuse.saved != null) s.reuse_failed = true;
+     }
+ 
+@@ -88,14 +98,26 @@ pub const Backend = struct {
+         if (s.isCancelled()) return error.Cancelled;
+         const prompt = s.prompt();
+         const count = if (max_rows == 0) b.f.s.rows else @min(max_rows, b.f.s.rows);
+-        const end = @min(prompt.len, b.filling + count);
++        var end = @min(prompt.len, b.filling + count);
++        for (b.marks) |m| if (m > b.filling and m < end) {
++            end = m;
++        };
+         const done = end == prompt.len;
+         try b.run(prompt[b.filling..end], done);
+         b.filling = end;
+         s.fill_at.store(@intCast(end), .monotonic);
++        for (b.marks, 0..) |m, i| if (m == end) try b.save(i, prompt[0..end]);
+         return done;
+     }
+ 
++    /// Keep the state after `tokens` in turn `slot`, for a later prompt that starts with them.
++    fn save(b: *Backend, slot: usize, tokens: []const u32) !void {
++        b.kept[slot] = .{};
++        try b.tell(.save, &.{@intCast(slot)}, false);
++        try b.f.turn(slot, tokens.len, false);
++        b.kept[slot] = .{ .at = tokens.len, .hash = turns.hash(tokens) };
++    }
++
+     fn prefill(p: *anyopaque, s: *lanes.Stream) anyerror!void {
+         while (!try step(p, s, 0)) {}
+     }
+diff --git a/zig/src/families/inkling2/draft.zig b/zig/src/families/inkling2/draft.zig
+index 81975ffa..3f099c16 100644
+--- a/zig/src/families/inkling2/draft.zig
++++ b/zig/src/families/inkling2/draft.zig
+@@ -71,6 +71,7 @@ pub const Draft = struct {
+     snapshot_stride: usize = 0,
+     verify_logits: u64 = 0,
+     verify_picks: u64 = 0,
++    kept: [@import("turns.zig").slots]u64 = @splat(0), // each kept turn's copy of the local rings' windows
+ 
+     fn take(d: *Draft, bytes: usize) !u64 {
+         var b = try cuda.DeviceBuffer.alloc(d.owner.d, @max(256, bytes));
+@@ -150,6 +151,7 @@ pub const Draft = struct {
+         d.snapshots = try d.take(9 * d.snapshot_stride * 2);
+         d.verify_logits = try d.take(8 * d.fold.n * 4);
+         d.verify_picks = try d.take(8 * 32);
++        for (&d.kept) |*k| k.* = try d.take(@import("turns.zig").draftBytes(share));
+         std.log.info("inkling DSpark: {d:.3} GiB weights, KV and scratch per rank", .{@as(f64, @floatFromInt(d.owner.bytes)) / (1 << 30)});
+         return d;
+     }
+diff --git a/zig/src/families/inkling2/forward.zig b/zig/src/families/inkling2/forward.zig
+index aacc307c..b958c35b 100644
+--- a/zig/src/families/inkling2/forward.zig
++++ b/zig/src/families/inkling2/forward.zig
+@@ -5,6 +5,7 @@ const cfg = @import("config.zig");
+ const wt = @import("weights.zig");
+ const st = @import("state.zig");
+ const kern = @import("kernels.zig");
++const turns = @import("turns.zig");
+ const int = kern.int;
+ const ceil = kern.ceil;
+ 
+@@ -422,10 +423,58 @@ pub const Forward = struct {
+         if (count > 0) try d.ingest(f, d.pos, count);
+     }
+ 
+-    pub fn clear(f: *Forward) !void {
+-        try f.s.clear();
+-        if (f.drafter) |d| d.pos = 0;
++    /// A request's first pass: from 0, or from kept turn `slot` - 1 at its position `at` (turns.zig); then its edit.
++    pub fn begin(f: *Forward, keys: bool, slot: usize, at: usize) !void {
++        if (slot == 0) {
++            try f.s.clear();
++            if (f.drafter) |d| d.pos = 0;
++        } else try f.turn(slot - 1, at, true);
+         if (f.audit) |*a| a.checked = 0;
++        try f.setEdit(keys);
++    }
++
++    /// Copy into kept turn `slot` what a pass resumed at `at` (the position now) cannot rebuild from the global caches,
++    /// or (`back`) copy it back and stand at `at`.
++    pub fn turn(f: *Forward, slot: usize, at: usize, back: bool) !void {
++        if (slot >= turns.slots or at == 0 or at > f.s.context or (!back and at != f.s.pos)) return error.InklingPosition;
++        const row = f.w.share.keyHeads() * 128 * 2;
++        var kept = f.s.kept[slot];
++        for (f.s.cache, 0..) |c, i| {
++            if (cfg.local(i)) for ([_]u64{ c.k, c.v }) |ring| {
++                try f.ringRows(ring, c.capacity, kept, at, row, back);
++                kept += turns.window * row;
++            };
++            for (c.conv, 0..) |history, j| {
++                const bytes = turns.convBytes(f.w.share, j);
++                try if (back) f.copy(history, kept, bytes) else f.copy(kept, history, bytes);
++                kept += bytes;
++            }
++        }
++        if (f.drafter) |d| {
++            kept = d.kept[slot];
++            for (d.layers, 0..) |l, i| if (@import("draft_config.zig").local(i)) for ([_]u64{ l.cache_k, l.cache_v }) |ring| {
++                try f.ringRows(ring, l.capacity, kept, at, row, back);
++                kept += turns.window * row;
++            };
++            // its markov state comes from the last row ingested, which the resumed pass makes
++            if (back) d.pos = at;
++        }
++        if (!back) return;
++        f.s.pos = at;
++        f.verify_start = at;
++    }
++
++    /// A ring's rows for positions [at - window, at), against `kept`'s rows in position order.
++    fn ringRows(f: *Forward, cache: u64, capacity: usize, kept: u64, at: usize, row: usize, back: bool) !void {
++        const first = at -| turns.window;
++        var p = first;
++        while (p < at) {
++            const n = @min(at - p, capacity - p % capacity);
++            const live = cache + (p % capacity) * row;
++            const saved = kept + (p - first) * row;
++            try if (back) f.copy(live, saved, n * row) else f.copy(saved, live, n * row);
++            p += n;
++        }
+     }
+ 
+     pub fn pick(f: *Forward) !u32 {
+diff --git a/zig/src/families/inkling2/inkling2.zig b/zig/src/families/inkling2/inkling2.zig
+index b7b7f0f6..34238da1 100644
+--- a/zig/src/families/inkling2/inkling2.zig
++++ b/zig/src/families/inkling2/inkling2.zig
+@@ -15,4 +15,5 @@ test {
+     _ = kernels;
+     _ = native;
+     _ = @import("link.zig");
++    _ = @import("turns.zig");
+ }
+diff --git a/zig/src/families/inkling2/link.zig b/zig/src/families/inkling2/link.zig
+index a5034401..fe84577f 100644
+--- a/zig/src/families/inkling2/link.zig
++++ b/zig/src/families/inkling2/link.zig
+@@ -3,7 +3,7 @@ const std = @import("std");
+ const cuda = @import("cuda");
+ const forward = @import("forward.zig");
+ 
+-pub const Kind = enum(u32) { begin = 1, rows, end, verify, keep, draft, keep_draft };
++pub const Kind = enum(u32) { begin = 1, rows, end, verify, keep, draft, keep_draft, save };
+ /// Up to `inline_ids` ids ride in the header itself, so a verify, keep or draft record is one broadcast.
+ const inline_ids = 12;
+ const Header = extern struct { kind: u32, rows: u32 = 0, final: u32 = 0, reserved: u32 = 0, ids: [inline_ids]u32 = @splat(0) };
+@@ -54,12 +54,11 @@ pub const Link = struct {
+             const kind = std.enums.fromInt(Kind, header.kind) orelse return error.InklingCommand;
+             switch (kind) {
+                 .begin => {
+-                    // its one id: whether this request takes the refusal edit
+-                    if (header.rows != 1 or header.ids[0] > 1) return error.InklingCommand;
+-                    try f.clear();
+-                    try f.setEdit(header.ids[0] == 1);
++                    // whether this request takes the refusal edit, the kept turn it resumes (slot + 1, 0: none) and where
++                    if (header.rows != 3 or header.ids[0] > 1) return error.InklingCommand;
++                    try f.begin(header.ids[0] == 1, header.ids[1], header.ids[2]);
+                 },
+-                .rows, .verify, .keep, .draft, .keep_draft => {
++                .rows, .verify, .keep, .draft, .keep_draft, .save => {
+                     if (header.rows == 0 or header.rows > ids.len or header.final > 1) return error.InklingCommand;
+                     const values = ids[0..header.rows];
+                     if (values.len <= inline_ids) @memcpy(values, header.ids[0..values.len]) else {
+@@ -77,6 +76,10 @@ pub const Link = struct {
+                             if (values.len != 1) return error.InklingCommand;
+                             try f.keep(values[0]);
+                         },
++                        .save => {
++                            if (values.len != 1) return error.InklingCommand;
++                            try f.turn(values[0], f.s.pos, false);
++                        },
+                         .draft, .keep_draft => {
+                             // keep_draft: the keep and the next draft in one record, queued back to back as on rank 0
+                             const extra: usize = @intFromBool(kind == .keep_draft);
+diff --git a/zig/src/families/inkling2/native.zig b/zig/src/families/inkling2/native.zig
+index 400014e4..855b5143 100644
+--- a/zig/src/families/inkling2/native.zig
++++ b/zig/src/families/inkling2/native.zig
+@@ -149,7 +149,9 @@ fn openPair(gpa: std.mem.Allocator, io: std.Io, ctx: *const cuda.Context, dir: [
+     }
+     own.w = try wt.loadProfile(gpa, io, ctx.d, dir, share, cfg.layers, o.drafts, if (quant) |*q| q else null, try expertsDir());
+     errdefer own.w.deinit();
+-    const kv = try share.kvBytes(o.context) + if (o.drafts) try @import("draft_config.zig").kvBytes(share, o.context) else 0;
++    const turns = @import("turns.zig");
++    const kept = turns.slots * (turns.targetBytes(share) + if (o.drafts) turns.draftBytes(share) else 0);
++    const kv = try share.kvBytes(o.context) + kept + if (o.drafts) try @import("draft_config.zig").kvBytes(share, o.context) else 0;
+     if (o.room) |r| if ((r.read(r.ctx) orelse 0) < kv + (1 << 30)) return error.InklingKvRoom;
+     own.s = try state.State.init(gpa, ctx.d, &own.w, o.context, try environment.read(usize, "TF_INKLING_PROMPT_ROWS", state.prompt_rows));
+     errdefer own.s.deinit();
+diff --git a/zig/src/families/inkling2/state.zig b/zig/src/families/inkling2/state.zig
+index f4380056..2c37abc2 100644
+--- a/zig/src/families/inkling2/state.zig
++++ b/zig/src/families/inkling2/state.zig
+@@ -3,6 +3,7 @@ const std = @import("std");
+ const cuda = @import("cuda");
+ const cfg = @import("config.zig");
+ const weights = @import("weights.zig");
++const turns = @import("turns.zig");
+ 
+ pub const prompt_rows = 256;
+ pub const Cache = struct { k: u64, v: u64, capacity: usize, conv: [4]u64 };
+@@ -12,6 +13,7 @@ pub const State = struct {
+     d: *const cuda.Driver,
+     owned: std.ArrayList(cuda.DeviceBuffer) = .empty,
+     cache: []Cache = &.{},
++    kept: [turns.slots]u64 = @splat(0), // turns.zig: each kept turn's copy of the local rings' windows and histories
+     rows: usize,
+     context: usize,
+     pos: usize = 0,
+@@ -75,6 +77,7 @@ pub const State = struct {
+             c.* = .{ .capacity = capacity, .k = try s.take(capacity * keys * 128 * 2), .v = try s.take(capacity * keys * 128 * 2), .conv = undefined };
+             for (&c.conv, 0..) |*p, j| p.* = try s.take(3 * (if (j < 2) keys * 128 else h) * 2);
+         }
++        for (&s.kept) |*k| k.* = try s.take(turns.targetBytes(w.share));
+         s.ids = try s.take(r * 4);
+         s.partial = try s.take(r * h * 2);
+         s.blocks = try s.take(8 * r * h * 2);
+diff --git a/zig/src/families/inkling2/turns.zig b/zig/src/families/inkling2/turns.zig
+new file mode 100644
+index 00000000..4f3c91c9
+--- /dev/null
++++ b/zig/src/families/inkling2/turns.zig
+@@ -0,0 +1,102 @@
++//! Turn reuse: a prompt's state kept at a few of its positions, so a later prompt that starts with the same tokens
++//! resumes there instead of reading them again. The global layers' caches are not copied: every kept turn reads the
++//! one live set, so a turn stays good only while no pass since has started before its position. What a resumed pass
++//! cannot rebuild from them is copied (Forward.turn): each local ring's last `window` rows, every convolution history,
++//! and the drafter's local rings.
++const std = @import("std");
++const cfg = @import("config.zig");
++const dc = @import("draft_config.zig");
++
++/// Slot 0 keeps the end of the last prompt; 1 to 3 the server's shared-prefix cuts (Request.shared_prefixes), latest first.
++pub const slots = 4;
++/// The ring rows a pass resumed at `at` reads back: positions [at - window, at).
++pub const window = cfg.local_window;
++
++/// A kept turn: its position (0: none) and its tokens' hash.
++pub const Kept = struct { at: usize = 0, hash: u64 = 0 };
++
++pub fn hash(tokens: []const u32) u64 {
++    return std.hash.Wyhash.hash(0, std.mem.sliceAsBytes(tokens));
++}
++
++/// The kept turn a prompt resumes from: the furthest whose tokens start it, short of its last token (null: none).
++pub fn find(kept: []const Kept, prompt: []const u32) ?usize {
++    var best: ?usize = null;
++    for (kept, 0..) |k, i| {
++        if (k.at == 0 or k.at >= prompt.len) continue;
++        if (best) |b| if (k.at <= kept[b].at) continue;
++        if (hash(prompt[0..k.at]) == k.hash) best = i;
++    }
++    return best;
++}
++
++/// A pass resumed at `at` overwrites the global caches from there: every turn kept past it is gone.
++pub fn drop(kept: []Kept, at: usize) void {
++    for (kept) |*k| if (k.at > at) {
++        k.* = .{};
++    };
++}
++
++/// The positions a pass from `at` keeps, by slot (0: none): the prompt's end, then the server's cuts (ascending).
++pub fn marks(len: usize, cuts: []const u32, at: usize) [slots]usize {
++    var out: [slots]usize = @splat(0);
++    out[0] = len;
++    for (cuts, 0..) |c, j| {
++        const slot = cuts.len - j;
++        if (slot < slots and c > at and c < len) out[slot] = c;
++    }
++    return out;
++}
++
++pub fn convBytes(share: cfg.Share, j: usize) usize {
++    return 3 * (if (j < 2) share.keyHeads() * 128 else cfg.hidden) * 2;
++}
++
++/// One kept turn's copy of the target's state.
++pub fn targetBytes(share: cfg.Share) usize {
++    var n: usize = 0;
++    for (0..cfg.layers) |i| {
++        if (cfg.local(i)) n += 2 * window * share.keyHeads() * 128 * 2;
++        for (0..4) |j| n += convBytes(share, j);
++    }
++    return n;
++}
++
++/// One kept turn's copy of the drafter's local rings.
++pub fn draftBytes(share: cfg.Share) usize {
++    var n: usize = 0;
++    for (0..dc.layers) |i| if (dc.local(i)) {
++        n += 2 * window * share.keyHeads() * 128 * 2;
++    };
++    return n;
++}
++
++test "a prompt resumes from the furthest kept turn that starts it, and a pass drops what it overwrites" {
++    const a = [_]u32{ 1, 2, 3, 4, 5, 6, 7, 8 };
++    var kept: [slots]Kept = @splat(.{});
++    kept[1] = .{ .at = 3, .hash = hash(a[0..3]) };
++    kept[0] = .{ .at = 6, .hash = hash(a[0..6]) };
++    try std.testing.expectEqual(@as(?usize, 0), find(&kept, &a));
++    // another conversation shares only the first cut
++    const b = [_]u32{ 1, 2, 3, 9, 9, 9, 9 };
++    try std.testing.expectEqual(@as(?usize, 1), find(&kept, &b));
++    // the whole prompt kept: its last token still needs a pass for the first draw
++    try std.testing.expectEqual(@as(?usize, 1), find(&kept, a[0..6]));
++    drop(&kept, 3);
++    try std.testing.expect(kept[0].at == 0 and kept[1].at == 3);
++    drop(&kept, 0);
++    try std.testing.expectEqual(@as(?usize, null), find(&kept, &a));
++}
++
++test "a pass keeps its end in slot 0 and the server's cuts past its start, the latest first" {
++    try std.testing.expectEqual([slots]usize{ 9000, 7000, 6488, 4952 }, marks(9000, &.{ 4952, 6488, 7000 }, 0));
++    try std.testing.expectEqual([slots]usize{ 9000, 7000, 0, 0 }, marks(9000, &.{ 4952, 6488, 7000 }, 6488));
++    try std.testing.expectEqual([slots]usize{ 9000, 7000, 6488, 0 }, marks(9000, &.{ 6488, 7000 }, 0));
++    try std.testing.expectEqual([slots]usize{ 40, 0, 0, 0 }, marks(40, &.{}, 0));
++}
++
++test "a kept turn holds the local rings' window and every history" {
++    const share = try cfg.Share.init(0, 2);
++    try std.testing.expectEqual(@as(usize, 40 * 2 * 1024 * 1024 + 48 * (2 * 3072 + 2 * 27648)), targetBytes(share));
++    try std.testing.expectEqual(@as(usize, 4 * 2 * 1024 * 1024), draftBytes(share));
++}
 -- 
 2.56.1
 

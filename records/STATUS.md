@@ -385,6 +385,15 @@ Patch chain in `patches/atomic-llama-cpp/`, applied in order by `Dockerfile`:
 
 ## Recent Changes
 
+- 2026-11-18: **Inkling-2-Small reads prompts faster and resumes turns** —
+  Prompt passes take 2048 tokens through a shared EXL3 prompt kernel: about
+  710 tok/s at 10k tokens (was about 380). A prompt that starts with the last
+  prompt, or with its system prompt, resumes there: the second turn of a
+  39k-token conversation answers in 0.25 s instead of 75 s, and a new session
+  on the same system prompt in 0.18 s. An unrelated request in between drops
+  the kept turns (they share one live cache), and the next turn reads its
+  prompt in full.
+
 - 2026-11-18: **DeepSeek-V4.1-Flash-1017 goes straight to opencode-go** —
   The Sparks now run Inkling-2-Small for the foreseeable future, so Grimoire's
   `DeepSeek-V4.1-Flash-1017` no longer tries spark2:8888 first (a 2 s wait

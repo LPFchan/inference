@@ -7,6 +7,7 @@
 #   EDIT (default 1: OpenUncensored's refusal edit, per request: NAME takes it, NAME-Stock is the model as released),
 #   NAME (default Inkling-2-Small). A request with a temperature decodes greedily (TENSORFOLD_GREEDY_FALLBACK).
 #   TEMPLATE (default templates/inkling2.jinja: the model writes its own headers, so it thinks and calls tools).
+#   PROMPT_ROWS (default 2048): prompt tokens a pass (more fills tf_ik_prompt_dot's 64-member blocks; ~1.4 MB a row).
 #   Thinking is on at effort high unless a request sends reasoning_effort (none turns it off) or enable_thinking false.
 set -euo pipefail
 rank=${1:?rank 0 or 1}; shift
@@ -35,7 +36,8 @@ export TF_INKLING_RANK=$rank TF_INKLING_WORLD=2 TF_INKLING_VERIFY_CHECK=0 \
   TF_ROCE_HCA=rocep1s0f1 NCCL_IB_HCA=rocep1s0f1 \
   NCCL_RUNTIME_CONNECT=0 NCCL_CUMEM_ENABLE=0 NCCL_CUMEM_HOST_ENABLE=0 \
   LD_LIBRARY_PATH=$HOME/inkling-2-small/lib:/usr/local/cuda/lib64 \
-  TF_ROCE=${TF_ROCE:-1} TENSORFOLD_GREEDY_FALLBACK=1 TENSORFOLD_MEMORY_RESERVE_GIB=${RESERVE_GIB:-6} TF_INKLING_FP4=${FP4:-all}
+  TF_ROCE=${TF_ROCE:-1} TENSORFOLD_GREEDY_FALLBACK=1 TENSORFOLD_MEMORY_RESERVE_GIB=${RESERVE_GIB:-6} TF_INKLING_FP4=${FP4:-all} \
+  TF_INKLING_PROMPT_ROWS=${PROMPT_ROWS:-2048}
 exec "$bin" serve "$model" --backend cuda --device 0 --context "${CONTEXT:-131072}" \
   --parallel 1 "${drafts[@]}" "${template[@]}" --reasoning-effort high --temperature 0 --prompt-cache-gib 0 \
   --host "${API_HOST:-127.0.0.1}" --port "${API_PORT:-8000}" --name "$name" \

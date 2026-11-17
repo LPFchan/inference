@@ -49,6 +49,13 @@ so the stock model's kernels and outputs are unchanged.
 
 - Decode, greedy, 131,072-token window: prose 38-42 tok/s, code 69, 8k context 37. About 0.2 s to the first token on
   short prompts. The uncensored name runs 36-39 on prose.
+- Prompt reading: about 710 tok/s at 10k tokens, 520 at 40k (attention grows with length). Passes take 2048 tokens
+  (`PROMPT_ROWS`).
+- Turn reuse: a prompt that starts with the previous prompt, or shares its system prompt, resumes there. A second
+  turn of a 39k-token conversation starts answering in 0.25 s (75 s for the first), and a new session on the same
+  system prompt in 0.18 s. The engine keeps four turns: the last prompt's end and three cuts near the system
+  prompt's end, about 91 MB each per Spark. They all read one live copy of the global layers' cache, so any request
+  that starts elsewhere (even a short unrelated one) drops the turns past where it started.
 - The engine decodes greedily only. `TENSORFOLD_GREEDY_FALLBACK=1` makes a request with a temperature decode greedily
   instead of failing.
 - Tool calls come back as OpenAI `tool_calls` (parallel calls too, streamed whole once each call's message closes).
