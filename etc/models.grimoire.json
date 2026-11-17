@@ -986,7 +986,8 @@
         "completion"
       ],
       "ctx-size": 131072,
-      "added": "2026-11-17T20:36:43.644416+00:00"
+      "added": "2026-11-17T20:36:43.644416+00:00",
+      "family": "inkling"
     }
   },
   "fixed": {
@@ -1012,6 +1013,15 @@
     "glm": {
       "vllm-reasoning-efforts": [
         "low",
+        "high",
+        "max"
+      ],
+      "vllm-default-effort": "high"
+    },
+    "inkling": {
+      "vllm-reasoning-efforts": [
+        "low",
+        "medium",
         "high",
         "max"
       ],
