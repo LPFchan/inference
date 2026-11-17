@@ -7,6 +7,7 @@
 #   EDIT (default 1: OpenUncensored's refusal edit, per request: NAME takes it, NAME-Stock is the model as released),
 #   NAME (default Inkling-2-Small). A request with a temperature decodes greedily (TENSORFOLD_GREEDY_FALLBACK).
 #   TEMPLATE (default templates/inkling2.jinja: the model writes its own headers, so it thinks and calls tools).
+#   Thinking is on at effort high unless a request sends reasoning_effort (none turns it off) or enable_thinking false.
 set -euo pipefail
 rank=${1:?rank 0 or 1}; shift
 master=192.168.100.1
@@ -36,6 +37,6 @@ export TF_INKLING_RANK=$rank TF_INKLING_WORLD=2 TF_INKLING_VERIFY_CHECK=0 \
   LD_LIBRARY_PATH=$HOME/inkling-2-small/lib:/usr/local/cuda/lib64 \
   TF_ROCE=${TF_ROCE:-1} TENSORFOLD_GREEDY_FALLBACK=1 TENSORFOLD_MEMORY_RESERVE_GIB=${RESERVE_GIB:-6} TF_INKLING_FP4=${FP4:-all}
 exec "$bin" serve "$model" --backend cuda --device 0 --context "${CONTEXT:-131072}" \
-  --parallel 1 "${drafts[@]}" "${template[@]}" --no-thinking --temperature 0 --prompt-cache-gib 0 \
+  --parallel 1 "${drafts[@]}" "${template[@]}" --reasoning-effort high --temperature 0 --prompt-cache-gib 0 \
   --host "${API_HOST:-127.0.0.1}" --port "${API_PORT:-8000}" --name "$name" \
   --no-update-check "$@"

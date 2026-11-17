@@ -54,7 +54,6 @@ so the stock model's kernels and outputs are unchanged.
 - Tool calls come back as OpenAI `tool_calls` (parallel calls too, streamed whole once each call's message closes).
   Thinking comes back as `reasoning_content`. The server reads Inkling's messages by token id
   (`zig/src/server/inkling_reply.zig`), and only `<|content_model_end_sampling|>` ends a reply.
-- Thinking is off by default (`--no-thinking`). A request turns it on with `reasoning_effort` (`low`, `medium`,
-  `high`, ...) or `chat_template_kwargs: {"enable_thinking": true}` (effort 0.9). With tools offered the model often
-  writes a one-line thought before a call even with thinking off.
+- Thinking is on at effort high by default (`--reasoning-effort high`). A request sets `reasoning_effort` (`low`,
+  `medium`, ...; `none` turns it off) or `chat_template_kwargs: {"enable_thinking": false}`.
 - Text only: no images.

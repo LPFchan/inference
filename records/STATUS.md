@@ -395,8 +395,8 @@ Patch chain in `patches/atomic-llama-cpp/`, applied in order by `Dockerfile`:
   `Inkling-2-Small-Stock` is the released model on the same port and is not
   in Grimoire. Greedy only (a request's temperature decodes greedily), text
   only. Tool calls come back as OpenAI `tool_calls` and thinking as
-  `reasoning_content`; thinking is off unless a request sends
-  `reasoning_effort`. Decode: prose 38-42 tok/s, code 69, 37 at 8k.
+  `reasoning_content`; thinking defaults to effort high
+  (`reasoning_effort: none` turns it off). Decode: prose 38-42 tok/s, code 69, 37 at 8k.
 
 - 2026-11-18: **GLM-5.3 listed on Grimoire** — `GLM-5.3` is a hosted
   `vllm-remote` entry that always serves from opencode-go (`glm-5.3`, billed
