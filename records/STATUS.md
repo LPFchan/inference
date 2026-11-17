@@ -385,6 +385,13 @@ Patch chain in `patches/atomic-llama-cpp/`, applied in order by `Dockerfile`:
 
 ## Recent Changes
 
+- 2026-11-18: **DeepSeek-V4.1-Flash-1017 goes straight to opencode-go** —
+  The Sparks now run Inkling-2-Small for the foreseeable future, so Grimoire's
+  `DeepSeek-V4.1-Flash-1017` no longer tries spark2:8888 first (a 2 s wait
+  before its fallback on every request). It is a hosted `vllm-remote` entry
+  like `GLM-5.3` (`deepseek-v4.1-flash`, billed to the Go plan).
+  `dsv41-tensorfold.service` stays stopped on spark2.
+
 - 2026-11-18: **Inkling-2-Small served from spark1+spark2** — Thinking
   Machines' 594B MoE runs at TP 2 from kortexa's EXL3 2.59bpw pack through
   kortexa's TensorFold fork plus our patch (`etc/spark/inkling2/`). spark2's
