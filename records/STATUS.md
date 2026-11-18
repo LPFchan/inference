@@ -385,6 +385,13 @@ Patch chain in `patches/atomic-llama-cpp/`, applied in order by `Dockerfile`:
 
 ## Recent Changes
 
+- 2026-11-18: **Inkling-2-Small frees 2.5 GiB a Spark** — The engine now
+  takes 106.7 GiB of each Spark instead of 109.2, so about 7.5 GiB stays free
+  after the load (was 4.6-5.0). The expert matmuls reuse two buffers that
+  attention is done with, the 40 sliding-window layers keep 1,280 positions
+  each instead of 12,288 (a long prompt pass borrows one shared ring), and the
+  drafter keeps only the tap rows it reads. Same replies and same draft
+  acceptance bit for bit; prompt and decode speed unchanged.
 - 2026-11-18: **Inkling-2-Small reads prompts at about 2000 tok/s** — A cold
   10.9k-token prompt takes 5.4-5.5 s (was 6.6 s), 43k takes 22.7 s (was 27 s).
   The two Sparks used to wait on each other twice a layer; a prompt now runs

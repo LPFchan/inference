@@ -50,10 +50,13 @@ so the stock model's kernels and outputs are unchanged.
 - Decode, greedy, 131,072-token window: prose 38-42 tok/s, code 69, 8k context 37. About 0.2 s to the first token on
   short prompts. The uncensored name runs 36-39 on prose.
 - Prompt reading: about 2000 tok/s at 10.9k tokens (1975-2020 from one restart to the next), 1900 at 43k. A pass
-  takes up to 11,264 tokens (`PROMPT_ROWS`, about 0.55 MB of scratch a token), so a prompt that fits streams the expert
+  takes up to 11,264 tokens (`PROMPT_ROWS`, about 0.4 MB of scratch a token), so a prompt that fits streams the expert
   weights once. A pass of 512 tokens or more runs in three row chunks: while one chunk's sums cross to the other Spark,
   the GPU already works on the next chunk. The exchange runs over both RoCE twins of the cable's port (one carries only
   ~100 Gb/s) with 4 NCCL channels.
+- Memory: the engine takes 106.7 GiB of each Spark, so about 7.5 GiB stays free after the load. The expert matmuls
+  reuse two buffers attention is done with, each of the 40 sliding-window layers keeps 1,280 positions (a longer pass
+  borrows one shared ring and copies the window in and back out), and the drafter keeps only the tap rows it reads.
 - Turn reuse: a prompt that starts with the previous prompt, or shares its system prompt, resumes there. A second
   turn of a 39k-token conversation starts answering in 0.25 s (75 s for the first), and a new session on the same
   system prompt in 0.18 s. The engine keeps four turns: the last prompt's end and three cuts near the system

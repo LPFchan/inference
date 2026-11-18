@@ -1,7 +1,7 @@
 From ab85a9bf58392c5c08b6c055247d51880eb07aee Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Tue, 17 Nov 2026 22:24:16 +0900
-Subject: [PATCH 01/32] Quantize Inkling's BF16 attention and head projections
+Subject: [PATCH 01/35] Quantize Inkling's BF16 attention and head projections
  to NVFP4 at load (TF_INKLING_FP4)
 
 TF_INKLING_FP4=attn keeps Q, K, V, R, gate and O as NVFP4 lane weights; =all adds the output head.
@@ -371,7 +371,7 @@ index 2045cb01..171bd7c8 100644
 From e893996207418a3e9be28bb35b1baa2e77cf1084 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Tue, 17 Nov 2026 23:19:05 +0900
-Subject: [PATCH 02/32] Inkling decode: latency-bound mix and quant kernels
+Subject: [PATCH 02/35] Inkling decode: latency-bound mix and quant kernels
  issue all loads at once; NVFP4 drafter projections under FP4=all
 
 tf_ik_mix: one 576-thread CTA a row, each thread one 16-byte chunk of every source, one combined
@@ -808,7 +808,7 @@ index 8da5834f..cb578b05 100644
 From 96948dfd43770dbe0bf6447a20a5e9d280704bfc Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Tue, 17 Nov 2026 23:29:20 +0900
-Subject: [PATCH 03/32] Inkling verification: one attention launch and one
+Subject: [PATCH 03/35] Inkling verification: one attention launch and one
  small BF16 projection call for every verified row
 
 The decode attention kernel already masks each row's own causal window, so batching keeps each row's
@@ -860,7 +860,7 @@ index 7915e8fa..f4e4c249 100644
 From 3a6b5504d561d17f420582133ed40be48582795d Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 00:03:41 +0900
-Subject: [PATCH 04/32] Inkling: replay one CUDA graph per one-token step and
+Subject: [PATCH 04/35] Inkling: replay one CUDA graph per one-token step and
  verify window (TF_INKLING_GRAPHS, default on)
 
 Prep and attention read the step position from the device when a graph replays; draft mode's
@@ -1175,7 +1175,7 @@ index 171bd7c8..fe3f9ca5 100644
 From 377844b40b29a1f6383f57ff1f2f860506b6df50 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 00:32:24 +0900
-Subject: [PATCH 05/32] Inkling: split experts across the pair
+Subject: [PATCH 05/35] Inkling: split experts across the pair
  (TF_INKLING_EXPERTS=<full checkpoint>)
 
 Every rank runs half of every routed expert: w13's output tile columns (its gate/up pairs) and
@@ -1373,7 +1373,7 @@ index fe3f9ca5..2351961d 100644
 From 789e179ab26119d5a6de7b898a10edc605b2c499 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 01:00:07 +0900
-Subject: [PATCH 06/32] inkling2: Q, gate, R (and local K, V) as one NVFP4
+Subject: [PATCH 06/35] inkling2: Q, gate, R (and local K, V) as one NVFP4
  projection per layer
 
 ---
@@ -1578,7 +1578,7 @@ index cd581e8e..24d790ac 100644
 From a3c3d0a78b38b334b3f7742e7951ea85e6fbc57a Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 01:28:35 +0900
-Subject: [PATCH 07/32] inkling2: decode attention split over 16 key-tile sets
+Subject: [PATCH 07/35] inkling2: decode attention split over 16 key-tile sets
  per head, merged in order; row-invariant, 5x faster at 8k
 
 ---
@@ -1856,7 +1856,7 @@ index bd866c21..61429166 100644
 From ab0010657824d26cf3c308235d70494933fcbd00 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 01:28:35 +0900
-Subject: [PATCH 08/32] inkling2: TF_INKLING_EXPERTS also takes a pack already
+Subject: [PATCH 08/35] inkling2: TF_INKLING_EXPERTS also takes a pack already
  cut to this rank's half
 
 ---
@@ -1906,7 +1906,7 @@ index 24d790ac..99b00b99 100644
 From 043a53a41eca9204af6e89600af96d9eb50453e3 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 01:51:21 +0900
-Subject: [PATCH 09/32] inkling2: build the glue and drafter kernels
+Subject: [PATCH 09/35] inkling2: build the glue and drafter kernels
  arch-specific (sm_121a): native FP4/FP8 conversions
 
 ---
@@ -1937,7 +1937,7 @@ index 9b4f6c77..688b055f 100644
 From b71cf55b766fb07d42dc314522b0f3978cc6dbba Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 02:20:32 +0900
-Subject: [PATCH 10/32] inkling2: forward graph in pieces; warp-level route
+Subject: [PATCH 10/35] inkling2: forward graph in pieces; warp-level route
  top-8 and mix reductions; drafter rnn and fold as NVFP4
 
 ---
@@ -2256,7 +2256,7 @@ index 8ff38eff..08a3f9c4 100644
 From 427a874ffca07c1770318912cc1a76cbfb0665e7 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 02:32:26 +0900
-Subject: [PATCH 11/32] inkling2: keep() restores every conv history in one
+Subject: [PATCH 11/35] inkling2: keep() restores every conv history in one
  launch
 
 ---
@@ -2364,7 +2364,7 @@ index dcae77b3..52a87e1c 100644
 From d910d2b7cf40eb1b0d327cd464f3ee38afdfb217 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 04:36:01 +0900
-Subject: [PATCH 12/32] inkling2: verify drafts while their chained chance
+Subject: [PATCH 12/35] inkling2: verify drafts while their chained chance
  stays at least TF_INKLING_DRAFT_FLOOR (default 0.6), up to 5 deep
 
 The drafter reports each pick's probability (tf_ik_top1p: one 1024-thread block, float4 loads, online
@@ -2686,7 +2686,7 @@ index 2351961d..0872392e 100644
 From b723bd4b0aaa55e93437decdc35f0e9e045f265d Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 04:36:01 +0900
-Subject: [PATCH 13/32] environment tests: valid forms for TF_INKLING_FP4,
+Subject: [PATCH 13/35] environment tests: valid forms for TF_INKLING_FP4,
  EXPERTS, GRAPHS and DRAFT_FLOOR
 
 ---
@@ -2718,7 +2718,7 @@ index 046db04f..b150590f 100644
 From afec536d2fca51b7496bfe1638b53892f571c90b Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 04:50:40 +0900
-Subject: [PATCH 14/32] inkling2: peer records carry up to 12 ids in the header
+Subject: [PATCH 14/35] inkling2: peer records carry up to 12 ids in the header
  (one broadcast each); keep rides with the next draft
 
 Rank 1 no longer drains its stream between the keep and the draft, so it queues ingest and drafting back to
@@ -2884,7 +2884,7 @@ index 12481774..d989ed85 100644
 From e4ca0d94d29e48cd30505322736329ef395e43dd Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 05:23:05 +0900
-Subject: [PATCH 15/32] server: TENSORFOLD_KEYS_MODEL, a model id whose
+Subject: [PATCH 15/35] server: TENSORFOLD_KEYS_MODEL, a model id whose
  requests carry keys to the engine for its per-request edit
 
 The same plumbing as our DeepSeek keys switch: the id is listed beside the served name, its requests set
@@ -3068,7 +3068,7 @@ index 820d6556..872b9c1b 100644
 From 2fe1103f1c0877e578abdfc1d6cda853c2af9594 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 05:23:05 +0900
-Subject: [PATCH 16/32] inkling2: TF_INKLING_EDIT, OpenUncensored's refusal
+Subject: [PATCH 16/35] inkling2: TF_INKLING_EDIT, OpenUncensored's refusal
  edit for requests that ask (TENSORFOLD_KEYS_MODEL)
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
@@ -3398,7 +3398,7 @@ index b150590f..d47c1bcc 100644
 From ba9c87428a457f48d95a949e4a360b9ccb36d1b8 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 05:35:06 +0900
-Subject: [PATCH 17/32] server: TENSORFOLD_GREEDY_FALLBACK=1 decodes a sampling
+Subject: [PATCH 17/35] server: TENSORFOLD_GREEDY_FALLBACK=1 decodes a sampling
  request greedily on a greedy-only engine instead of refusing it
 
 ---
@@ -3447,7 +3447,7 @@ index 872b9c1b..2dc2cf17 100644
 From 22d3c966619c259ab9b3c18a8d6f751af79d95a6 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 05:57:25 +0900
-Subject: [PATCH 18/32] server: read Inkling 2's messages natively: text,
+Subject: [PATCH 18/35] server: read Inkling 2's messages natively: text,
  thinking as reasoning_content, JSON invokes as tool_calls; only end of
  sampling ends a turn; reasoning_effort switches thinking
 
@@ -3705,7 +3705,7 @@ index 2dc2cf17..0778579c 100644
 From 0709576ac8dfe65568a99bfc1f6eedaf659b515c Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 07:55:06 +0900
-Subject: [PATCH 19/32] inkling2: prompt passes take tf_ik_prompt_dot (the
+Subject: [PATCH 19/35] inkling2: prompt passes take tf_ik_prompt_dot (the
  common EXL3 prompt path at any trellis width, 64 members a block, whole K)
  and TF_INKLING_PROMPT_ROWS (default 256)
 
@@ -4013,7 +4013,7 @@ index d47c1bcc..749ab179 100644
 From e6dc7e6ff2e56509e45ad218151ce708acf24428 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 08:29:54 +0900
-Subject: [PATCH 20/32] inkling2: turn reuse: a prompt resumes from the
+Subject: [PATCH 20/35] inkling2: turn reuse: a prompt resumes from the
  furthest kept turn that starts it (the last prompt's end, or the server's
  system-prompt cuts); a kept turn copies each local ring's last 1024 rows,
  every conv history and the drafter's local rings, and reads the one live set
@@ -4411,7 +4411,7 @@ index 00000000..4f3c91c9
 From d7fef321311bcc40ffa4e069c9b99559e0227d5b Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 08:46:22 +0900
-Subject: [PATCH 21/32] inkling2: each rank sums a row's eight expert outputs
+Subject: [PATCH 21/35] inkling2: each rank sums a row's eight expert outputs
  before the exchange (tf_ik_moe_sum), so the pair gathers one f32 row, not
  eight bf16 ones; no gathered buffer
 
@@ -4490,7 +4490,7 @@ index 2c37abc2..fa688af9 100644
 From f8c778f1cbdb6eeeb037112d0e0768a0290f90ad Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 09:11:07 +0900
-Subject: [PATCH 22/32] inkling2: prompt passes attend with
+Subject: [PATCH 22/35] inkling2: prompt passes attend with
  tf_ik_attention_flash (64 query rows a block, cp.async key and value tiles,
  ldmatrix fragments, online softmax in registers, P in BF16); tf_ik_attention
  and its SIMT exception path removed
@@ -4867,7 +4867,7 @@ index ea53c710..ce0c156c 100644
 From 7a84815fe7b7f7cb20040b5abbaa29f679ebd70d Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 10:23:20 +0900
-Subject: [PATCH 23/32] inkling2: tf_ik_relative takes rows * heads on grid x
+Subject: [PATCH 23/35] inkling2: tf_ik_relative takes rows * heads on grid x
  (y stays under 65535 for passes of 2731 rows and more)
 
 ---
@@ -4908,7 +4908,7 @@ index 323fe8f1..e0ba47fe 100644
 From 0c84ddf3f319639a7700e1c8b55fa17f4f1633b7 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 10:23:24 +0900
-Subject: [PATCH 24/32] inkling2: tf_ik_prompt_dot takes 128 members by 128
+Subject: [PATCH 24/35] inkling2: tf_ik_prompt_dot takes 128 members by 128
  columns, one Hadamard block, and unrotates it in its epilogue (BF16 out, no
  fp32 z or tf_ik_unrotate pass); split ranks skip the slot zero fills; gu,
  hidden and quant_down sized to the rank's intermediate
@@ -5195,7 +5195,7 @@ index fa688af9..8a914651 100644
 From 705ceaf6f05b60e342ecfe68d552da5195f239e6 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 11:03:10 +0900
-Subject: [PATCH 25/32] inkling2: tf_ik_down_input makes the down projection's
+Subject: [PATCH 25/35] inkling2: tf_ik_down_input makes the down projection's
  rotated input in one CTA a pair (tf_ik_swiglu, tf_ik_quant and tf_ik_rotate's
  arithmetic in order, the rounded row in shared memory); no hidden or
  quant_down buffers; TF_INKLING_PROMPT_ROWS up to 8192
@@ -5448,7 +5448,7 @@ index 2fd9c43b..b219c477 100644
 From 111b5231028f0fb7ab911cbf6f4edfd979012b0a Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 12:03:07 +0900
-Subject: [PATCH 26/32] inkling2: tf_ik_relative computes 8 distances a thread
+Subject: [PATCH 26/35] inkling2: tf_ik_relative computes 8 distances a thread
  with vector loads and one 16-byte store (same sums in the same order);
  TF_INKLING_PROMPT_ROWS up to 16384 (about 0.55 MB a row), so a prompt of that
  length takes one pass and streams the expert weights once
@@ -5530,7 +5530,7 @@ index b219c477..d5102bf3 100644
 From b1770ee99ce9051111b8080038b1391813dc64e0 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 16:05:19 +0900
-Subject: [PATCH 27/32] inkling2: tf_ik_attention_flash keeps its output
+Subject: [PATCH 27/35] inkling2: tf_ik_attention_flash keeps its output
  accumulators in registers (the epilogue's row loop unrolled; o was a 272-byte
  stack array), stages each tile's relative bias rows in shared memory with its
  keys, and skips the per-score mask on tiles 1024 or more behind a warp's rows
@@ -5642,7 +5642,7 @@ index 9b83ea7e..d35f49ba 100644
 From c909e9e2c5f914897156b0470cc00f5f1dc2e3b1 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 21:17:32 +0900
-Subject: [PATCH 28/32] inkling2: tf_ik_prompt_dot stages 64 of k a chunk in
+Subject: [PATCH 28/35] inkling2: tf_ik_prompt_dot stages 64 of k a chunk in
  two stages, one barrier a chunk (same mma chain over k, bits unchanged)
 
 ---
@@ -5751,7 +5751,7 @@ index 8b8d7c8b..bdf6a14b 100644
 From c54ebeb4a71ee986829928ff415bbe88e1b9a2a0 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 21:17:32 +0900
-Subject: [PATCH 29/32] prompt16: prompt_lean's blocks claim tiles from a
+Subject: [PATCH 29/35] prompt16: prompt_lean's blocks claim tiles from a
  counter as they go, so one an exchange's kernels hold off a multiprocessor
  takes fewer (the last block resets it; each tile's bits unchanged)
 
@@ -5838,7 +5838,7 @@ index b5ffc643..8918452b 100644
 From 41c01d9cece5688eac89ea01fe7e426a2b08313f Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 21:17:32 +0900
-Subject: [PATCH 30/32] inkling2: a two-rank exchange sends each rank the f32
+Subject: [PATCH 30/35] inkling2: a two-rank exchange sends each rank the f32
  rows it sums (tf_ik_pair_sum adds them in rank order) and gathers BF16 sums,
  75% of the bytes; prompt passes of 512 rows and more take three row chunks (a
  sixth, two thirds, a sixth) whose exchanges run on a side stream while the
@@ -6250,7 +6250,7 @@ index 6ea32d7a..9ea2a720 100644
 From 9f7501194d2cfc43c082d1a362b427e8891ae78a Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 21:17:32 +0900
-Subject: [PATCH 31/32] inkling2: every pass embeds by tf_ik_embed_shard, the
+Subject: [PATCH 31/35] inkling2: every pass embeds by tf_ik_embed_shard, the
  gather and tf_ik_embed_pick (a row a host copy before: a 10.9k prompt started
  about 45 ms late; the same bytes)
 
@@ -6312,7 +6312,7 @@ index 0d66b439..4a0bfbbb 100644
 From aa662f9b308ac36bb143a96bab31ba8275d328da Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 21:17:32 +0900
-Subject: [PATCH 32/32] inkling2: tf_ik_up_input rounds a prompt row once and
+Subject: [PATCH 32/35] inkling2: tf_ik_up_input rounds a prompt row once and
  rotates its eight slots in one CTA (tf_ik_quant then tf_ik_rotate's
  arithmetic in order; passes under 64 rows keep the two kernels, bits
  unchanged)
@@ -6412,6 +6412,449 @@ index ac4aa21f..91e96fc4 100644
  
  pub const Mix = extern struct {
      partial: u64,
+-- 
+2.56.1
+
+
+From 9d0af1f86ba8afc0e5e92ca27caefef22dd53dd4 Mon Sep 17 00:00:00 2001
+From: LPFchan <me@lost.plus>
+Date: Wed, 18 Nov 2026 22:27:34 +0900
+Subject: [PATCH 33/35] inkling2: the experts' gate and up outputs take
+ relative's memory and the down projections' input streams' (attention is done
+ with both), the down outputs s.rotated's once the up projections have read
+ it: 1.16 GiB less a rank at 11264 prompt rows (the same bits)
+
+---
+ zig/src/families/inkling2/forward.zig | 27 +++++++++++++--------------
+ zig/src/families/inkling2/state.zig   | 12 +++++++-----
+ 2 files changed, 20 insertions(+), 19 deletions(-)
+
+diff --git a/zig/src/families/inkling2/forward.zig b/zig/src/families/inkling2/forward.zig
+index 4e74fe16..5b493cd2 100644
+--- a/zig/src/families/inkling2/forward.zig
++++ b/zig/src/families/inkling2/forward.zig
+@@ -194,9 +194,9 @@ pub const Forward = struct {
+         return if (rows >= kern.prompt_tile_rows) kern.prompt_tile else 16;
+     }
+ 
+-    /// `input` null: the rows are already rotated into s.rotated (tf_ik_down_input).
+-    /// Chunk c's pairs through one expert matrix (s.plan holds their plan; pair ids count from the chunk's first).
+-    fn projectExperts(f: *Forward, m: wt.Matrix, input: ?u64, input_slots: usize, output_all: u64, c: Chunk, splits: usize) !void {
++    /// Chunk c's pairs through one expert matrix (s.plan holds their plan; pair ids count from the chunk's first), from
++    /// their rotated rows in `input_all` (tf_ik_up_input, tf_ik_down_input).
++    fn projectExperts(f: *Forward, m: wt.Matrix, input_all: u64, output_all: u64, c: Chunk, splits: usize) !void {
+         const rows = c.count;
+         const pairs = rows * cfg.topk;
+         const count = f.w.share.expertCount();
+@@ -204,9 +204,8 @@ pub const Forward = struct {
+         const sk = if (tile == kern.prompt_tile) 1 else splits; // the prompt dot sums the whole K in one block
+         const items = cuda.grouped.maxItems(pairs, count + 1, tile);
+         const picks = f.s.picks + c.first * cfg.topk * 4;
+-        const rotated = f.s.rotated + c.first * cfg.topk * m.k * 2;
++        const rotated = input_all + c.first * cfg.topk * m.k * 2;
+         const output = output_all + c.first * cfg.topk * m.n * 2;
+-        if (input) |x| try f.k.go(.rotate, f.stream, .{ .x = @intCast(pairs), .y = @intCast(m.k / 128) }, 32, .{ x + c.first * cfg.hidden * 2, picks, m.suh, rotated, int(m.k), int(input_slots), int(count) });
+         const dot: kern.Dot = .{ .x0 = rotated, .x1 = rotated, .tp0 = m.ptrs, .tp1 = m.ptrs, .k2_0 = m.bits, .k2_1 = m.bits, .uids = f.s.plan.items, .ucount = f.s.plan.counts, .members = f.s.plan.members, .z = f.s.z, .k = int(m.k), .n = int(m.n), .p = int(pairs), .sk = int(sk), .maxm = int(tile), .slots = cfg.topk, .nu = int(items), .mats = 1, .ns = 0, .standard = 1, .skip = int(count) };
+         if (tile == kern.prompt_tile) return f.k.promptDot(f.stream, dot, m.svh, output); // it unrotates its own columns
+         try f.k.dot(f.stream, dot);
+@@ -236,7 +235,7 @@ pub const Forward = struct {
+         try f.exchangeSum(f.stream, f.partsOf(all), rows, f.s.sums);
+         try f.afterAttention(l, index, all);
+         try f.expertsUp(l, index, rows);
+-        try f.projectExperts(l.w2, null, 0, f.s.down, all, 1);
++        try f.projectExperts(l.w2, f.s.down_input, f.s.rotated, all, 1);
+         try f.moeSum(all);
+         try f.exchangeSum(f.stream, f.partsOf(all), rows, f.s.sums);
+         try f.tail(l, index, all);
+@@ -361,19 +360,19 @@ pub const Forward = struct {
+         const share = f.w.share;
+         const pairs = rows * cfg.topk;
+         try f.k.plan.route(stream, s.picks, pairs, share.expertCount() + 1, planTile(rows), s.plan);
+-        if (!share.split) { // the slots of experts another rank holds add zeros; a split rank holds every slot
+-            try f.zero(s.gu, pairs * 2 * share.inter() * 2);
+-            try f.zero(s.down, pairs * h * 2);
+-        }
+-        try f.projectExperts(l.w13, null, 0, s.gu, .{ .first = 0, .count = rows }, 4);
+-        try f.k.go(.down_input, stream, .{ .x = @intCast(pairs) }, kern.quantThreads(share.inter()), .{ s.gu, s.gamma, s.picks, l.w2.suh, s.rotated, int(share.inter()), @as(i32, @intFromBool(index < 40)), int(share.expertCount()) });
++        // the slots of experts another rank holds add zeros (a split rank holds every slot); s.rotated takes the down
++        // outputs once the up projections have read it
++        if (!share.split) try f.zero(s.gu, pairs * 2 * share.inter() * 2);
++        try f.projectExperts(l.w13, s.rotated, s.gu, .{ .first = 0, .count = rows }, 4);
++        try f.k.go(.down_input, stream, .{ .x = @intCast(pairs) }, kern.quantThreads(share.inter()), .{ s.gu, s.gamma, s.picks, l.w2.suh, s.down_input, int(share.inter()), @as(i32, @intFromBool(index < 40)), int(share.expertCount()) });
++        if (!share.split) try f.zero(s.rotated, pairs * h * 2);
+     }
+ 
+ 
+     /// Chunk c's rows of the expert outputs summed into this rank's partial.
+     fn moeSum(f: *Forward, c: Chunk) !void {
+         const h = cfg.hidden;
+-        try f.k.go(.moe_sum, f.stream, .{ .x = ceil(c.count * h, 256) }, 256, .{ f.s.down + c.first * cfg.topk * h * 2, f.ownPart(c), int(c.count), @as(i32, h) });
++        try f.k.go(.moe_sum, f.stream, .{ .x = ceil(c.count * h, 256) }, 256, .{ f.s.rotated + c.first * cfg.topk * h * 2, f.ownPart(c), int(c.count), @as(i32, h) });
+     }
+ 
+     /// The end of a layer for chunk `c`, once the experts' sums are in s.sums: the residual stream's next state.
+@@ -427,7 +426,7 @@ pub const Forward = struct {
+                 try f.afterAttention(l, i, c);
+             }
+             try f.expertsUp(l, i, rows);
+-            try f.projectExperts(l.w2, null, 0, f.s.down, .{ .first = 0, .count = rows }, 1);
++            try f.projectExperts(l.w2, f.s.down_input, f.s.rotated, .{ .first = 0, .count = rows }, 1);
+             for (chunks, 0..) |c, j| {
+                 try f.moeSum(c);
+                 try f.handOff(side, j, c);
+diff --git a/zig/src/families/inkling2/state.zig b/zig/src/families/inkling2/state.zig
+index 9ea2a720..8d18dfee 100644
+--- a/zig/src/families/inkling2/state.zig
++++ b/zig/src/families/inkling2/state.zig
+@@ -44,10 +44,10 @@ pub const State = struct {
+     picks: u64 = 0,
+     gamma: u64 = 0,
+     quant_up: u64 = 0,
+-    rotated: u64 = 0,
++    rotated: u64 = 0, // the experts' rotated input (tf_ik_up_input), then the down projections' output
+     z: u64 = 0,
+-    gu: u64 = 0,
+-    down: u64 = 0,
++    gu: u64 = 0, // the gate and up outputs: relative's memory when they fit (attention is done with it)
++    down_input: u64 = 0, // the down projections' rotated input (tf_ik_down_input): streams' memory when it fits
+     parts: u64 = 0,
+     logits: u64 = 0,
+     top1: u64 = 0,
+@@ -106,8 +106,10 @@ pub const State = struct {
+         s.rotated = try s.take(pairs * h * 2);
+         // split-K partials of passes below prompt_tile_rows rows (up to 4 splits); a prompt pass unrotates in its dot
+         s.z = try s.take(4 * @as(usize, @min(r, prompt_tile_rows - 1)) * cfg.topk * h * 4);
+-        s.gu = try s.take(pairs * 2 * w.share.inter() * 2);
+-        s.down = try s.take(pairs * h * 2);
++        const gu = pairs * 2 * w.share.inter() * 2;
++        s.gu = if (gu <= r * heads * 1024 * 2) s.relative else try s.take(gu);
++        const down_input = pairs * w.share.inter() * 2;
++        s.down_input = if (down_input <= 3 * r * h * 2) s.streams else try s.take(down_input);
+         s.parts = try s.take(w.share.world * r * h * 4);
+         s.logits = try s.take(w.head.n * 4);
+         s.top1 = try s.take(w.share.world * 16);
+-- 
+2.56.1
+
+
+From 6525b55fd1e1c42729e8d9746517e599c8d17bba Mon Sep 17 00:00:00 2001
+From: LPFchan <me@lost.plus>
+Date: Wed, 18 Nov 2026 22:27:34 +0900
+Subject: [PATCH 34/35] inkling2: a local layer's own ring holds 1024 + 256
+ positions; a longer pass runs on one shared ring of the pass's size, the
+ window before it copied in at its first chunk and the window at its end back
+ after its last: 0.82 GiB less a rank at 11264 prompt rows (the same bits)
+
+---
+ zig/src/families/inkling2/forward.zig | 32 ++++++++++++++++++++++-----
+ zig/src/families/inkling2/state.zig   |  9 +++++++-
+ 2 files changed, 34 insertions(+), 7 deletions(-)
+
+diff --git a/zig/src/families/inkling2/forward.zig b/zig/src/families/inkling2/forward.zig
+index 5b493cd2..f29a83cb 100644
+--- a/zig/src/families/inkling2/forward.zig
++++ b/zig/src/families/inkling2/forward.zig
+@@ -231,7 +231,7 @@ pub const Forward = struct {
+ 
+     fn layer(f: *Forward, l: wt.Layer, index: usize, rows: usize) !void {
+         const all: Chunk = .{ .first = 0, .count = rows };
+-        try f.attend(l, index, all);
++        try f.attend(l, index, all, rows);
+         try f.exchangeSum(f.stream, f.partsOf(all), rows, f.s.sums);
+         try f.afterAttention(l, index, all);
+         try f.expertsUp(l, index, rows);
+@@ -251,9 +251,11 @@ pub const Forward = struct {
+         return f.partsOf(c) + f.w.share.rank * c.count * cfg.hidden * 4;
+     }
+ 
+-    /// The attention half of a layer for chunk `c`, through the output projection into this rank's partial
+-    /// (f.ownPart(c)). Scratch that lives only inside it starts at row 0; the residual buffers take the chunk's rows.
+-    fn attend(f: *Forward, l: wt.Layer, index: usize, c: Chunk) !void {
++    /// The attention half of a layer for chunk `c` of a `pass`-row pass, through the output projection into this rank's
++    /// partial (f.ownPart(c)). Scratch that lives only inside it starts at row 0; the residual buffers take the chunk's
++    /// rows. A local layer's pass too long for its own ring runs on s.ring: the window before the pass is copied in at
++    /// its first chunk and the window at its end back after its last.
++    fn attend(f: *Forward, l: wt.Layer, index: usize, c: Chunk, pass: usize) !void {
+         const h = cfg.hidden;
+         const s = f.s;
+         const stream = f.stream;
+@@ -301,7 +303,10 @@ pub const Forward = struct {
+             try f.product(l.gate, qsource, s.gate, rows, .bf16);
+         }
+         try f.product(l.sink, qsource, s.sink, rows, .bf16);
+-        const cache = s.cache[index];
++        const own = s.cache[index];
++        const long = local and pass + cfg.local_window > own.capacity and own.capacity < s.context;
++        const cache = if (long) s.ring else own;
++        if (long and c.first == 0) try f.moveWindow(own, cache, pos);
+         try f.k.go(.prep, stream, .{ .x = @intCast(heads), .y = @intCast(rows) }, 128, .{ s.q, l.q_scale, s.q, @as(u64, 0), int(heads), @as(i32, 128), int(s.pos), int(cache.capacity), @as(i32, 0), @as(i32, @intFromBool(!local)), f.posp() });
+         try f.k.go(.prep, stream, .{ .x = @intCast(keys), .y = @intCast(rows) }, 128, .{ s.k, @as(u64, 0), s.k, cache.k, int(keys), @as(i32, 128), int(s.pos), int(cache.capacity), @as(i32, 1), @as(i32, 0), f.posp() });
+         try f.k.go(.prep, stream, .{ .x = @intCast(keys), .y = @intCast(rows) }, 128, .{ s.v, @as(u64, 0), s.v, cache.v, int(keys), @as(i32, 128), int(s.pos), int(cache.capacity), @as(i32, 2), @as(i32, 0), f.posp() });
+@@ -318,9 +323,24 @@ pub const Forward = struct {
+                 f.decode_reported = true;
+             }
+         } else try f.k.go(.attention_flash, stream, .{ .x = ceil(rows, 64), .y = @intCast(heads) }, 128, .{attention});
++        if (long and c.first + c.count == pass) try f.moveWindow(cache, own, pos + pass);
+         try f.product(l.o, s.attn_heads, f.ownPart(c), rows, .f32);
+     }
+ 
++    /// Ring `to`'s rows for positions [end - window, end) from ring `from`'s (a position's row is at its index modulo
++    /// the ring's capacity).
++    fn moveWindow(f: *Forward, from: st.Cache, to: st.Cache, end: usize) !void {
++        if (to.capacity == 0) return error.InklingContext;
++        const row = f.w.share.keyHeads() * 128 * 2;
++        var p = end -| turns.window;
++        while (p < end) {
++            const n = @min(end - p, from.capacity - p % from.capacity, to.capacity - p % to.capacity);
++            try f.copy(to.k + (p % to.capacity) * row, from.k + (p % from.capacity) * row, n * row);
++            try f.copy(to.v + (p % to.capacity) * row, from.v + (p % from.capacity) * row, n * row);
++            p += n;
++        }
++    }
++
+     /// The rest of a layer's attention half for chunk `c`, once its sums are in s.sums: up to the experts' inputs.
+     fn afterAttention(f: *Forward, l: wt.Layer, index: usize, c: Chunk) !void {
+         const h = cfg.hidden;
+@@ -418,7 +438,7 @@ pub const Forward = struct {
+                     try f.tail(layers[i - 1], i - 1, c);
+                 }
+                 try f.tap(i, c);
+-                try f.attend(l, i, c);
++                try f.attend(l, i, c, rows);
+                 try f.handOff(side, j, c);
+             }
+             for (chunks, 0..) |c, j| {
+diff --git a/zig/src/families/inkling2/state.zig b/zig/src/families/inkling2/state.zig
+index 8d18dfee..20fd00e9 100644
+--- a/zig/src/families/inkling2/state.zig
++++ b/zig/src/families/inkling2/state.zig
+@@ -7,6 +7,8 @@ const turns = @import("turns.zig");
+ const prompt_tile_rows = @import("kernels.zig").prompt_tile_rows;
+ 
+ pub const prompt_rows = 256;
++/// The most rows a pass writes straight into a local layer's own ring; a longer pass takes State.ring (Forward.attend).
++pub const ring_rows = 256;
+ pub const Cache = struct { k: u64, v: u64, capacity: usize, conv: [4]u64 };
+ 
+ pub const State = struct {
+@@ -14,6 +16,7 @@ pub const State = struct {
+     d: *const cuda.Driver,
+     owned: std.ArrayList(cuda.DeviceBuffer) = .empty,
+     cache: []Cache = &.{},
++    ring: Cache = .{ .k = 0, .v = 0, .capacity = 0, .conv = @splat(0) }, // a long pass's local ring, one layer at a time
+     kept: [turns.slots]u64 = @splat(0), // turns.zig: each kept turn's copy of the local rings' windows and histories
+     rows: usize,
+     context: usize,
+@@ -71,11 +74,15 @@ pub const State = struct {
+         const heads = w.share.queryHeads();
+         const keys = w.share.keyHeads();
+         s.cache = try gpa.alloc(Cache, w.layer.len);
++        const own_ring = @as(usize, cfg.local_window) + @min(r, ring_rows);
+         for (s.cache, 0..) |*c, i| {
+-            const capacity = if (cfg.local(i)) @min(context, cfg.local_window + r) else context;
++            const capacity = if (cfg.local(i)) @min(context, own_ring) else context;
+             c.* = .{ .capacity = capacity, .k = try s.take(capacity * keys * 128 * 2), .v = try s.take(capacity * keys * 128 * 2), .conv = undefined };
+             for (&c.conv, 0..) |*p, j| p.* = try s.take(3 * (if (j < 2) keys * 128 else h) * 2);
+         }
++        const ring = @min(context, cfg.local_window + r);
++        if (ring > @min(context, own_ring))
++            s.ring = .{ .k = try s.take(ring * keys * 128 * 2), .v = try s.take(ring * keys * 128 * 2), .capacity = ring, .conv = @splat(0) };
+         for (&s.kept) |*k| k.* = try s.take(turns.targetBytes(w.share));
+         s.ids = try s.take(r * 4);
+         s.partial = try s.take(r * h * 2);
+-- 
+2.56.1
+
+
+From 134656cc61f203cfd1a88b840e5143a55d6dffd5 Mon Sep 17 00:00:00 2001
+From: LPFchan <me@lost.plus>
+Date: Wed, 18 Nov 2026 22:27:34 +0900
+Subject: [PATCH 35/35] inkling2: the drafter sums its global layer's tap mix
+ in f32 tap by tap (tf_ik_draft_gather, then tf_ik_draft_mix_sum:
+ tf_ik_draft_mix's arithmetic in its order) and keeps of each tap only the
+ last rows a local ring holds, which are all a local layer ingests: 0.49 GiB
+ less a rank (the same bits)
+
+---
+ zig/kernels/cuda/inkling2_draft.cu         | 25 ++++++++++++
+ zig/src/families/inkling2/draft.zig        | 45 ++++++++++++++++++----
+ zig/src/families/inkling2/draft_config.zig |  5 ++-
+ zig/src/families/inkling2/forward.zig      |  9 ++---
+ 4 files changed, 70 insertions(+), 14 deletions(-)
+
+diff --git a/zig/kernels/cuda/inkling2_draft.cu b/zig/kernels/cuda/inkling2_draft.cu
+index 9c675f7e..922436cc 100644
+--- a/zig/kernels/cuda/inkling2_draft.cu
++++ b/zig/kernels/cuda/inkling2_draft.cu
+@@ -47,6 +47,31 @@ extern "C" __global__ void tf_ik_draft_mix(const bf16* taps, const bf16* alpha,
+     }
+ }
+ 
++// tf_ik_draft_mix's tap sum one tap at a time, kept in f32 between taps: tap 0 starts it, the later ones add in order
++extern "C" __global__ void tf_ik_draft_gather(const bf16* x, const bf16* alpha, float* sums, int tap, int n) {
++    const int i = (blockIdx.x * blockDim.x + threadIdx.x) * 4;
++    if (i >= n) return;
++    const float a = f(alpha[tap]);
++    const uint2 raw = *reinterpret_cast<const uint2*>(x + i);
++    const bf16* in = reinterpret_cast<const bf16*>(&raw);
++    float4 v = tap ? *reinterpret_cast<const float4*>(sums + i) : make_float4(0.f, 0.f, 0.f, 0.f);
++    v.x += f(in[0]) * a;
++    v.y += f(in[1]) * a;
++    v.z += f(in[2]) * a;
++    v.w += f(in[3]) * a;
++    *reinterpret_cast<float4*>(sums + i) = v;
++}
++
++// tf_ik_draft_mix of rows whose tap sums tf_ik_draft_gather kept
++extern "C" __global__ void tf_ik_draft_mix_sum(const float* sums, const bf16* norm, bf16* out) {
++    const int row = blockIdx.x, t = threadIdx.x;
++    const float* v = sums + (size_t)row * 4608;
++    float square = 0.f;
++    for (int c = t; c < 4608; c += 256) square += v[c] * v[c];
++    const float scale = rsqrtf(sum(square) / 4608.f + 1e-6f);
++    for (int c = t; c < 4608; c += 256) out[row * 4608 + c] = b((v[c] * scale) * f(norm[c]));
++}
++
+ extern "C" __global__ void tf_ik_draft_prep(const bf16* x, const bf16* norm, bf16* out, bf16* cache,
+                                           int heads, int pos, int capacity) {
+     const int row = blockIdx.y, head = blockIdx.x, c = threadIdx.x;
+diff --git a/zig/src/families/inkling2/draft.zig b/zig/src/families/inkling2/draft.zig
+index 3f099c16..bcf59d16 100644
+--- a/zig/src/families/inkling2/draft.zig
++++ b/zig/src/families/inkling2/draft.zig
+@@ -7,7 +7,7 @@ const wt = @import("weights.zig");
+ const Forward = @import("forward.zig").Forward;
+ const int = @import("kernels.zig").int;
+ const ceil = @import("kernels.zig").ceil;
+-const Op = enum { mix, norm, prep, store, attention, merge, add, swiglu, gates, logits };
++const Op = enum { mix, mix_sum, gather, norm, prep, store, attention, merge, add, swiglu, gates, logits };
+ const Layer = struct {
+     context_norm: u64,
+     input_norm: u64,
+@@ -35,7 +35,12 @@ pub const Draft = struct {
+     module: cuda.Module,
+     ops: std.EnumArray(Op, cuda.Function),
+     layers: [5]Layer = undefined,
++    // The target's eight taps of a pass (Forward.tap): every row's mix sum for the global layer (tf_ik_draft_gather, f32),
++    // and each tap's last `tail` rows, all a local ring keeps (pass row `tail_first` first).
++    sums: u64 = 0,
+     taps: u64 = 0,
++    tail: usize = 0,
++    tail_first: usize = 0,
+     alpha: u64 = 0,
+     mask: u64 = 0,
+     norm: u64 = 0,
+@@ -125,7 +130,9 @@ pub const Draft = struct {
+             l.cache_k = try d.take(l.capacity * 512 * 2);
+             l.cache_v = try d.take(l.capacity * 512 * 2);
+         }
+-        d.taps = try d.take(8 * rows * 4608 * 2);
++        d.sums = try d.take(rows * 4608 * 4);
++        d.tail = @min(rows, dc.capacity(context, 0));
++        d.taps = try d.take(8 * d.tail * 4608 * 2);
+         d.x = try d.take(8 * 4608 * 2);
+         d.normed = try d.take(8 * 4608 * 2);
+         d.context_x = try d.take(rows * 4608 * 2);
+@@ -165,17 +172,39 @@ pub const Draft = struct {
+         inline for (values) |v| args.add(v);
+         try cuda.launch.launch(d.ops.get(op), .{ .grid = grid, .block = .{ .x = threads } }, f.stream, &args);
+     }
++    /// A target pass of `rows` rows begins: where its taps' kept rows start.
++    pub fn pass(d: *Draft, rows: usize) void {
++        d.tail_first = rows - @min(rows, d.tail);
++    }
++
++    /// Tap j's rows [first, first + count) of the pass, from x (the pass's rows from its first): added into the global
++    /// layer's mix sums, and the rows past tail_first kept.
++    pub fn tap(d: *Draft, f: *Forward, j: usize, x: u64, first: usize, count: usize) !void {
++        const n = count * 4608;
++        try d.go(f, .gather, .{ .x = ceil(n / 4, 256) }, 256, .{ x + first * 4608 * 2, d.alpha + dc.global * 16, d.sums + first * 4608 * 4, int(j), int(n) });
++        const from = @max(first, d.tail_first);
++        if (from < first + count) try f.copy(d.taps + (j * d.tail + from - d.tail_first) * 4608 * 2, x + from * 4608 * 2, (first + count - from) * 4608 * 2);
++    }
++
++    /// The pass's first `count` rows into the drafter's caches at `pos`: every row into the global layer's, a local
++    /// layer's last `tail` (all its ring keeps).
+     pub fn ingest(d: *Draft, f: *Forward, pos: usize, count: usize) !void {
+         if (count == 0) return error.InklingDraftRows;
+         if (pos != d.pos) return error.InklingDraftPosition;
++        const kept = count - @min(count, d.tail);
++        if (kept < d.tail_first) return error.InklingDraftRows;
+         for (d.layers, 0..) |l, i| {
+-            try d.go(f, .mix, .{ .x = @intCast(count) }, 256, .{ d.taps, d.alpha + i * 16, l.context_norm, d.context_x, int(f.s.rows * 4608) });
+-            try f.product(l.kc, d.context_x, d.k, count, .bf16);
+-            try f.product(l.vc, d.context_x, d.v, count, .bf16);
+-            try d.go(f, .prep, .{ .x = 4, .y = @intCast(count) }, 128, .{ d.k, l.ctxnorm, d.k, l.cache_k, @as(i32, 4), int(pos), int(l.capacity) });
+-            try d.go(f, .store, .{ .x = ceil(count * 512, 256) }, 256, .{ d.v, l.cache_v, @as(i32, 512), int(pos), int(l.capacity), int(count) });
++            const first = if (dc.local(i)) kept else 0;
++            const rows = count - first;
++            if (dc.local(i)) {
++                try d.go(f, .mix, .{ .x = @intCast(rows) }, 256, .{ d.taps + (first - d.tail_first) * 4608 * 2, d.alpha + i * 16, l.context_norm, d.context_x, int(d.tail * 4608) });
++            } else try d.go(f, .mix_sum, .{ .x = @intCast(rows) }, 256, .{ d.sums, l.context_norm, d.context_x });
++            try f.product(l.kc, d.context_x, d.k, rows, .bf16);
++            try f.product(l.vc, d.context_x, d.v, rows, .bf16);
++            try d.go(f, .prep, .{ .x = 4, .y = @intCast(rows) }, 128, .{ d.k, l.ctxnorm, d.k, l.cache_k, @as(i32, 4), int(pos + first), int(l.capacity) });
++            try d.go(f, .store, .{ .x = ceil(rows * 512, 256) }, 256, .{ d.v, l.cache_v, @as(i32, 512), int(pos + first), int(l.capacity), int(rows) });
+         }
+-        try d.go(f, .mix, .{ .x = 1 }, 256, .{ d.taps + (count - 1) * 4608 * 2, d.alpha + 5 * 16, d.markov_norm, d.f_rnn, int(f.s.rows * 4608) });
++        try d.go(f, .mix, .{ .x = 1 }, 256, .{ d.taps + (count - 1 - d.tail_first) * 4608 * 2, d.alpha + 5 * 16, d.markov_norm, d.f_rnn, int(d.tail * 4608) });
+         d.pos = pos + count;
+     }
+     fn reduce(d: *Draft, f: *Forward, l: wt.Linear, x: u64) !void {
+diff --git a/zig/src/families/inkling2/draft_config.zig b/zig/src/families/inkling2/draft_config.zig
+index c4251be7..827d6edf 100644
+--- a/zig/src/families/inkling2/draft_config.zig
++++ b/zig/src/families/inkling2/draft_config.zig
+@@ -12,8 +12,11 @@ pub const targets = [_]u32{ 5, 11, 17, 23, 29, 35, 41, 48 };
+ pub const eps: f32 = 1e-6;
+ pub const theta: f32 = 1000000;
+ 
++/// The one layer whose ring holds the whole context; the others keep a window.
++pub const global = 2;
++
+ pub fn local(layer: usize) bool {
+-    return layer != 2;
++    return layer != global;
+ }
+ 
+ pub fn capacity(context: usize, layer: usize) usize {
+diff --git a/zig/src/families/inkling2/forward.zig b/zig/src/families/inkling2/forward.zig
+index f29a83cb..819b244b 100644
+--- a/zig/src/families/inkling2/forward.zig
++++ b/zig/src/families/inkling2/forward.zig
+@@ -477,13 +477,11 @@ pub const Forward = struct {
+         return &f.side.?;
+     }
+ 
+-    /// The drafter's copy of the residual stream before layer i, for chunk c's rows.
++    /// The drafter's tap of the residual stream before layer i, for chunk c's rows (Draft.tap).
+     fn tap(f: *Forward, i: usize, c: Chunk) !void {
+         const d = f.drafter orelse return;
+-        const s = f.s;
+-        const at = c.first * cfg.hidden * 2;
+         for (@import("draft_config.zig").targets, 0..) |t, j| {
+-            if (i == t) try f.copy(d.taps + j * s.rows * cfg.hidden * 2 + at, s.partial + at, c.count * cfg.hidden * 2);
++            if (i == t) try d.tap(f, j, f.s.partial, c.first, c.count);
+         }
+     }
+ 
+@@ -493,6 +491,7 @@ pub const Forward = struct {
+         const s = f.s;
+         if (rows == 0 or rows > s.rows or rows + s.pos > s.context) return error.InklingContext;
+         for (ids) |id| if (id >= cfg.vocabulary) return error.InklingToken;
++        if (f.drafter) |d| d.pass(rows); // on the host: a replayed graph's taps take its rows too
+         // a one-token step, or a verify window, replays its captured graph (a plain step with a drafter ingests on the host)
+         if (f.graphs_on and final and rows < f.graphs[0].len and (f.verifying or f.drafter == null) and !f.verify_check) return f.replay(ids);
+         return f.body(ids, final);
+@@ -548,7 +547,7 @@ pub const Forward = struct {
+         const norm_rows = if (all) rows else 1;
+         try f.k.go(.mix, f.stream, .{ .x = @intCast(norm_rows) }, kern.mix_threads, .{kern.Mix{ .partial = s.partial + last, .blocks = s.blocks + last, .attention = 0, .query = f.w.output_query, .norm = f.w.norm, .out = s.normed, .rows = int(norm_rows), .width = cfg.hidden, .block_stride = int(s.rows * cfg.hidden), .blocks_count = int(cfg.blocksBefore(f.w.layer.len)), .queries = 1, .mode = 0 }});
+         if (f.drafter) |d| {
+-            try f.copy(d.taps + 7 * s.rows * cfg.hidden * 2, s.normed, rows * cfg.hidden * 2);
++            try d.tap(f, 7, s.normed, 0, rows);
+             if (!f.verifying) try d.ingest(f, start, rows);
+         }
+         if (!final) return;
 -- 
 2.56.1
 
