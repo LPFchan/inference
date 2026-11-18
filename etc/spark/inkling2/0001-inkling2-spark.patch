@@ -1,7 +1,7 @@
 From ab85a9bf58392c5c08b6c055247d51880eb07aee Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Tue, 17 Nov 2026 22:24:16 +0900
-Subject: [PATCH 01/26] Quantize Inkling's BF16 attention and head projections
+Subject: [PATCH 01/27] Quantize Inkling's BF16 attention and head projections
  to NVFP4 at load (TF_INKLING_FP4)
 
 TF_INKLING_FP4=attn keeps Q, K, V, R, gate and O as NVFP4 lane weights; =all adds the output head.
@@ -371,7 +371,7 @@ index 2045cb01..171bd7c8 100644
 From e893996207418a3e9be28bb35b1baa2e77cf1084 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Tue, 17 Nov 2026 23:19:05 +0900
-Subject: [PATCH 02/26] Inkling decode: latency-bound mix and quant kernels
+Subject: [PATCH 02/27] Inkling decode: latency-bound mix and quant kernels
  issue all loads at once; NVFP4 drafter projections under FP4=all
 
 tf_ik_mix: one 576-thread CTA a row, each thread one 16-byte chunk of every source, one combined
@@ -808,7 +808,7 @@ index 8da5834f..cb578b05 100644
 From 96948dfd43770dbe0bf6447a20a5e9d280704bfc Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Tue, 17 Nov 2026 23:29:20 +0900
-Subject: [PATCH 03/26] Inkling verification: one attention launch and one
+Subject: [PATCH 03/27] Inkling verification: one attention launch and one
  small BF16 projection call for every verified row
 
 The decode attention kernel already masks each row's own causal window, so batching keeps each row's
@@ -860,7 +860,7 @@ index 7915e8fa..f4e4c249 100644
 From 3a6b5504d561d17f420582133ed40be48582795d Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 00:03:41 +0900
-Subject: [PATCH 04/26] Inkling: replay one CUDA graph per one-token step and
+Subject: [PATCH 04/27] Inkling: replay one CUDA graph per one-token step and
  verify window (TF_INKLING_GRAPHS, default on)
 
 Prep and attention read the step position from the device when a graph replays; draft mode's
@@ -1175,7 +1175,7 @@ index 171bd7c8..fe3f9ca5 100644
 From 377844b40b29a1f6383f57ff1f2f860506b6df50 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 00:32:24 +0900
-Subject: [PATCH 05/26] Inkling: split experts across the pair
+Subject: [PATCH 05/27] Inkling: split experts across the pair
  (TF_INKLING_EXPERTS=<full checkpoint>)
 
 Every rank runs half of every routed expert: w13's output tile columns (its gate/up pairs) and
@@ -1373,7 +1373,7 @@ index fe3f9ca5..2351961d 100644
 From 789e179ab26119d5a6de7b898a10edc605b2c499 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 01:00:07 +0900
-Subject: [PATCH 06/26] inkling2: Q, gate, R (and local K, V) as one NVFP4
+Subject: [PATCH 06/27] inkling2: Q, gate, R (and local K, V) as one NVFP4
  projection per layer
 
 ---
@@ -1578,7 +1578,7 @@ index cd581e8e..24d790ac 100644
 From a3c3d0a78b38b334b3f7742e7951ea85e6fbc57a Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 01:28:35 +0900
-Subject: [PATCH 07/26] inkling2: decode attention split over 16 key-tile sets
+Subject: [PATCH 07/27] inkling2: decode attention split over 16 key-tile sets
  per head, merged in order; row-invariant, 5x faster at 8k
 
 ---
@@ -1856,7 +1856,7 @@ index bd866c21..61429166 100644
 From ab0010657824d26cf3c308235d70494933fcbd00 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 01:28:35 +0900
-Subject: [PATCH 08/26] inkling2: TF_INKLING_EXPERTS also takes a pack already
+Subject: [PATCH 08/27] inkling2: TF_INKLING_EXPERTS also takes a pack already
  cut to this rank's half
 
 ---
@@ -1906,7 +1906,7 @@ index 24d790ac..99b00b99 100644
 From 043a53a41eca9204af6e89600af96d9eb50453e3 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 01:51:21 +0900
-Subject: [PATCH 09/26] inkling2: build the glue and drafter kernels
+Subject: [PATCH 09/27] inkling2: build the glue and drafter kernels
  arch-specific (sm_121a): native FP4/FP8 conversions
 
 ---
@@ -1937,7 +1937,7 @@ index 9b4f6c77..688b055f 100644
 From b71cf55b766fb07d42dc314522b0f3978cc6dbba Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 02:20:32 +0900
-Subject: [PATCH 10/26] inkling2: forward graph in pieces; warp-level route
+Subject: [PATCH 10/27] inkling2: forward graph in pieces; warp-level route
  top-8 and mix reductions; drafter rnn and fold as NVFP4
 
 ---
@@ -2256,7 +2256,7 @@ index 8ff38eff..08a3f9c4 100644
 From 427a874ffca07c1770318912cc1a76cbfb0665e7 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 02:32:26 +0900
-Subject: [PATCH 11/26] inkling2: keep() restores every conv history in one
+Subject: [PATCH 11/27] inkling2: keep() restores every conv history in one
  launch
 
 ---
@@ -2364,7 +2364,7 @@ index dcae77b3..52a87e1c 100644
 From d910d2b7cf40eb1b0d327cd464f3ee38afdfb217 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 04:36:01 +0900
-Subject: [PATCH 12/26] inkling2: verify drafts while their chained chance
+Subject: [PATCH 12/27] inkling2: verify drafts while their chained chance
  stays at least TF_INKLING_DRAFT_FLOOR (default 0.6), up to 5 deep
 
 The drafter reports each pick's probability (tf_ik_top1p: one 1024-thread block, float4 loads, online
@@ -2686,7 +2686,7 @@ index 2351961d..0872392e 100644
 From b723bd4b0aaa55e93437decdc35f0e9e045f265d Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 04:36:01 +0900
-Subject: [PATCH 13/26] environment tests: valid forms for TF_INKLING_FP4,
+Subject: [PATCH 13/27] environment tests: valid forms for TF_INKLING_FP4,
  EXPERTS, GRAPHS and DRAFT_FLOOR
 
 ---
@@ -2718,7 +2718,7 @@ index 046db04f..b150590f 100644
 From afec536d2fca51b7496bfe1638b53892f571c90b Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 04:50:40 +0900
-Subject: [PATCH 14/26] inkling2: peer records carry up to 12 ids in the header
+Subject: [PATCH 14/27] inkling2: peer records carry up to 12 ids in the header
  (one broadcast each); keep rides with the next draft
 
 Rank 1 no longer drains its stream between the keep and the draft, so it queues ingest and drafting back to
@@ -2884,7 +2884,7 @@ index 12481774..d989ed85 100644
 From e4ca0d94d29e48cd30505322736329ef395e43dd Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 05:23:05 +0900
-Subject: [PATCH 15/26] server: TENSORFOLD_KEYS_MODEL, a model id whose
+Subject: [PATCH 15/27] server: TENSORFOLD_KEYS_MODEL, a model id whose
  requests carry keys to the engine for its per-request edit
 
 The same plumbing as our DeepSeek keys switch: the id is listed beside the served name, its requests set
@@ -3068,7 +3068,7 @@ index 820d6556..872b9c1b 100644
 From 2fe1103f1c0877e578abdfc1d6cda853c2af9594 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 05:23:05 +0900
-Subject: [PATCH 16/26] inkling2: TF_INKLING_EDIT, OpenUncensored's refusal
+Subject: [PATCH 16/27] inkling2: TF_INKLING_EDIT, OpenUncensored's refusal
  edit for requests that ask (TENSORFOLD_KEYS_MODEL)
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
@@ -3398,7 +3398,7 @@ index b150590f..d47c1bcc 100644
 From ba9c87428a457f48d95a949e4a360b9ccb36d1b8 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 05:35:06 +0900
-Subject: [PATCH 17/26] server: TENSORFOLD_GREEDY_FALLBACK=1 decodes a sampling
+Subject: [PATCH 17/27] server: TENSORFOLD_GREEDY_FALLBACK=1 decodes a sampling
  request greedily on a greedy-only engine instead of refusing it
 
 ---
@@ -3447,7 +3447,7 @@ index 872b9c1b..2dc2cf17 100644
 From 22d3c966619c259ab9b3c18a8d6f751af79d95a6 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 05:57:25 +0900
-Subject: [PATCH 18/26] server: read Inkling 2's messages natively: text,
+Subject: [PATCH 18/27] server: read Inkling 2's messages natively: text,
  thinking as reasoning_content, JSON invokes as tool_calls; only end of
  sampling ends a turn; reasoning_effort switches thinking
 
@@ -3705,7 +3705,7 @@ index 2dc2cf17..0778579c 100644
 From 0709576ac8dfe65568a99bfc1f6eedaf659b515c Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 07:55:06 +0900
-Subject: [PATCH 19/26] inkling2: prompt passes take tf_ik_prompt_dot (the
+Subject: [PATCH 19/27] inkling2: prompt passes take tf_ik_prompt_dot (the
  common EXL3 prompt path at any trellis width, 64 members a block, whole K)
  and TF_INKLING_PROMPT_ROWS (default 256)
 
@@ -4013,7 +4013,7 @@ index d47c1bcc..749ab179 100644
 From e6dc7e6ff2e56509e45ad218151ce708acf24428 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 08:29:54 +0900
-Subject: [PATCH 20/26] inkling2: turn reuse: a prompt resumes from the
+Subject: [PATCH 20/27] inkling2: turn reuse: a prompt resumes from the
  furthest kept turn that starts it (the last prompt's end, or the server's
  system-prompt cuts); a kept turn copies each local ring's last 1024 rows,
  every conv history and the drafter's local rings, and reads the one live set
@@ -4411,7 +4411,7 @@ index 00000000..4f3c91c9
 From d7fef321311bcc40ffa4e069c9b99559e0227d5b Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 08:46:22 +0900
-Subject: [PATCH 21/26] inkling2: each rank sums a row's eight expert outputs
+Subject: [PATCH 21/27] inkling2: each rank sums a row's eight expert outputs
  before the exchange (tf_ik_moe_sum), so the pair gathers one f32 row, not
  eight bf16 ones; no gathered buffer
 
@@ -4490,7 +4490,7 @@ index 2c37abc2..fa688af9 100644
 From f8c778f1cbdb6eeeb037112d0e0768a0290f90ad Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 09:11:07 +0900
-Subject: [PATCH 22/26] inkling2: prompt passes attend with
+Subject: [PATCH 22/27] inkling2: prompt passes attend with
  tf_ik_attention_flash (64 query rows a block, cp.async key and value tiles,
  ldmatrix fragments, online softmax in registers, P in BF16); tf_ik_attention
  and its SIMT exception path removed
@@ -4867,7 +4867,7 @@ index ea53c710..ce0c156c 100644
 From 7a84815fe7b7f7cb20040b5abbaa29f679ebd70d Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 10:23:20 +0900
-Subject: [PATCH 23/26] inkling2: tf_ik_relative takes rows * heads on grid x
+Subject: [PATCH 23/27] inkling2: tf_ik_relative takes rows * heads on grid x
  (y stays under 65535 for passes of 2731 rows and more)
 
 ---
@@ -4908,7 +4908,7 @@ index 323fe8f1..e0ba47fe 100644
 From 0c84ddf3f319639a7700e1c8b55fa17f4f1633b7 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 10:23:24 +0900
-Subject: [PATCH 24/26] inkling2: tf_ik_prompt_dot takes 128 members by 128
+Subject: [PATCH 24/27] inkling2: tf_ik_prompt_dot takes 128 members by 128
  columns, one Hadamard block, and unrotates it in its epilogue (BF16 out, no
  fp32 z or tf_ik_unrotate pass); split ranks skip the slot zero fills; gu,
  hidden and quant_down sized to the rank's intermediate
@@ -5195,7 +5195,7 @@ index fa688af9..8a914651 100644
 From 705ceaf6f05b60e342ecfe68d552da5195f239e6 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 11:03:10 +0900
-Subject: [PATCH 25/26] inkling2: tf_ik_down_input makes the down projection's
+Subject: [PATCH 25/27] inkling2: tf_ik_down_input makes the down projection's
  rotated input in one CTA a pair (tf_ik_swiglu, tf_ik_quant and tf_ik_rotate's
  arithmetic in order, the rounded row in shared memory); no hidden or
  quant_down buffers; TF_INKLING_PROMPT_ROWS up to 8192
@@ -5448,7 +5448,7 @@ index 2fd9c43b..b219c477 100644
 From 111b5231028f0fb7ab911cbf6f4edfd979012b0a Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 12:03:07 +0900
-Subject: [PATCH 26/26] inkling2: tf_ik_relative computes 8 distances a thread
+Subject: [PATCH 26/27] inkling2: tf_ik_relative computes 8 distances a thread
  with vector loads and one 16-byte store (same sums in the same order);
  TF_INKLING_PROMPT_ROWS up to 16384 (about 0.55 MB a row), so a prompt of that
  length takes one pass and streams the expert weights once
@@ -5523,6 +5523,118 @@ index b219c477..d5102bf3 100644
      .{ .name = "TF_INKLING_VERIFY_CHECK", .scope = .cuda, .kind = .flag, .forms = "0 or 1" },
      .{ .name = "TF_INKLING_RANK", .scope = .cuda, .kind = .u32, .max = 1, .forms = "rank 0 or 1" },
      .{ .name = "TF_INKLING_WORLD", .scope = .cuda, .kind = .u32, .only = &.{ 1, 2 }, .forms = "one rank for operator checks or two for serving" },
+-- 
+2.56.1
+
+
+From b1770ee99ce9051111b8080038b1391813dc64e0 Mon Sep 17 00:00:00 2001
+From: LPFchan <me@lost.plus>
+Date: Wed, 18 Nov 2026 16:05:19 +0900
+Subject: [PATCH 27/27] inkling2: tf_ik_attention_flash keeps its output
+ accumulators in registers (the epilogue's row loop unrolled; o was a 272-byte
+ stack array), stages each tile's relative bias rows in shared memory with its
+ keys, and skips the per-score mask on tiles 1024 or more behind a warp's rows
+ (same scores in the same order, bits unchanged)
+
+---
+ zig/kernels/cuda/inkling2_attention_flash.cuh | 44 +++++++++++++++----
+ 1 file changed, 35 insertions(+), 9 deletions(-)
+
+diff --git a/zig/kernels/cuda/inkling2_attention_flash.cuh b/zig/kernels/cuda/inkling2_attention_flash.cuh
+index 9b83ea7e..d35f49ba 100644
+--- a/zig/kernels/cuda/inkling2_attention_flash.cuh
++++ b/zig/kernels/cuda/inkling2_attention_flash.cuh
+@@ -1,6 +1,7 @@
+ // Prompt-pass attention, flash style: 64 query rows of one head a block (16 a warp), 64-key tiles of BF16 keys and
+ // values staged by cp.async, Q.K and P.V on tensor cores with P in BF16, the softmax online in registers. The same
+-// relative bias, window, gate and sink as the decode kernels. Keys past the last row read as zeros.
++// relative bias, window, gate and sink as the decode kernels; a tile's bias rows are staged with its keys, and tiles
++// 1024 or more behind a warp's rows skip the per-score mask. Keys past the last row read as zeros.
+ #pragma once
+ #include "inkling2_common.cuh"
+ using namespace inkling2;
+@@ -43,12 +44,23 @@ __device__ inline void stage(bf16 (*dst)[LD], const bf16* cache, int base, int l
+         cp16(&dst[row][piece * 8], src, valid);
+     }
+ }
++// The relative bias a 64-key tile needs: block row i (absolute a.pos + r0 + i) takes distances from the 8-aligned
++// floor of its smallest, 72 of them (nine 16-byte pieces), whole pieces inside [0, 1024) and real rows only.
++constexpr int RB = 72;
++__device__ inline int rel_first(int row_abs, int base) { return (row_abs - base - (BK - 1)) >> 3 << 3; }
++__device__ inline void stage_rel(bf16 (*dst)[RB], const bf16* relative, int r0, int pos, int rows, int hq, int head, int base) {
++    for (int i = threadIdx.x; i < BR * (RB / 8); i += 128) {
++        const int row = i / (RB / 8), piece = i % (RB / 8), first = rel_first(pos + r0 + row, base) + piece * 8;
++        const bool valid = r0 + row < rows && first >= 0 && first < 1024;
++        cp16(&dst[row][piece * 8], relative + ((size_t)(valid ? r0 + row : 0) * hq + head) * 1024 + (valid ? first : 0), valid);
++    }
++}
+ } // namespace ik_flash
+ 
+ extern "C" __global__ __launch_bounds__(128) void tf_ik_attention_flash(InklingAttention a) {
+     using namespace ik_flash;
+     if (a.posp) a.pos = *a.posp;
+-    __shared__ __align__(16) bf16 ks[BK][LD], vs[BK][LD];
++    __shared__ __align__(16) bf16 ks[BK][LD], vs[BK][LD], rs[BR][RB];
+     const int t = threadIdx.x, w = t >> 5, lane = t & 31, g = lane >> 2, sub = lane & 3;
+     const int r0 = blockIdx.x * BR, head = blockIdx.y, kh = head / (a.hq / a.hk);
+     const int last = a.pos + min(a.rows, r0 + BR) - 1;
+@@ -71,7 +83,10 @@ extern "C" __global__ __launch_bounds__(128) void tf_ik_attention_flash(InklingA
+     const int rows_abs[2] = {a.pos + wr + g, a.pos + wr + g + 8};
+     const bool rows_ok[2] = {wr + g < a.rows, wr + g + 8 < a.rows};
+     const int start = first / BK * BK;
++    // a tile needs the bias when some row of the block is under 1024 past its first key
++    auto near = [&](int b) { return a.pos + r0 + BR - 1 - b < 1024 + BK - 1 + BR; };
+     stage(ks, a.k, start, last, a.capacity, a.hk, kh);
++    if (near(start)) stage_rel(rs, a.relative, r0, a.pos, a.rows, a.hq, head, start);
+     commit();
+     stage(vs, a.v, start, last, a.capacity, a.hk, kh);
+     commit();
+@@ -88,13 +103,21 @@ extern "C" __global__ __launch_bounds__(128) void tf_ik_attention_flash(InklingA
+         }
+         // scale, relative bias, mask; the tile's row maxima
+         float tm[2] = {-INFINITY, -INFINITY};
+-        for (int n = 0; n < 8; ++n) for (int e = 0; e < 4; ++e) {
+-            const int h = e >> 1, key = base + n * 8 + 2 * sub + (e & 1), distance = rows_abs[h] - key;
+-            const bool valid = rows_ok[h] && distance >= 0 && key >= 0 && (!a.window || distance <= a.window);
+-            float score = s[n][e] * 0.08838834764831845f;
+-            if (valid && distance < 1024) score += f(a.relative[((size_t)(wr + g + 8 * h) * a.hq + head) * 1024 + distance]);
+-            s[n][e] = valid ? score : -INFINITY;
+-            tm[h] = fmaxf(tm[h], s[n][e]);
++        // a warp whose 16 rows are all real and at least 1024 past the tile's last key: every score is valid, no bias
++        if (!a.window && wr + 16 <= a.rows && a.pos + wr - (base + BK - 1) >= 1024) {
++            for (int n = 0; n < 8; ++n) for (int e = 0; e < 4; ++e) {
++                s[n][e] = s[n][e] * 0.08838834764831845f;
++                tm[e >> 1] = fmaxf(tm[e >> 1], s[n][e]);
++            }
++        } else {
++            for (int n = 0; n < 8; ++n) for (int e = 0; e < 4; ++e) {
++                const int h = e >> 1, key = base + n * 8 + 2 * sub + (e & 1), distance = rows_abs[h] - key;
++                const bool valid = rows_ok[h] && distance >= 0 && key >= 0 && (!a.window || distance <= a.window);
++                float score = s[n][e] * 0.08838834764831845f;
++                if (valid && distance < 1024) score += f(rs[w * 16 + g + 8 * h][distance - rel_first(rows_abs[h], base)]);
++                s[n][e] = valid ? score : -INFINITY;
++                tm[h] = fmaxf(tm[h], s[n][e]);
++            }
+         }
+         float alpha[2];
+         for (int h = 0; h < 2; ++h) {
+@@ -124,6 +147,7 @@ extern "C" __global__ __launch_bounds__(128) void tf_ik_attention_flash(InklingA
+         __syncthreads(); // every warp is past its K reads and V has landed
+         if (base + BK <= last) {
+             stage(ks, a.k, base + BK, last, a.capacity, a.hk, kh);
++            if (near(base + BK)) stage_rel(rs, a.relative, r0, a.pos, a.rows, a.hq, head, base + BK);
+         }
+         commit();
+         // O += P V: P from the score registers, V by transposed ldmatrix
+@@ -142,6 +166,8 @@ extern "C" __global__ __launch_bounds__(128) void tf_ik_attention_flash(InklingA
+         commit();
+     }
+     wait<0>();
++    // unrolled, so o stays in registers (an h-indexed o is a stack array)
++#pragma unroll
+     for (int h = 0; h < 2; ++h) {
+         const int row = wr + g + 8 * h;
+         if (row >= a.rows) continue;
 -- 
 2.56.1
 

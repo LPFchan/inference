@@ -49,7 +49,7 @@ so the stock model's kernels and outputs are unchanged.
 
 - Decode, greedy, 131,072-token window: prose 38-42 tok/s, code 69, 8k context 37. About 0.2 s to the first token on
   short prompts. The uncensored name runs 36-39 on prose.
-- Prompt reading: about 1550 tok/s at 10.9k tokens, 1400 at 43k. A pass takes up to 11,264 tokens (`PROMPT_ROWS`,
+- Prompt reading: about 1650 tok/s at 10.9k tokens, 1600 at 43k. A pass takes up to 11,264 tokens (`PROMPT_ROWS`,
   about 0.55 MB of scratch a token), so a prompt that fits streams the expert weights once. The exchange between the
   Sparks runs over both RoCE twins of the cable's port (one carries only ~100 Gb/s) with 4 NCCL channels.
 - Turn reuse: a prompt that starts with the previous prompt, or shares its system prompt, resumes there. A second

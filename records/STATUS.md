@@ -385,6 +385,12 @@ Patch chain in `patches/atomic-llama-cpp/`, applied in order by `Dockerfile`:
 
 ## Recent Changes
 
+- 2026-11-18: **Inkling-2-Small reads long prompts at about 1600 tok/s** — A
+  cold 43k-token prompt takes 27 s (was 31 s), 10.9k takes 6.6 s (1650 tok/s).
+  The prompt attention kernel was keeping its output in slow stack memory, read
+  the position bias with scattered loads, and masked every score; it now keeps
+  the output in registers, stages the bias with each key tile, and skips the
+  mask far from the diagonal. Same replies bit for bit.
 - 2026-11-18: **Qwen3.8 Flash-Next retired** — removed from the live
   gateway registry, `etc/models.grimoire.json`, `etc/models.mangchi.json`
   and Mangchi's launch spec (`etc/mangchi-agent.json`), and its
