@@ -47,7 +47,7 @@ so the stock model's kernels and outputs are unchanged.
 
 ## What it does today
 
-- Decode, greedy, 524,288-token window: prose 38-44 tok/s, code 63-69, 8k context 37, 115k 36, 250k 13.5, 481k 11.
+- Decode, greedy, 524,288-token window: prose 38-44 tok/s, code 63-69, 8k context 37, 32k 54, 115k 51, 250k 25, 481k 22.
   About 0.2 s to the first token on short prompts. The uncensored name runs 36-39 on prose.
 - Prompt reading: about 2000 tok/s at 10.9k tokens (1975-2020 from one restart to the next), 1900 at 43k. A pass
   takes up to 11,264 tokens (`PROMPT_ROWS`, about 0.4 MB of scratch a token), so a prompt that fits streams the expert
