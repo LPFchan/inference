@@ -63,15 +63,6 @@ Seed at `/etc/grimoire/models.json`, persisted to `/var/lib/grimoire/models.json
       "cache-type-v": "turbo4",
       "extra-args": ["--tensor-split", "1,1"]
     },
-    "qwen3.8-flash-next": {
-      "backend": "vllm-remote",
-      "remote-agent-url": "http://mangchi.tail.lost.plus:9700",
-      "remote-model-id": "qwen3.8-flash-next",
-      "remote-url": "http://mangchi.tail.lost.plus:8002",
-      "backend-model-id": "qwen3.8-flash-next",
-      "ctx-size": 393216,
-      "startup-timeout": 900
-    },
     "gemma-4-mtp-31B": {
       "file": "gguf/Gemma4-31B-Q4_K_M.gguf",
       "mtp-head": "gguf/gemma4-mtp-head-q8_0.gguf",

@@ -1,24 +1,5 @@
 {
   "models": {
-    "qwen3.8-flash-next": {
-      "backend": "vllm-remote",
-      "remote-agent-url": "http://mangchi.tail.lost.plus:9700",
-      "remote-model-id": "qwen3.8-flash-next",
-      "remote-url": "http://mangchi.tail.lost.plus:8002",
-      "backend-model-id": "qwen3.8-flash-next",
-      "family": "qwen",
-      "capabilities": [
-        "completion",
-        "multimodal"
-      ],
-      "cost": {
-        "input": 0.33,
-        "output": 3.25,
-        "cache_read": 0.1
-      },
-      "ctx-size": 393216,
-      "startup-timeout": 900
-    },
     "gemma-4-mtp-31B": {
       "file": "gguf/gemma-4-31B_q4_0-it.gguf",
       "speculative-type": "mtp",

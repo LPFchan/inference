@@ -239,40 +239,7 @@ def test_status_reports_loading_until_health_check_completes(mgr, monkeypatch):
 
 def test_specs_file_parses():
     assert agent.HOST_MEMORY_FLOOR_GIB == 6
-    specs = agent.load_specs()
-    assert set(specs) == {"qwen3.8-flash-next"}
-    flash = specs["qwen3.8-flash-next"]
-    assert flash.vllm_docker_image == "mangchi-vllm:thor-dense-candidate-v10-sharded-state"
-    assert "--enable-per-request-metrics" in flash.serve_args
-    assert "--enable-prompt-tokens-details" in flash.serve_args
-    assert (
-        flash.serve_args[flash.serve_args.index("--load-format") + 1]
-        == "sharded_state"
-    )
-    assert flash.serve_args[flash.serve_args.index("--served-model-name") + 1] == "qwen3.8-flash-next"
-    assert "--enable-auto-tool-choice" in flash.serve_args
-    assert flash.serve_args[flash.serve_args.index("--tool-call-parser") + 1] == "qwen3_xml"
-    assert flash.serve_args[flash.serve_args.index("--reasoning-parser") + 1] == "qwen3"
-    assert flash.env.get("VLLM_PLE_MMAP") == "1"
-    assert flash.env.get("VLLM_PLE_MMAP_DIR") == "/models/qwen3.8-flash-next-abliterated-w4a4"
-    assert flash.env.get("VLLM_THOR_CUTEDSL_MOE") == "1"
-    assert flash.env.get("QWEN4EXP_DRAFT_VOCAB") == "98304"
-    assert flash.env.get("VLLM_ALLOW_LONG_MAX_MODEL_LEN") == "1"
-    assert flash.cache_dir_host == "/home/yeowool/.cache/mangchi-vllm"
-    assert "VLLM_PLE_CPU_OFFLOAD" not in flash.env
-    assert "--enforce-eager" in flash.serve_args
-    assert "--no-enable-flashinfer-autotune" in flash.serve_args
-    assert flash.serve_args[flash.serve_args.index("--max-model-len") + 1] == "393216"
-    assert "--skip-mm-profiling" in flash.serve_args
-    assert flash.serve_args[flash.serve_args.index("--kv-cache-memory-bytes") + 1] == "14485411127"
-    assert flash.serve_args[flash.serve_args.index("--kv-cache-dtype") + 1] == "fp8"
-    assert flash.serve_args[flash.serve_args.index("--max-num-batched-tokens") + 1] == "8192"
-    assert "--limit-mm-per-prompt" not in flash.serve_args
-    mm_processor = json.loads(flash.serve_args[flash.serve_args.index("--mm-processor-kwargs") + 1])
-    assert mm_processor == {"max_pixels": 2097152}
-    assert flash.gpu_mem_util == 0.82
-    assert flash.resident_gb == 101
-    assert flash.resident_gb <= agent.MEMORY_BUDGET_GIB
+    assert agent.load_specs() == {}
 
 
 def test_qsa_fp8_canary_build_is_pinned_and_thor_aware():
@@ -325,21 +292,31 @@ def test_qsa_fp8_canary_build_is_pinned_and_thor_aware():
 
 
 def test_docker_launch_command_shape():
-    specs = agent.load_specs()
-    name = "qwen3.8-flash-next"
-    cmd = agent.build_launch_command(name, specs[name])
+    name = "thor-model"
+    spec = agent.LaunchSpec(
+        model_path="/models/thor-model",
+        resident_gb=40,
+        gpu_mem_util=0.5,
+        port=8002,
+        serve_args=["--chat-template", "/templates/chat.jinja"],
+        vllm_docker_image="mangchi-vllm:test",
+        models_dir_host="/home/yeowool/models",
+        cache_dir_host="/home/yeowool/.cache/mangchi-vllm",
+        templates_dir_host="/home/yeowool/inference/templates",
+    )
+    cmd = agent.build_launch_command(name, spec)
     assert cmd[0] == "docker" and "run" in cmd and "-d" in cmd
     assert f"mangchi-vllm-{name}" in cmd
     assert "--runtime" in cmd and "nvidia" in cmd
     # port published, model dir mounted ro, image + vllm serve present
     joined = " ".join(cmd)
     assert "-p 8002:8002" in joined
-    assert "/home/yeowool/models/nvfp4:/models:ro" in joined
+    assert "/home/yeowool/models:/models:ro" in joined
     assert "/home/yeowool/.cache/mangchi-vllm:/root/.cache" in joined
-    assert "--entrypoint vllm mangchi-vllm:thor-dense-candidate-v10-sharded-state serve /models/qwen3.8-flash-next-abliterated-w4a4-vllm-state-mtp4-393k" in joined
+    assert "--entrypoint vllm mangchi-vllm:test serve /models/thor-model" in joined
     assert "/home/yeowool/inference/templates:/templates:ro" in joined
-    assert "--chat-template /templates/qwen3.8-chat_template.jinja" in joined
-    assert "--gpu-memory-utilization 0.82" in joined
+    assert "--chat-template /templates/chat.jinja" in joined
+    assert "--gpu-memory-utilization 0.5" in joined
 
 
 def test_container_resident_alive_and_reap(mgr, monkeypatch):

@@ -1,8 +1,8 @@
 # Current Status
 
-**Snapshot:** 2026-10-29
+**Snapshot:** 2026-11-18
 **Posture:** The Grimoire gateway serves local llama.cpp models and admits remote vLLM models through Mangchi's residency agent. The local engine remains TheTom's turboquant fork with turbo4 KV. Mangchi model artifacts are managed separately from the gateway.
-**Focus:** Serve Qwen3.8 Flash-Next as Mangchi's registered remote model and continue Flash-Next's its decode, prefix-cache, and CUDA-graph optimization program.
+**Focus:** Qwen3-ASR autoresearch. Mangchi's residency agent has no launch spec since Qwen3.8 Flash-Next retired (2026-11-18); Mangchi serves MiniMax-H3-Image.
 
 ## Autoresearch — Qwen3-ASR
 
@@ -385,6 +385,13 @@ Patch chain in `patches/atomic-llama-cpp/`, applied in order by `Dockerfile`:
 
 ## Recent Changes
 
+- 2026-11-18: **Qwen3.8 Flash-Next retired** — removed from the live
+  gateway registry, `etc/models.grimoire.json`, `etc/models.mangchi.json`
+  and Mangchi's launch spec (`etc/mangchi-agent.json`), and its
+  `/home/yeowool/models/nvfp4` checkpoints were deleted to free Mangchi's
+  disk. Its probe scripts and the Spark Flash-Next bootstrap are gone; the
+  Mangchi agent compose now mounts `/home/yeowool/models`, and the
+  `docker/mangchi-vllm` build stays for a future Thor model.
 - 2026-11-18: **Inkling-2-Small reads prompts at about 1550 tok/s** — A cold
   10.9k-token prompt takes 7.0 s (was 15.3 s), 43k takes 31 s (1400 tok/s).
   A pass now holds up to 11,264 tokens, so such a prompt reads the 91 GB of
