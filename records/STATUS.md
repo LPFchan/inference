@@ -385,6 +385,12 @@ Patch chain in `patches/atomic-llama-cpp/`, applied in order by `Dockerfile`:
 
 ## Recent Changes
 
+- 2026-11-18: **Inkling-2-Small reads up to 524,288 tokens** — The window is
+  four times longer (was 131,072). The engine keeps the long-history KV caches
+  as NVFP4, so 524,288 tokens take 2.99 GiB a Spark, about what 131,072 took in
+  BF16. Against BF16: same math score (12 of 12), three hidden facts found at
+  every length up to 481k, same draft acceptance, prompts within 3%. Decode
+  slows with length: 36 tok/s at 115k, 11 at 481k. `KV4=0` restores BF16.
 - 2026-11-18: **Inkling-2-Small frees 2.5 GiB a Spark** — The engine now
   takes 106.7 GiB of each Spark instead of 109.2, so about 7.5 GiB stays free
   after the load (was 4.6-5.0). The expert matmuls reuse two buffers that

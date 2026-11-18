@@ -966,7 +966,7 @@
       "capabilities": [
         "completion"
       ],
-      "ctx-size": 131072,
+      "ctx-size": 524288,
       "added": "2026-11-17T20:36:43.644416+00:00",
       "family": "inkling"
     }

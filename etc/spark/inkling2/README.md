@@ -47,14 +47,20 @@ so the stock model's kernels and outputs are unchanged.
 
 ## What it does today
 
-- Decode, greedy, 131,072-token window: prose 38-42 tok/s, code 69, 8k context 37. About 0.2 s to the first token on
-  short prompts. The uncensored name runs 36-39 on prose.
+- Decode, greedy, 524,288-token window: prose 38-44 tok/s, code 63-69, 8k context 37, 115k 36, 250k 13.5, 481k 11.
+  About 0.2 s to the first token on short prompts. The uncensored name runs 36-39 on prose.
 - Prompt reading: about 2000 tok/s at 10.9k tokens (1975-2020 from one restart to the next), 1900 at 43k. A pass
   takes up to 11,264 tokens (`PROMPT_ROWS`, about 0.4 MB of scratch a token), so a prompt that fits streams the expert
   weights once. A pass of 512 tokens or more runs in three row chunks: while one chunk's sums cross to the other Spark,
   the GPU already works on the next chunk. The exchange runs over both RoCE twins of the cable's port (one carries only
   ~100 Gb/s) with 4 NCCL channels.
-- Memory: the engine takes 106.7 GiB of each Spark, so about 7.5 GiB stays free after the load. The expert matmuls
+- Long context: the 8 global layers and the drafter's global layer keep their KV caches as NVFP4 (`KV4=1`, the
+  default): E2M1 values with an E4M3 scale per 16, 72 bytes a token and head instead of 256, so 524,288 tokens take
+  2.99 GiB a Spark. The attention kernels widen them back to BF16 tiles, so the math is unchanged. `KV4=0` keeps BF16
+  caches, which fit up to 131,072. Against BF16: 12 of 12 math problems both ways, three hidden facts found at 32k
+  and 115k (and at 250k and 481k, past BF16's reach), drafter acceptance 58% against 57%, prompts within 3%. Replies
+  are no longer byte-identical to BF16's, but they stay correct. A 481k prompt takes about 9 minutes (880 tok/s).
+- Memory: the engine takes 107.0 GiB of each Spark, so about 7 GiB stays free after the load. The expert matmuls
   reuse two buffers attention is done with, each of the 40 sliding-window layers keeps 1,280 positions (a longer pass
   borrows one shared ring and copies the window in and back out), and the drafter keeps only the tap rows it reads.
 - Turn reuse: a prompt that starts with the previous prompt, or shares its system prompt, resumes there. A second
