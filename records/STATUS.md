@@ -385,6 +385,13 @@ Patch chain in `patches/atomic-llama-cpp/`, applied in order by `Dockerfile`:
 
 ## Recent Changes
 
+- 2026-11-19: **Inkling-2-Small decodes faster at long context** — Decode
+  runs 53 tok/s at 115k (was 51), 34 at 250k (was 25) and 27 at 481k (was 22).
+  A 481k prompt reads in about 7.5 minutes (was 9). The FP4 attention kernels
+  now read the cache in bigger pieces and share it across query heads. Replies,
+  math and the hidden facts are as before. The engine can also serve up to 4
+  requests at once (`STREAMS`), but prod stays at 1 for now: more streams cap
+  the longest request below 524k.
 - 2026-11-18: **Inkling-2-Small reads up to 524,288 tokens** — The window is
   four times longer (was 131,072). The engine keeps the long-history KV caches
   as NVFP4, so 524,288 tokens take 2.99 GiB a Spark, about what 131,072 took in

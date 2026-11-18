@@ -6,7 +6,7 @@ through kortexa's TensorFold fork (branch `kortexa-ai/inkling2-draft`, `e2614feb
 
 | File | What it is |
 | --- | --- |
-| `0001-inkling2-spark.patch` | Our 18 engine commits on `e2614feb` (`git am`): speed, the refusal edit per request, greedy fallback, Inkling's reply messages (thinking, tool calls). |
+| `0001-inkling2-spark.patch` | Our 41 engine commits on `e2614feb` (`git am`): speed, the refusal edit per request, greedy fallback, Inkling's reply messages (thinking, tool calls), NVFP4 KV caches, up to 4 streams at once. |
 | `inkling2.jinja` | The chat template `serve-rank.sh` passes: kortexa's, without the forced text opener, so the model writes its own message headers. |
 | `serve-rank.sh` | One rank, natively (no Docker). Rank 0 on spark2 serves the API; rank 1 on spark1 reads spark2's models over NFS. |
 | `pair.sh` | Both ranks from spark2: ships the binary to spark1, starts rank 1 there, runs rank 0 in the foreground. |
@@ -47,7 +47,7 @@ so the stock model's kernels and outputs are unchanged.
 
 ## What it does today
 
-- Decode, greedy, 524,288-token window: prose 38-44 tok/s, code 63-69, 8k context 37, 32k 54, 115k 51, 250k 25, 481k 22.
+- Decode, greedy, 524,288-token window: prose 38-44 tok/s, code 63-69, 8k context 37, 32k 67, 115k 53, 250k 34, 481k 27.
   About 0.2 s to the first token on short prompts. The uncensored name runs 36-39 on prose.
 - Prompt reading: about 2000 tok/s at 10.9k tokens (1975-2020 from one restart to the next), 1900 at 43k. A pass
   takes up to 11,264 tokens (`PROMPT_ROWS`, about 0.4 MB of scratch a token), so a prompt that fits streams the expert
@@ -59,10 +59,15 @@ so the stock model's kernels and outputs are unchanged.
   2.99 GiB a Spark. The attention kernels widen them back to BF16 tiles, so the math is unchanged. `KV4=0` keeps BF16
   caches, which fit up to 131,072. Against BF16: 12 of 12 math problems both ways, three hidden facts found at 32k
   and 115k (and at 250k and 481k, past BF16's reach), drafter acceptance 58% against 57%, prompts within 3%. Replies
-  are no longer byte-identical to BF16's, but they stay correct. A 481k prompt takes about 9 minutes (880 tok/s).
+  are no longer byte-identical to BF16's, but they stay correct. A 481k prompt takes about 7.5 minutes (1100 tok/s).
 - Memory: the engine takes 107.0 GiB of each Spark, so about 7 GiB stays free after the load. The expert matmuls
   reuse two buffers attention is done with, each of the 40 sliding-window layers keeps 1,280 positions (a longer pass
   borrows one shared ring and copies the window in and back out), and the drafter keeps only the tap rows it reads.
+- Streams: `STREAMS` (default 1) is how many requests run at once, up to 4. Their long-history caches share one pool,
+  so the longest request shrinks as streams are added: about 553k positions in all at 2, 384k at 4 (the pool takes the
+  memory left after the load, so it varies a little from boot to boot). Streams verify their drafts in one shared pass,
+  and each reply stays the same as when it runs alone. All streams together: 44 tok/s with one, 50 with two, 56 with
+  four. A long prompt still reads one stream at a time, so it stalls the others while it reads.
 - Turn reuse: a prompt that starts with the previous prompt, or shares its system prompt, resumes there. A second
   turn of a 39k-token conversation starts answering in 0.25 s (75 s for the first), and a new session on the same
   system prompt in 0.18 s. The engine keeps four turns: the last prompt's end and three cuts near the system
