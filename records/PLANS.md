@@ -56,59 +56,6 @@ The incident audit and OpenCode soak are recorded in `records/research/RSH-20260
 
 A graph-safe reusable scratch reservation remains optional future work. Revisit it only if CUDA-graph throughput becomes more valuable than the currently verified long-agent-context headroom.
 
-## Thor-native NVFP4 MoE for Qwen3.8 Flash-Next
-
-Replace the target model's Marlin W4A16 expert fallback with NVIDIA's native
-SM110 CuTeDSL W4A4 MoE kernel from TensorRT-Edge-LLM. Keep the current
-`mangchi-vllm:thor-qsa-fp8-5fd5dd5` image and its 262,144-token service as the
-rollback until the new backend passes correctness, full-model, and performance
-gates.
-
-### Implementation path
-
-1. Pin the imported TensorRT-Edge-LLM source revision and preserve its
-   Apache-2.0 provenance. Adapt the SM110 runner behind a narrow vLLM expert
-   backend rather than copying unrelated TensorRT-Edge runtime code.
-2. Support the exact Flash-Next target geometry first: hidden size 2,560,
-   intermediate size 640, 512 experts, top-k 10, fused SwiGLU, ModelOpt NVFP4
-   weights and static NVFP4 activations. Reject unsupported layouts and
-   quantization schemes explicitly.
-3. Map compressed-tensors/ModelOpt W4A4 weights, block scales, global scales,
-   routing output, activation quantization, and BF16 output to the runner
-   without quantize-dequantize-quantize conversions on the expert hot path.
-4. Package the adapter and kernel build reproducibly in
-   `docker/mangchi-vllm/`, retaining the SSD-backed PLE, persistent QSA top-k,
-   FP8 attention KV, and native 262K context configuration.
-5. Validate kernel output against a trusted BF16 or Marlin reference across
-   representative token counts and routing patterns before loading the whole
-   checkpoint. Then run short chat, long-prefill, and decode tests on Mangchi.
-6. Benchmark Marlin, FlashInfer CUTLASS if its one-line SM110 dispatch fix is
-   usable, and the NVIDIA CuTeDSL backend under identical clocks and requests.
-   FlashInfer is a control measurement, not the primary implementation target.
-
-### Acceptance gates
-
-- The backend is selected only on SM110/SM110a for compatible true W4A4
-  NVFP4 MoE layers; W4A16 and unsupported layers keep their existing backend.
-- Numerical comparison finds no material correctness regression against the
-  reference path, and unsupported shapes fail cleanly before kernel launch.
-- Qwen3.8 Flash-Next starts from the downloaded W4A4 checkpoint, completes a
-  deterministic chat smoke, and retains the 262,144-token configured context.
-- Measured prefill and decode throughput are recorded against the current
-  Marlin deployment using the same prompt, output length, power mode, clocks,
-  CUDA-graph mode, and MTP setting.
-- Deployment happens only after the native backend is both correct and faster;
-  otherwise the current FP8-QSA/Marlin image remains production.
-
-### 2026-09-10 canary result
-
-The pinned NVIDIA CuTeDSL MoE path now loads the complete Flash-Next checkpoint,
-handles vLLM's padded `-1` expert routes, serves a deterministic generation, and
-retains FP8 KV with the configured 262,144-token context. The native path reached
-1,671 prompt tok/s and 10.56 decode tok/s in the initial canary. Correctness is
-accepted; performance is not yet accepted against the 4,500 prompt tok/s Thor
-report, so this remains a canary rather than the production default.
-
 ## Thor-native NVFP4 dense path for Qwen3.8-27B
 
 The 27B W4A4 checkpoint now has an opt-in SM110 dense backend based on NVIDIA's
@@ -155,71 +102,6 @@ Triton-MLIR FA4 targets because their own configure checks reject SM110; keep
 the core stable-ABI CUDA/MoE extensions, FA2, Triton kernels, CUTLASS, and the
 separately installed FlashInfer and CuTeDSL paths used by the accepted models.
 
-
-## Flash-Next decode/TTFT program (prefix caching, MTP, graphs)
-
-Three-step program greenlit by the operator 2026-09-12, sequenced prefix
-caching first, then MTP in eager mode, then CUDA graphs.
-
-Steps 1-2 (done 2026-09-12, `RSH-20260912-001`): image
-mangchi-vllm:thor-dense-candidate-v7-prefix-mtp ships the ported
-blazux/qwen3.8-Flash-DGX two-line mamba block_size fix
-(docker/mangchi-vllm/patch_mamba_block_size.py) and serves MTP=2 from the
-in-checkpoint draft head. MTP is the whole gain so far, and it scales with how
-predictable the text is. End-to-end against the 10.56 tok/s pre-MTP baseline:
-code 26.0 tok/s (2.46x, mean accepted length 2.82/3.00, per-position
-95.1/86.6%), prose 16.5-17.5 tok/s (1.56-1.65x, 1.97-2.00/3.00, 61-64/36%),
-arithmetic 2.95/3.00. Those per-position rates match or beat tonyd2wild's Spark
-reference (93/78% code, 65/39% prose), so refusal projection did not depress the
-draft head; the prose gap is the workload, not the checkpoint. Step rate holds
-at ~9/s on both workloads against 10.56/s pre-MTP, so MTP costs roughly 15% per
-step and returns the accepted length. The verify-shape risk is closed:
-thor_nvfp4/check.py now gates tokens 2, 3, 4. Budget cost: util
-0.68 -> 0.72, resident 83 -> 88 GiB, with the unused multimodal warmup
-disabled to pay for it.
-
-Prefix caching is enabled but inert on this vLLM pin (5fd5dd5). With no KV
-group annotated as the draft's, vLLM flags the Mamba groups as draft groups
-and silently disables cross-request reuse: cached_tokens stays 0 on every
-repeat, so nothing can come from a misaligned state restore. Adding
-max_model_len to the speculative config did not clear the warning. blazux
-gets real hits because their image runs the qwen38-flash-next release line,
-a different codebase from our PR #55557 pin. Unblocking this needs
-draft-group annotation in kv_cache_utils.py (_warn_if_unannotated_eagle_mamba),
-which is vLLM work rather than configuration. Until then the acceptance bar
-stays measured parity via scripts/mangchi-prefix-cache-parity.py, and note
-that its exact-match oracle is too strict for an MTP stack — free-form
-reasoning text varies cold-vs-cold at temperature 0 from MTP tie-breaking.
-Short definite-answer determinism is the reliable regression check.
-
-Speculative depth is now measured rather than assumed: k=4 is the operating
-point (`RSH-20260912-002`), k=3 is the alternative if the served mix becomes
-prose-dominated, and k>=5 is blocked on a vLLM block-size alignment bug that
-ignores the QSA ring capacity. The k=4 optimum should be re-checked once graphs
-land, since a lower per-step cost shifts the turnover deeper.
-
-Step 3 is re-scoped (`RSH-20260912-003`). The cheap route -- registering the PLE
-gather as a splitting op -- was implemented and does not work on this pin: the
-op is invoked and still lands inside CUDA graph capture. Graphs therefore
-require the staged gather (disk read hoisted into the model state's
-prepare_inputs, into a fixed GPU buffer), and measured GPU occupancy of 63-69%
-caps the prize near 20%. The reduced-vocabulary draft, originally an aside in
-this plan, already returned more than that and has shipped.
-
-Step 3 (graphs) has a concrete design from tonyd2wild's
-Qwen3.8-Flash-Next-NVFP4-DGX-Spark single-spark-vllm-tp1 lane: move the PLE
-gather out of the forward pass into model-state prepare_inputs with fixed
-GPU buffers (shape follows Trosfy's vLLM PR 54129), enabling
-compilation-config mode 0 with cudagraph_mode FULL_DECODE_ONLY.
-Their staged gather replaces mmap with preadv positional reads on a thread
-pool (their measurements: mmap page faults serialize on mmap_lock at 10-20K
-rows/s cold regardless of threads; preadv reaches 131K rows/s cold at 64
-threads on GB10 NVMe). Their results ladder on GB10: eager+MTP 24.6 tok/s,
-piecewise graphs 32.5, staged gather + FULL_DECODE_ONLY 37.4, plus
-reduced-vocab draft + MTP3 = 43.9. Port candidates live in that repo's
-single-spark-vllm-tp1/patch/ (ple_mmap.py preadv reader, ple_layer.diff
-staged integration). Reduced draft vocabulary (65,536-row head projection,
-target still verifies full vocab) is an independent +15-20% decode option.
 
 ## DeepSeek-V4.1-Flash-1017: after the recipe upgrade and the keys switch
 
