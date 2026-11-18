@@ -385,6 +385,15 @@ Patch chain in `patches/atomic-llama-cpp/`, applied in order by `Dockerfile`:
 
 ## Recent Changes
 
+- 2026-11-18: **Inkling-2-Small reads prompts at about 1550 tok/s** — A cold
+  10.9k-token prompt takes 7.0 s (was 15.3 s), 43k takes 31 s (1400 tok/s).
+  A pass now holds up to 11,264 tokens, so such a prompt reads the 91 GB of
+  expert weights once per Spark. The expert kernel unrotates in its own
+  output stage, and one kernel makes the down projection's input (no fp32
+  intermediates). Attention runs a flash kernel. The Sparks exchange one f32
+  row per token per layer over both RoCE twins (4 NCCL channels). About
+  5 GB stays free on each Spark.
+
 - 2026-11-18: **Inkling-2-Small reads prompts faster and resumes turns** —
   Prompt passes take 2048 tokens through a shared EXL3 prompt kernel: about
   710 tok/s at 10k tokens (was about 380). A prompt that starts with the last
