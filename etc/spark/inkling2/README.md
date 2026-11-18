@@ -60,14 +60,15 @@ so the stock model's kernels and outputs are unchanged.
   caches, which fit up to 131,072. Against BF16: 12 of 12 math problems both ways, three hidden facts found at 32k
   and 115k (and at 250k and 481k, past BF16's reach), drafter acceptance 58% against 57%, prompts within 3%. Replies
   are no longer byte-identical to BF16's, but they stay correct. A 481k prompt takes about 7.5 minutes (1100 tok/s).
-- Memory: the engine takes 107.0 GiB of each Spark, so about 7 GiB stays free after the load. The expert matmuls
+- Memory: the engine takes about 108 GiB of each Spark with the shared pool, so about 6 GB stays free after the load. The expert matmuls
   reuse two buffers attention is done with, each of the 40 sliding-window layers keeps 1,280 positions (a longer pass
   borrows one shared ring and copies the window in and back out), and the drafter keeps only the tap rows it reads.
-- Streams: `STREAMS` (default 1) is how many requests run at once, up to 4. Their long-history caches share one pool,
-  so the longest request shrinks as streams are added: about 553k positions in all at 2, 384k at 4 (the pool takes the
-  memory left after the load, so it varies a little from boot to boot). Streams verify their drafts in one shared pass,
-  and each reply stays the same as when it runs alone. All streams together: 44 tok/s with one, 50 with two, 56 with
-  four. A long prompt still reads one stream at a time, so it stalls the others while it reads.
+- Streams: prod serves 2 requests at once (`STREAMS`, default 2, up to 4). Their long-history caches share one pool
+  that takes the memory left after the load past a 5 GiB reserve (`RESERVE_GIB`), about 700k positions, so one request
+  can still use the whole 524,288-token window. Streams verify their drafts in one shared pass, and each reply stays
+  the same as when it runs alone. All streams together: 44 tok/s with one, 50 with two, 56 with four (4 streams cap a
+  request near 384k). Most of a step reads the experts' weights, and each chat's tokens need other experts, so more
+  streams add little. A long prompt still reads one stream at a time, so it stalls the other while it reads.
 - Turn reuse: a prompt that starts with the previous prompt, or shares its system prompt, resumes there. A second
   turn of a 39k-token conversation starts answering in 0.25 s (75 s for the first), and a new session on the same
   system prompt in 0.18 s. The engine keeps four turns: the last prompt's end and three cuts near the system

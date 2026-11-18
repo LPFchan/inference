@@ -385,6 +385,11 @@ Patch chain in `patches/atomic-llama-cpp/`, applied in order by `Dockerfile`:
 
 ## Recent Changes
 
+- 2026-11-19: **Inkling-2-Small answers two chats at once** — A second
+  request no longer waits for the first: both decode together, about 25 tok/s
+  each (50 in all; one alone still gets 44). Each reply is the same as when it
+  runs alone. One request can still use the whole 524,288-token window. While
+  one chat reads a long prompt, the other pauses.
 - 2026-11-19: **Inkling-2-Small decodes faster at long context** — Decode
   runs 53 tok/s at 115k (was 51), 34 at 250k (was 25) and 27 at 481k (was 22).
   A 481k prompt reads in about 7.5 minutes (was 9). The FP4 attention kernels
