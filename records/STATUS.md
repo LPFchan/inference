@@ -385,6 +385,15 @@ Patch chain in `patches/atomic-llama-cpp/`, applied in order by `Dockerfile`:
 
 ## Recent Changes
 
+- 2026-11-18: **Inkling-2-Small reads prompts at about 2000 tok/s** — A cold
+  10.9k-token prompt takes 5.4-5.5 s (was 6.6 s), 43k takes 22.7 s (was 27 s).
+  The two Sparks used to wait on each other twice a layer; a prompt now runs
+  in three row chunks, and each chunk's sums cross the cable while the GPU
+  works on the next one. Each rank also sends only the half the other one
+  sums. Smaller wins: a faster expert matmul pipeline, one kernel for the
+  expert input instead of two, the embedding without a host copy per token,
+  and the projection kernel no longer stalls when the exchange takes a few
+  of its multiprocessors. Same replies bit for bit.
 - 2026-11-18: **Inkling-2-Small reads long prompts at about 1600 tok/s** — A
   cold 43k-token prompt takes 27 s (was 31 s), 10.9k takes 6.6 s (1650 tok/s).
   The prompt attention kernel was keeping its output in slow stack memory, read
