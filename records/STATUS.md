@@ -385,6 +385,13 @@ Patch chain in `patches/atomic-llama-cpp/`, applied in order by `Dockerfile`:
 
 ## Recent Changes
 
+- 2026-11-19: **Inkling-2-Small samples instead of always picking the top
+  token** — Replies now use temperature 1 by default, as the model was trained.
+  Always picking the top token is the likely cause of agent turns that looped
+  in thinking (28-29k thinking tokens, then a one-line reply with no tool call). A request's
+  `temperature` and `seed` apply, and a seed repeats its text exactly.
+  `top_k`/`top_p`/`min_p` are ignored. Short replies decode at 44.8 tok/s
+  instead of 54.5, because fewer draft guesses match.
 - 2026-11-19: **Inkling-2-Small reads images** — Chats can attach PNG, JPEG
   or WebP pictures (up to 4, 4,096 image tokens in all). The engine runs the
   model's own image tower on spark2; its output matches a reference run. A
@@ -472,8 +479,8 @@ Patch chain in `patches/atomic-llama-cpp/`, applied in order by `Dockerfile`:
   `Inkling-2-Small` (`vllm-remote`, no fallback) carries OpenUncensored's
   refusal edit, applied per request from the same weights;
   `Inkling-2-Small-Stock` is the released model on the same port and is not
-  in Grimoire. Greedy only (a request's temperature decodes greedily), text
-  only. Tool calls come back as OpenAI `tool_calls` and thinking as
+  in Grimoire. Samples at temperature 1 by default; takes text and
+  images. Tool calls come back as OpenAI `tool_calls` and thinking as
   `reasoning_content`; thinking defaults to effort high
   (`reasoning_effort: none` turns it off). Decode: prose 38-42 tok/s, code 69, 37 at 8k.
 

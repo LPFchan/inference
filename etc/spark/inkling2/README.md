@@ -6,7 +6,7 @@ through kortexa's TensorFold fork (branch `kortexa-ai/inkling2-draft`, `e2614feb
 
 | File | What it is |
 | --- | --- |
-| `0001-inkling2-spark.patch` | Our 44 engine commits on `e2614feb` (`git am`): speed, the refusal edit per request, greedy fallback, Inkling's reply messages (thinking, tool calls), NVFP4 KV caches, up to 4 streams at once, images. |
+| `0001-inkling2-spark.patch` | Our 45 engine commits on `e2614feb` (`git am`): speed, the refusal edit per request, Inkling's reply messages (thinking, tool calls), NVFP4 KV caches, up to 4 streams at once, images, temperature sampling. |
 | `inkling2.jinja` | The chat template `serve-rank.sh` passes: kortexa's, without the forced text opener, so the model writes its own message headers. |
 | `serve-rank.sh` | One rank, natively (no Docker). Rank 0 on spark2 serves the API; rank 1 on spark1 reads spark2's models over NFS. |
 | `pair.sh` | Both ranks from spark2: ships the binary to spark1, starts rank 1 there, runs rank 0 in the foreground. |
@@ -77,8 +77,10 @@ so the stock model's kernels and outputs are unchanged.
   system prompt in 0.18 s. The engine keeps four turns: the last prompt's end and three cuts near the system
   prompt's end, about 91 MB each per Spark. They all read one live copy of the global layers' cache, so any request
   that starts elsewhere (even a short unrelated one) drops the turns past where it started.
-- The engine decodes greedily only. `TENSORFOLD_GREEDY_FALLBACK=1` makes a request with a temperature decode greedily
-  instead of failing.
+- Replies are sampled at temperature 1 by default (`TEMPERATURE`; 0 is greedy), as the model was trained. A request's
+  own `temperature` and `seed` apply; the same seed gives the same text, with or without drafts or another request
+  running. `top_k`, `top_p` and `min_p` are ignored. Sampling costs about 18% of decode speed (44.8 vs 54.5 tok/s on
+  short replies): the drafter still guesses the most likely token, so fewer guesses match.
 - Tool calls come back as OpenAI `tool_calls` (parallel calls too, streamed whole once each call's message closes).
   Thinking comes back as `reasoning_content`. The server reads Inkling's messages by token id
   (`zig/src/server/inkling_reply.zig`), and only `<|content_model_end_sampling|>` ends a reply.

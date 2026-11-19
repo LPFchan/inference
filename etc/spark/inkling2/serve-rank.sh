@@ -9,7 +9,8 @@
 #   STREAMS (default 2): requests at once, up to 4; their long-history caches share one pool, so the longest request
 #   shrinks with more (about 553k positions in all at 2, 384k at 4; 1: one request on a whole-context cache).
 #   BIN (rank 0's binary; default the main checkout's build; restart-pair.sh ships the same one to rank 1).
-#   NAME (default Inkling-2-Small). A request with a temperature decodes greedily (TENSORFOLD_GREEDY_FALLBACK).
+#   NAME (default Inkling-2-Small). TEMPERATURE (default 1, as the model was trained; 0: greedy) for requests that send
+#   none; a request's seed repeats its text. top_k, top_p and min_p are not applied.
 #   TEMPLATE (default templates/inkling2.jinja: the model writes its own headers, so it thinks and calls tools).
 #   PROMPT_ROWS (default 11264): prompt tokens a pass; a prompt up to that length streams the expert weights once
 #   (about 0.55 MB of scratch a row). NCCL_IB_HCA (default both RoCE twins of the cabled port: one carries ~100 Gb/s),
@@ -50,10 +51,10 @@ export TF_INKLING_RANK=$rank TF_INKLING_WORLD=2 TF_INKLING_VERIFY_CHECK=${TF_INK
   NCCL_MAX_NCHANNELS=${NCCL_MAX_NCHANNELS:-4} \
   NCCL_RUNTIME_CONNECT=0 NCCL_CUMEM_ENABLE=0 NCCL_CUMEM_HOST_ENABLE=0 \
   LD_LIBRARY_PATH=$HOME/inkling-2-small/lib:/usr/local/cuda/lib64 \
-  TF_ROCE=${TF_ROCE:-1} TENSORFOLD_GREEDY_FALLBACK=1 TENSORFOLD_MEMORY_RESERVE_GIB=${RESERVE_GIB:-5} TF_INKLING_FP4=${FP4:-all} \
+  TF_ROCE=${TF_ROCE:-1} TENSORFOLD_MEMORY_RESERVE_GIB=${RESERVE_GIB:-5} TF_INKLING_FP4=${FP4:-all} \
   TF_INKLING_KV4=${KV4:-1} TF_INKLING_STREAMS=${STREAMS:-2} \
   TF_INKLING_PROMPT_ROWS=${PROMPT_ROWS:-11264}
 exec "$bin" serve "$model" --backend cuda --device 0 --context "${CONTEXT:-524288}" \
-  --parallel "${STREAMS:-2}" "${drafts[@]}" "${vision[@]}" "${template[@]}" --reasoning-effort high --temperature 0 --prompt-cache-gib 0 \
+  --parallel "${STREAMS:-2}" "${drafts[@]}" "${vision[@]}" "${template[@]}" --reasoning-effort high --temperature "${TEMPERATURE:-1}" --prompt-cache-gib 0 \
   --host "${API_HOST:-127.0.0.1}" --port "${API_PORT:-8000}" --name "$name" \
   --no-update-check "$@"
