@@ -855,8 +855,8 @@ class ModelManager:
             if (active := self.active.get(name)) is not None
             and active.status == config.MODEL_STATUS_LOADED and active.is_running()
         ]
-        if len(ready) < 2:
-            return ready[0] if ready else model_name
+        if not ready:
+            return model_name
 
         affinity = (model_name, conversation_key) if conversation_key else None
         if affinity is not None:

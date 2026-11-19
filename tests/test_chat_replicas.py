@@ -84,6 +84,13 @@ class PickReplicaTests(unittest.TestCase):
         other = "chat-g1" if first == "chat" else "chat"
         self.assertEqual(self.manager.pick_replica("chat", "conv", "user"), other)
 
+    def test_conversation_started_on_one_copy_stays_when_peer_loads(self):
+        del self.manager.active["chat-g1"]
+        self.assertEqual(self.manager.pick_replica("chat", "conv", "user"), "chat")
+        self.manager.active["chat"].inflight = 3
+        self.manager.active["chat-g1"] = FakeActive("chat-g1")
+        self.assertEqual(self.manager.pick_replica("chat", "conv", "user"), "chat")
+
     def test_concurrent_conversations_spread_across_replicas(self):
         seen = set()
         for i in range(8):
