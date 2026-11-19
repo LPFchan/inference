@@ -385,6 +385,12 @@ Patch chain in `patches/atomic-llama-cpp/`, applied in order by `Dockerfile`:
 
 ## Recent Changes
 
+- 2026-11-20: **Chat spreads across mirrored copies of a model** —
+  `gemma-4-12b-it-qat-q4_0` now lists `gemma-4-12b-it-qat-q4_0-g1` as a
+  replica peer. When both are loaded (the `mirror` preset pins one per GPU),
+  chats to the one name use both GPUs: each conversation stays on its GPU,
+  and new work goes to the less busy one. Before, only embeddings and rerank
+  were spread; chat needed two names.
 - 2026-11-20: **DeepSeek-V4.1-Flash-1017 tries the Sparks first again** —
   The Sparks run DeepSeek-V4.1-Flash-1017 or Inkling-2-Small, one at a time,
   whichever the operator picks. Grimoire sends DeepSeek requests to

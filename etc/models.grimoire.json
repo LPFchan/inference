@@ -544,7 +544,30 @@
       },
       "family": "gemma4",
       "extra-args": [],
-      "added": "2026-08-27T04:07:38.596447+00:00"
+      "added": "2026-08-27T04:07:38.596447+00:00",
+      "replica_peers": [
+        "gemma-4-12b-it-qat-q4_0-g1"
+      ]
+    },
+    "gemma-4-12b-it-qat-q4_0-g1": {
+      "file": "gguf/gemma-4-12b-it-qat-q4_0.gguf",
+      "capabilities": [
+        "completion"
+      ],
+      "ctx-size": 120000,
+      "predict": 16384,
+      "parallel": 1,
+      "n-gpu-layers": 999,
+      "cache-type-k": "turbo4",
+      "cache-type-v": "turbo4",
+      "cost": {
+        "input": 0.14,
+        "output": 0.4,
+        "cache_read": 0.04
+      },
+      "family": "gemma4",
+      "extra-args": [],
+      "added": "2026-11-19T21:59:45.256223+00:00"
     },
     "eastself-gemma4-12b-sft-final": {
       "file": "gguf/gemma-4-12b-it-qat-q4_0-eastself-gemma4-12b-sft-final-tokenizer.gguf",

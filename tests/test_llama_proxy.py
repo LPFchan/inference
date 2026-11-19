@@ -174,6 +174,38 @@ class LlamaProxyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(request["model"], active.name)
         self.assertEqual(request["messages"][0]["content"], content)
 
+    async def test_chat_counts_in_flight_until_response_ends(self):
+        active = _FakeActive()
+        payload = {"messages": [{"role": "user", "content": "hi"}], "stream": False}
+
+        with patch.object(llama_proxy.registry, "resolve", return_value=active.name), \
+             patch.object(llama_proxy.registry, "get", return_value=active.cfg), \
+             patch.object(llama_proxy.registry, "get_family_defaults", return_value={}), \
+             patch.object(llama_proxy.plugin_manager, "before_request", side_effect=lambda p, *a: p), \
+             patch.object(llama_proxy.plugin_manager, "before_backend_request", side_effect=lambda p, *a: p), \
+             patch.object(llama_proxy.plugin_manager, "wrap_response_stream", side_effect=lambda s, *a: s), \
+             patch.object(llama_proxy, "get_proxy_client", _FakeClient):
+            response = await llama_proxy._proxy_chat(active.name, payload, active)
+            self.assertEqual(active.inflight, 1)
+            async for _ in response.body_iterator:
+                pass
+        self.assertEqual(active.inflight, 0)
+
+    async def test_failed_chat_does_not_stay_in_flight(self):
+        active = _FakeActive()
+
+        async def fail():
+            raise RuntimeError("backend down")
+
+        active.get_backend_model_id = fail
+        with patch.object(llama_proxy.registry, "resolve", return_value=active.name), \
+             patch.object(llama_proxy.registry, "get", return_value=active.cfg), \
+             patch.object(llama_proxy.registry, "get_family_defaults", return_value={}), \
+             patch.object(llama_proxy.plugin_manager, "before_request", side_effect=lambda p, *a: p):
+            with self.assertRaises(RuntimeError):
+                await llama_proxy._proxy_chat(active.name, {"messages": []}, active)
+        self.assertEqual(active.inflight, 0)
+
     async def test_hosted_remote_chat_carries_key_to_base_path(self):
         from grimoire.model_manager import ActiveModel
 

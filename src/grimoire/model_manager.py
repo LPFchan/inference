@@ -369,6 +369,8 @@ class ActiveModel:
         self.started = datetime.now(timezone.utc)
         self.backend_model_id = None
         self.status = config.MODEL_STATUS_LOADING
+        # Chat requests this process is serving now; picks the least busy replica.
+        self.inflight = 0
         self._unloading = False
         self._unload_token = None
         self.backend_type = cfg.get("backend", BACKEND_LLAMA)
@@ -669,6 +671,8 @@ class ModelManager:
         self.gpu_mask = None  # set[int] or None (None = all GPUs available)
         self._runtime_overrides: dict[str, RuntimeModelOverride] = {}
         self._pending_overrides: dict[str, RuntimeModelOverride] = {}
+        # (model, conversation) -> replica that holds the conversation's KV cache.
+        self._replica_affinity: OrderedDict[tuple[str, str], str] = OrderedDict()
 
     def _override(self, model_name, *, include_pending=True):
         if include_pending and model_name in self._pending_overrides:
@@ -808,6 +812,49 @@ class ModelManager:
             if runtime_command_signature(active_cfg) == signature:
                 return active_name, active
         return None, None
+
+    REPLICA_AFFINITY_CAP = 4096
+
+    def pick_replica(self, model_name, conversation_key=None, caller_key=None):
+        """Pick which copy of a mirrored model serves one chat request.
+
+        A model that lists `replica_peers` runs as identical copies on other
+        GPUs. Only loaded copies are candidates, so an unmirrored model (or one
+        whose peers are stopped) is served by itself as before. A conversation
+        stays on the copy that already holds its KV cache. Anything else goes to
+        the copy with the fewest requests in flight; ties go to a copy chosen by
+        hashing the caller, so one client's back-to-back requests keep landing
+        where their prompt is already cached.
+        """
+        peers = (registry.get(model_name) or {}).get("replica_peers") or []
+        if not peers:
+            return model_name
+        ready = [
+            name for name in dict.fromkeys([model_name, *peers])
+            if (active := self.active.get(name)) is not None
+            and active.status == config.MODEL_STATUS_LOADED and active.is_running()
+        ]
+        if len(ready) < 2:
+            return ready[0] if ready else model_name
+
+        affinity = (model_name, conversation_key) if conversation_key else None
+        if affinity is not None:
+            held = self._replica_affinity.get(affinity)
+            if held in ready:
+                self._replica_affinity.move_to_end(affinity)
+                return held
+
+        tie_key = conversation_key or caller_key or ""
+        start = int(hashlib.sha256(tie_key.encode()).hexdigest(), 16) % len(ready)
+        order = ready[start:] + ready[:start]
+        choice = min(order, key=lambda name: getattr(self.active[name], "inflight", 0))
+
+        if affinity is not None:
+            self._replica_affinity[affinity] = choice
+            self._replica_affinity.move_to_end(affinity)
+            while len(self._replica_affinity) > self.REPLICA_AFFINITY_CAP:
+                self._replica_affinity.popitem(last=False)
+        return choice
 
     def _build_route_table(self):
         """Map each ready model -> its replica backends for the proxy workers.

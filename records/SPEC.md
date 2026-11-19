@@ -78,6 +78,7 @@ These decisions were locked before Phase 1 and are not subject to renegotiation 
 - The requested alias's chat-template defaults, plugins, usage attribution, and history attribution apply to each request even when another alias owns the shared process.
 - Each completed web UI turn carries its cache-routing ID in `x-grimoire-kv-conversation-id` and warms the final persisted branch for the next turn. Cache keys are scoped by running model and authenticated user, and the warm request uses the same context compaction as a real turn. This header stays separate from the legacy history-recording conversation ID; warm-only requests do not count toward usage. Aborted or empty turns are not warmed.
 - The production llama-server RAM prompt-cache allowance is 4 GiB per process.
+- A model whose registry entry lists `replica_peers` serves chat (`/v1/chat/completions`, `/v1/responses`) from every loaded copy under its one name. A conversation stays on the copy that holds its KV cache; other requests go to the copy with the fewest requests in flight, ties going to the same copy for the same caller. Copies that are not loaded are skipped.
 
 ### Contract F: Public Capability Metadata
 - `GET /v1/models` preserves the registry's `capabilities` field and adds

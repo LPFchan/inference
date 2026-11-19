@@ -197,7 +197,34 @@ async def _rewrite_stream_model(stream, model_name):
         yield _rewrite_chunk_model(chunk, model_name)
 
 
-async def _proxy_chat(
+async def _proxy_chat(requested_model, payload, active, **kwargs):
+    """Forward a chat request, counting it in flight on `active` until its response ends.
+
+    `ModelManager.pick_replica` sends new work to the mirrored copy with the
+    fewest requests in flight. The count starts before the first await, so a
+    burst of requests sees each other, and covers the wait for the conversation
+    slot.
+    """
+    active.inflight = getattr(active, "inflight", 0) + 1
+    try:
+        response = await _forward_chat(requested_model, payload, active, **kwargs)
+    except BaseException:
+        active.inflight -= 1
+        raise
+    response.body_iterator = _release_when_done(response.body_iterator, active)
+    return response
+
+
+async def _release_when_done(body, active):
+    try:
+        async for chunk in body:
+            yield chunk
+    finally:
+        active.inflight -= 1
+        await body.aclose()
+
+
+async def _forward_chat(
     requested_model,
     payload,
     active,
