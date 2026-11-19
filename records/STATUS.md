@@ -385,6 +385,12 @@ Patch chain in `patches/atomic-llama-cpp/`, applied in order by `Dockerfile`:
 
 ## Recent Changes
 
+- 2026-11-20: **DeepSeek-V4.1-Flash-1017 tries the Sparks first again** —
+  The Sparks run DeepSeek-V4.1-Flash-1017 or Inkling-2-Small, one at a time,
+  whichever the operator picks. Grimoire sends DeepSeek requests to
+  spark2:8888 first and falls back to opencode-go when it can't connect, the
+  same entry as before 2026-11-18. While the Sparks run Inkling, the first
+  DeepSeek request after each 60 s costs up to 2 s before it falls back.
 - 2026-11-19: **Inkling-2-Small samples instead of always picking the top
   token** — Replies now use temperature 1 by default, as the model was trained.
   Always picking the top token is the likely cause of agent turns that looped
