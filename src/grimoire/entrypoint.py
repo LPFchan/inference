@@ -334,7 +334,7 @@ async def _with_fallback(model_name, request, attempt, replica=None):
     fallback = cfg.get("fallback")
     if not fallback or time.monotonic() >= _fallback_until.get(model_name, 0):
         try:
-            return await attempt(await manager.start_model(replica or model_name, evict=is_admin(request)))
+            return await attempt(await manager.start_replica(model_name, replica, evict=is_admin(request)))
         except _UNREACHABLE as e:
             if not fallback:
                 raise

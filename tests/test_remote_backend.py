@@ -485,6 +485,9 @@ class _FallbackManager:
         self.started.append(name)
         return ActiveModel(name, dict(EXTERNAL), port=None, gpu=None)
 
+    async def start_replica(self, name, replica=None, evict=True):
+        return await self.start_model(name, evict=evict)
+
 
 class _FallbackRegistry:
     def __init__(self, models):

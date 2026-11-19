@@ -186,6 +186,28 @@ class MirrorModeTests(unittest.TestCase):
             seen.add(name)
         self.assertEqual(seen, {"chat", "chat@mirror"})
 
+    def test_picked_twin_is_served_without_a_registry_entry(self):
+        self.run_async(self.manager.start_model("chat"))
+        twin = self.run_async(self.manager.start_replica("chat", "chat@mirror"))
+        self.assertEqual(twin.name, "chat@mirror")
+        self.run_async(self.manager._stop_twin("chat"))
+        self.assertEqual(self.run_async(self.manager.start_replica("chat", "chat@mirror")).name, "chat")
+
+    def test_chat_route_sends_a_picked_twin_its_request(self):
+        import grimoire.entrypoint as entrypoint
+
+        self.run_async(self.manager.start_model("chat"))
+        served = []
+
+        async def attempt(active):
+            served.append(active.name)
+
+        with patch.object(entrypoint, "manager", self.manager), \
+             patch.object(entrypoint, "registry", MirrorRegistry()), \
+             patch.object(entrypoint, "is_admin", lambda request: True):
+            self.run_async(entrypoint._with_fallback("chat", None, attempt, replica="chat@mirror"))
+        self.assertEqual(served, ["chat@mirror"])
+
     def test_route_table_lists_twin_as_a_replica_only(self):
         self.run_async(self.manager.start_model("chat"))
         routes = self.manager._build_route_table()

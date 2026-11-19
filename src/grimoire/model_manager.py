@@ -877,6 +877,20 @@ class ModelManager:
                 self._replica_affinity.popitem(last=False)
         return choice
 
+    async def start_replica(self, model_name, replica=None, *, evict=True):
+        """Return the loaded copy `pick_replica` chose, or start the model itself.
+
+        A mirror twin is not in the registry, so it is looked up here rather
+        than started by name. If the chosen copy stopped since it was picked,
+        the request goes to the model as usual.
+        """
+        if replica and replica != model_name:
+            active = self.active.get(replica)
+            if (active is not None and active.status == config.MODEL_STATUS_LOADED
+                    and active.is_running()):
+                return active
+        return await self.start_model(model_name, evict=evict)
+
     def _build_route_table(self):
         """Map each ready model -> its replica backends for the proxy workers.
 
