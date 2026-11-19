@@ -964,7 +964,8 @@
       "remote-url": "http://spark2.tail.lost.plus:8889",
       "backend-model-id": "Inkling-2-Small",
       "capabilities": [
-        "completion"
+        "completion",
+        "multimodal"
       ],
       "ctx-size": 524288,
       "added": "2026-11-17T20:36:43.644416+00:00",

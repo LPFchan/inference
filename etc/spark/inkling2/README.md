@@ -6,7 +6,7 @@ through kortexa's TensorFold fork (branch `kortexa-ai/inkling2-draft`, `e2614feb
 
 | File | What it is |
 | --- | --- |
-| `0001-inkling2-spark.patch` | Our 41 engine commits on `e2614feb` (`git am`): speed, the refusal edit per request, greedy fallback, Inkling's reply messages (thinking, tool calls), NVFP4 KV caches, up to 4 streams at once. |
+| `0001-inkling2-spark.patch` | Our 44 engine commits on `e2614feb` (`git am`): speed, the refusal edit per request, greedy fallback, Inkling's reply messages (thinking, tool calls), NVFP4 KV caches, up to 4 streams at once, images. |
 | `inkling2.jinja` | The chat template `serve-rank.sh` passes: kortexa's, without the forced text opener, so the model writes its own message headers. |
 | `serve-rank.sh` | One rank, natively (no Docker). Rank 0 on spark2 serves the API; rank 1 on spark1 reads spark2's models over NFS. |
 | `pair.sh` | Both ranks from spark2: ships the binary to spark1, starts rank 1 there, runs rank 0 in the foreground. |
@@ -34,6 +34,9 @@ so the stock model's kernels and outputs are unchanged.
 - spark2 `~/models/inkling2`: `kx/rank{0,1}` (kortexa's per-rank packs), `exl3` (the full pack), `split/rank{0,1}`
   (`split-experts.py`), `uncensored-edit/tf` (`export_edit.py`).
 - spark1 `~/inkling-2-small/{scripts,bin,logs}`; it reads `/mnt/spark2-models` (spark2's `~/models`, read-only NFS).
+- Both Sparks: `~/inkling-2-small/lib` holds libjpeg-turbo 3.1.4.1's `libturbojpeg.so.0` and libwebp 1.6.0's
+  `libwebpdecoder.so.3`, built from the release tarballs (`~/src/imglibs` on spark2). The engine takes JPEG and WebP
+  only from those exact releases; `serve-rank.sh` puts `lib` on the loader path.
 
 ## Install
 
@@ -81,4 +84,9 @@ so the stock model's kernels and outputs are unchanged.
   (`zig/src/server/inkling_reply.zig`), and only `<|content_model_end_sampling|>` ends a reply.
 - Thinking is on at effort high by default (`--reasoning-effort high`). A request sets `reasoning_effort` (`low`,
   `medium`, ...; `none` turns it off) or `chat_template_kwargs: {"enable_thinking": false}`.
-- Text only: no images.
+- Images (`VISION`, default 1): PNG, JPEG and WebP `image_url` parts, up to 4 a request and 4,096 tokens in all (one
+  token a 40x40 tile; a bigger image shrinks to fit). Rank 0 runs the checkpoint's own image tower
+  (`dense/vision.safetensors`) and sends the rows to rank 1. Its rows match a torch run of SGLang's tower (as close to
+  float32 as torch's own bf16). A 300-token image adds about 0.1 s, a 4,070-token one about 2.5 s, and the other chat
+  pauses that long. Follow-up turns resume past the image; another image never resumes it. The tower takes 0.83 GiB on
+  rank 0, so the pool is about 600k positions (one request still fits the whole window).

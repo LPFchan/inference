@@ -385,6 +385,13 @@ Patch chain in `patches/atomic-llama-cpp/`, applied in order by `Dockerfile`:
 
 ## Recent Changes
 
+- 2026-11-19: **Inkling-2-Small reads images** — Chats can attach PNG, JPEG
+  or WebP pictures (up to 4, 4,096 image tokens in all). The engine runs the
+  model's own image tower on spark2; its output matches a reference run. A
+  small picture adds about 0.1 s before the answer starts, a very large one
+  about 2.5 s. Follow-up turns reuse the picture. The tower takes 0.83 GiB, so
+  the shared pool holds about 600k positions; one request still fits the whole
+  524,288-token window. Grimoire now lists the model as taking images.
 - 2026-11-19: **Inkling-2-Small answers two chats at once** — A second
   request no longer waits for the first: both decode together, about 25 tok/s
   each (50 in all; one alone still gets 44). Each reply is the same as when it

@@ -1,7 +1,7 @@
 From ab85a9bf58392c5c08b6c055247d51880eb07aee Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Tue, 17 Nov 2026 22:24:16 +0900
-Subject: [PATCH 01/41] Quantize Inkling's BF16 attention and head projections
+Subject: [PATCH 01/44] Quantize Inkling's BF16 attention and head projections
  to NVFP4 at load (TF_INKLING_FP4)
 
 TF_INKLING_FP4=attn keeps Q, K, V, R, gate and O as NVFP4 lane weights; =all adds the output head.
@@ -371,7 +371,7 @@ index 2045cb01..171bd7c8 100644
 From e893996207418a3e9be28bb35b1baa2e77cf1084 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Tue, 17 Nov 2026 23:19:05 +0900
-Subject: [PATCH 02/41] Inkling decode: latency-bound mix and quant kernels
+Subject: [PATCH 02/44] Inkling decode: latency-bound mix and quant kernels
  issue all loads at once; NVFP4 drafter projections under FP4=all
 
 tf_ik_mix: one 576-thread CTA a row, each thread one 16-byte chunk of every source, one combined
@@ -808,7 +808,7 @@ index 8da5834f..cb578b05 100644
 From 96948dfd43770dbe0bf6447a20a5e9d280704bfc Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Tue, 17 Nov 2026 23:29:20 +0900
-Subject: [PATCH 03/41] Inkling verification: one attention launch and one
+Subject: [PATCH 03/44] Inkling verification: one attention launch and one
  small BF16 projection call for every verified row
 
 The decode attention kernel already masks each row's own causal window, so batching keeps each row's
@@ -860,7 +860,7 @@ index 7915e8fa..f4e4c249 100644
 From 3a6b5504d561d17f420582133ed40be48582795d Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 00:03:41 +0900
-Subject: [PATCH 04/41] Inkling: replay one CUDA graph per one-token step and
+Subject: [PATCH 04/44] Inkling: replay one CUDA graph per one-token step and
  verify window (TF_INKLING_GRAPHS, default on)
 
 Prep and attention read the step position from the device when a graph replays; draft mode's
@@ -1175,7 +1175,7 @@ index 171bd7c8..fe3f9ca5 100644
 From 377844b40b29a1f6383f57ff1f2f860506b6df50 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 00:32:24 +0900
-Subject: [PATCH 05/41] Inkling: split experts across the pair
+Subject: [PATCH 05/44] Inkling: split experts across the pair
  (TF_INKLING_EXPERTS=<full checkpoint>)
 
 Every rank runs half of every routed expert: w13's output tile columns (its gate/up pairs) and
@@ -1373,7 +1373,7 @@ index fe3f9ca5..2351961d 100644
 From 789e179ab26119d5a6de7b898a10edc605b2c499 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 01:00:07 +0900
-Subject: [PATCH 06/41] inkling2: Q, gate, R (and local K, V) as one NVFP4
+Subject: [PATCH 06/44] inkling2: Q, gate, R (and local K, V) as one NVFP4
  projection per layer
 
 ---
@@ -1578,7 +1578,7 @@ index cd581e8e..24d790ac 100644
 From a3c3d0a78b38b334b3f7742e7951ea85e6fbc57a Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 01:28:35 +0900
-Subject: [PATCH 07/41] inkling2: decode attention split over 16 key-tile sets
+Subject: [PATCH 07/44] inkling2: decode attention split over 16 key-tile sets
  per head, merged in order; row-invariant, 5x faster at 8k
 
 ---
@@ -1856,7 +1856,7 @@ index bd866c21..61429166 100644
 From ab0010657824d26cf3c308235d70494933fcbd00 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 01:28:35 +0900
-Subject: [PATCH 08/41] inkling2: TF_INKLING_EXPERTS also takes a pack already
+Subject: [PATCH 08/44] inkling2: TF_INKLING_EXPERTS also takes a pack already
  cut to this rank's half
 
 ---
@@ -1906,7 +1906,7 @@ index 24d790ac..99b00b99 100644
 From 043a53a41eca9204af6e89600af96d9eb50453e3 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 01:51:21 +0900
-Subject: [PATCH 09/41] inkling2: build the glue and drafter kernels
+Subject: [PATCH 09/44] inkling2: build the glue and drafter kernels
  arch-specific (sm_121a): native FP4/FP8 conversions
 
 ---
@@ -1937,7 +1937,7 @@ index 9b4f6c77..688b055f 100644
 From b71cf55b766fb07d42dc314522b0f3978cc6dbba Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 02:20:32 +0900
-Subject: [PATCH 10/41] inkling2: forward graph in pieces; warp-level route
+Subject: [PATCH 10/44] inkling2: forward graph in pieces; warp-level route
  top-8 and mix reductions; drafter rnn and fold as NVFP4
 
 ---
@@ -2256,7 +2256,7 @@ index 8ff38eff..08a3f9c4 100644
 From 427a874ffca07c1770318912cc1a76cbfb0665e7 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 02:32:26 +0900
-Subject: [PATCH 11/41] inkling2: keep() restores every conv history in one
+Subject: [PATCH 11/44] inkling2: keep() restores every conv history in one
  launch
 
 ---
@@ -2364,7 +2364,7 @@ index dcae77b3..52a87e1c 100644
 From d910d2b7cf40eb1b0d327cd464f3ee38afdfb217 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 04:36:01 +0900
-Subject: [PATCH 12/41] inkling2: verify drafts while their chained chance
+Subject: [PATCH 12/44] inkling2: verify drafts while their chained chance
  stays at least TF_INKLING_DRAFT_FLOOR (default 0.6), up to 5 deep
 
 The drafter reports each pick's probability (tf_ik_top1p: one 1024-thread block, float4 loads, online
@@ -2686,7 +2686,7 @@ index 2351961d..0872392e 100644
 From b723bd4b0aaa55e93437decdc35f0e9e045f265d Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 04:36:01 +0900
-Subject: [PATCH 13/41] environment tests: valid forms for TF_INKLING_FP4,
+Subject: [PATCH 13/44] environment tests: valid forms for TF_INKLING_FP4,
  EXPERTS, GRAPHS and DRAFT_FLOOR
 
 ---
@@ -2718,7 +2718,7 @@ index 046db04f..b150590f 100644
 From afec536d2fca51b7496bfe1638b53892f571c90b Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 04:50:40 +0900
-Subject: [PATCH 14/41] inkling2: peer records carry up to 12 ids in the header
+Subject: [PATCH 14/44] inkling2: peer records carry up to 12 ids in the header
  (one broadcast each); keep rides with the next draft
 
 Rank 1 no longer drains its stream between the keep and the draft, so it queues ingest and drafting back to
@@ -2884,7 +2884,7 @@ index 12481774..d989ed85 100644
 From e4ca0d94d29e48cd30505322736329ef395e43dd Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 05:23:05 +0900
-Subject: [PATCH 15/41] server: TENSORFOLD_KEYS_MODEL, a model id whose
+Subject: [PATCH 15/44] server: TENSORFOLD_KEYS_MODEL, a model id whose
  requests carry keys to the engine for its per-request edit
 
 The same plumbing as our DeepSeek keys switch: the id is listed beside the served name, its requests set
@@ -3068,7 +3068,7 @@ index 820d6556..872b9c1b 100644
 From 2fe1103f1c0877e578abdfc1d6cda853c2af9594 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 05:23:05 +0900
-Subject: [PATCH 16/41] inkling2: TF_INKLING_EDIT, OpenUncensored's refusal
+Subject: [PATCH 16/44] inkling2: TF_INKLING_EDIT, OpenUncensored's refusal
  edit for requests that ask (TENSORFOLD_KEYS_MODEL)
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
@@ -3398,7 +3398,7 @@ index b150590f..d47c1bcc 100644
 From ba9c87428a457f48d95a949e4a360b9ccb36d1b8 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 05:35:06 +0900
-Subject: [PATCH 17/41] server: TENSORFOLD_GREEDY_FALLBACK=1 decodes a sampling
+Subject: [PATCH 17/44] server: TENSORFOLD_GREEDY_FALLBACK=1 decodes a sampling
  request greedily on a greedy-only engine instead of refusing it
 
 ---
@@ -3447,7 +3447,7 @@ index 872b9c1b..2dc2cf17 100644
 From 22d3c966619c259ab9b3c18a8d6f751af79d95a6 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 05:57:25 +0900
-Subject: [PATCH 18/41] server: read Inkling 2's messages natively: text,
+Subject: [PATCH 18/44] server: read Inkling 2's messages natively: text,
  thinking as reasoning_content, JSON invokes as tool_calls; only end of
  sampling ends a turn; reasoning_effort switches thinking
 
@@ -3705,7 +3705,7 @@ index 2dc2cf17..0778579c 100644
 From 0709576ac8dfe65568a99bfc1f6eedaf659b515c Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 07:55:06 +0900
-Subject: [PATCH 19/41] inkling2: prompt passes take tf_ik_prompt_dot (the
+Subject: [PATCH 19/44] inkling2: prompt passes take tf_ik_prompt_dot (the
  common EXL3 prompt path at any trellis width, 64 members a block, whole K)
  and TF_INKLING_PROMPT_ROWS (default 256)
 
@@ -4013,7 +4013,7 @@ index d47c1bcc..749ab179 100644
 From e6dc7e6ff2e56509e45ad218151ce708acf24428 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 08:29:54 +0900
-Subject: [PATCH 20/41] inkling2: turn reuse: a prompt resumes from the
+Subject: [PATCH 20/44] inkling2: turn reuse: a prompt resumes from the
  furthest kept turn that starts it (the last prompt's end, or the server's
  system-prompt cuts); a kept turn copies each local ring's last 1024 rows,
  every conv history and the drafter's local rings, and reads the one live set
@@ -4411,7 +4411,7 @@ index 00000000..4f3c91c9
 From d7fef321311bcc40ffa4e069c9b99559e0227d5b Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 08:46:22 +0900
-Subject: [PATCH 21/41] inkling2: each rank sums a row's eight expert outputs
+Subject: [PATCH 21/44] inkling2: each rank sums a row's eight expert outputs
  before the exchange (tf_ik_moe_sum), so the pair gathers one f32 row, not
  eight bf16 ones; no gathered buffer
 
@@ -4490,7 +4490,7 @@ index 2c37abc2..fa688af9 100644
 From f8c778f1cbdb6eeeb037112d0e0768a0290f90ad Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 09:11:07 +0900
-Subject: [PATCH 22/41] inkling2: prompt passes attend with
+Subject: [PATCH 22/44] inkling2: prompt passes attend with
  tf_ik_attention_flash (64 query rows a block, cp.async key and value tiles,
  ldmatrix fragments, online softmax in registers, P in BF16); tf_ik_attention
  and its SIMT exception path removed
@@ -4867,7 +4867,7 @@ index ea53c710..ce0c156c 100644
 From 7a84815fe7b7f7cb20040b5abbaa29f679ebd70d Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 10:23:20 +0900
-Subject: [PATCH 23/41] inkling2: tf_ik_relative takes rows * heads on grid x
+Subject: [PATCH 23/44] inkling2: tf_ik_relative takes rows * heads on grid x
  (y stays under 65535 for passes of 2731 rows and more)
 
 ---
@@ -4908,7 +4908,7 @@ index 323fe8f1..e0ba47fe 100644
 From 0c84ddf3f319639a7700e1c8b55fa17f4f1633b7 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 10:23:24 +0900
-Subject: [PATCH 24/41] inkling2: tf_ik_prompt_dot takes 128 members by 128
+Subject: [PATCH 24/44] inkling2: tf_ik_prompt_dot takes 128 members by 128
  columns, one Hadamard block, and unrotates it in its epilogue (BF16 out, no
  fp32 z or tf_ik_unrotate pass); split ranks skip the slot zero fills; gu,
  hidden and quant_down sized to the rank's intermediate
@@ -5195,7 +5195,7 @@ index fa688af9..8a914651 100644
 From 705ceaf6f05b60e342ecfe68d552da5195f239e6 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 11:03:10 +0900
-Subject: [PATCH 25/41] inkling2: tf_ik_down_input makes the down projection's
+Subject: [PATCH 25/44] inkling2: tf_ik_down_input makes the down projection's
  rotated input in one CTA a pair (tf_ik_swiglu, tf_ik_quant and tf_ik_rotate's
  arithmetic in order, the rounded row in shared memory); no hidden or
  quant_down buffers; TF_INKLING_PROMPT_ROWS up to 8192
@@ -5448,7 +5448,7 @@ index 2fd9c43b..b219c477 100644
 From 111b5231028f0fb7ab911cbf6f4edfd979012b0a Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 12:03:07 +0900
-Subject: [PATCH 26/41] inkling2: tf_ik_relative computes 8 distances a thread
+Subject: [PATCH 26/44] inkling2: tf_ik_relative computes 8 distances a thread
  with vector loads and one 16-byte store (same sums in the same order);
  TF_INKLING_PROMPT_ROWS up to 16384 (about 0.55 MB a row), so a prompt of that
  length takes one pass and streams the expert weights once
@@ -5530,7 +5530,7 @@ index b219c477..d5102bf3 100644
 From b1770ee99ce9051111b8080038b1391813dc64e0 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 16:05:19 +0900
-Subject: [PATCH 27/41] inkling2: tf_ik_attention_flash keeps its output
+Subject: [PATCH 27/44] inkling2: tf_ik_attention_flash keeps its output
  accumulators in registers (the epilogue's row loop unrolled; o was a 272-byte
  stack array), stages each tile's relative bias rows in shared memory with its
  keys, and skips the per-score mask on tiles 1024 or more behind a warp's rows
@@ -5642,7 +5642,7 @@ index 9b83ea7e..d35f49ba 100644
 From c909e9e2c5f914897156b0470cc00f5f1dc2e3b1 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 21:17:32 +0900
-Subject: [PATCH 28/41] inkling2: tf_ik_prompt_dot stages 64 of k a chunk in
+Subject: [PATCH 28/44] inkling2: tf_ik_prompt_dot stages 64 of k a chunk in
  two stages, one barrier a chunk (same mma chain over k, bits unchanged)
 
 ---
@@ -5751,7 +5751,7 @@ index 8b8d7c8b..bdf6a14b 100644
 From c54ebeb4a71ee986829928ff415bbe88e1b9a2a0 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 21:17:32 +0900
-Subject: [PATCH 29/41] prompt16: prompt_lean's blocks claim tiles from a
+Subject: [PATCH 29/44] prompt16: prompt_lean's blocks claim tiles from a
  counter as they go, so one an exchange's kernels hold off a multiprocessor
  takes fewer (the last block resets it; each tile's bits unchanged)
 
@@ -5838,7 +5838,7 @@ index b5ffc643..8918452b 100644
 From 41c01d9cece5688eac89ea01fe7e426a2b08313f Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 21:17:32 +0900
-Subject: [PATCH 30/41] inkling2: a two-rank exchange sends each rank the f32
+Subject: [PATCH 30/44] inkling2: a two-rank exchange sends each rank the f32
  rows it sums (tf_ik_pair_sum adds them in rank order) and gathers BF16 sums,
  75% of the bytes; prompt passes of 512 rows and more take three row chunks (a
  sixth, two thirds, a sixth) whose exchanges run on a side stream while the
@@ -6250,7 +6250,7 @@ index 6ea32d7a..9ea2a720 100644
 From 9f7501194d2cfc43c082d1a362b427e8891ae78a Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 21:17:32 +0900
-Subject: [PATCH 31/41] inkling2: every pass embeds by tf_ik_embed_shard, the
+Subject: [PATCH 31/44] inkling2: every pass embeds by tf_ik_embed_shard, the
  gather and tf_ik_embed_pick (a row a host copy before: a 10.9k prompt started
  about 45 ms late; the same bytes)
 
@@ -6312,7 +6312,7 @@ index 0d66b439..4a0bfbbb 100644
 From aa662f9b308ac36bb143a96bab31ba8275d328da Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 21:17:32 +0900
-Subject: [PATCH 32/41] inkling2: tf_ik_up_input rounds a prompt row once and
+Subject: [PATCH 32/44] inkling2: tf_ik_up_input rounds a prompt row once and
  rotates its eight slots in one CTA (tf_ik_quant then tf_ik_rotate's
  arithmetic in order; passes under 64 rows keep the two kernels, bits
  unchanged)
@@ -6419,7 +6419,7 @@ index ac4aa21f..91e96fc4 100644
 From 9d0af1f86ba8afc0e5e92ca27caefef22dd53dd4 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 22:27:34 +0900
-Subject: [PATCH 33/41] inkling2: the experts' gate and up outputs take
+Subject: [PATCH 33/44] inkling2: the experts' gate and up outputs take
  relative's memory and the down projections' input streams' (attention is done
  with both), the down outputs s.rotated's once the up projections have read
  it: 1.16 GiB less a rank at 11264 prompt rows (the same bits)
@@ -6540,7 +6540,7 @@ index 9ea2a720..8d18dfee 100644
 From 6525b55fd1e1c42729e8d9746517e599c8d17bba Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 22:27:34 +0900
-Subject: [PATCH 34/41] inkling2: a local layer's own ring holds 1024 + 256
+Subject: [PATCH 34/44] inkling2: a local layer's own ring holds 1024 + 256
  positions; a longer pass runs on one shared ring of the pass's size, the
  window before it copied in at its first chunk and the window at its end back
  after its last: 0.82 GiB less a rank at 11264 prompt rows (the same bits)
@@ -6669,7 +6669,7 @@ index 8d18dfee..20fd00e9 100644
 From 134656cc61f203cfd1a88b840e5143a55d6dffd5 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 22:27:34 +0900
-Subject: [PATCH 35/41] inkling2: the drafter sums its global layer's tap mix
+Subject: [PATCH 35/44] inkling2: the drafter sums its global layer's tap mix
  in f32 tap by tap (tf_ik_draft_gather, then tf_ik_draft_mix_sum:
  tf_ik_draft_mix's arithmetic in its order) and keeps of each tap only the
  last rows a local ring holds, which are all a local layer ingests: 0.49 GiB
@@ -6862,7 +6862,7 @@ index f29a83cb..819b244b 100644
 From 22e4ab61f9747122d552a82a9b1a19b0a24f2735 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 23:46:17 +0900
-Subject: [PATCH 36/41] inkling2: the verify audit compares the final hidden
+Subject: [PATCH 36/44] inkling2: the verify audit compares the final hidden
  row with tap 7's kept tail (d.taps holds each tap's last d.tail rows from
  d.tail_first since 134656cc)
 
@@ -6890,7 +6890,7 @@ index dcb39d26..65e9ca50 100644
 From be67c79cdd99baa3e547eec3d6a45b94be78cc81 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 23:46:23 +0900
-Subject: [PATCH 37/41] inkling2: TF_INKLING_KV4=1 keeps the global layers' and
+Subject: [PATCH 37/44] inkling2: TF_INKLING_KV4=1 keeps the global layers' and
  the drafter's global layer's KV as NVFP4 rows (inkling2_kv4.cuh: E2M1 codes,
  an E4M3 scale per 16 values, 72 bytes a position and head against 256):
  tf_ik_prep and the drafter's prep and tf_ik_draft_store4 write them,
@@ -7788,7 +7788,7 @@ index 749ab179..5f8b8307 100644
 From 4ce73ea298b8eb200c0c199386502ae167541fdf Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Thu, 19 Nov 2026 00:15:26 +0900
-Subject: [PATCH 38/41] inkling2: tf_ik_draft_attention widens an FP4 ring 32
+Subject: [PATCH 38/44] inkling2: tf_ik_draft_attention widens an FP4 ring 32
  keys at a time into shared rows its eight warps share (each warp decoded
  every value itself): 45 -> 6 ms at 115k positions, under the BF16 ring's 9.7;
  each key's arithmetic as before, so FP4 matches its BF16 twin and the BF16
@@ -7864,7 +7864,7 @@ index d1604c0d..6959f558 100644
 From f8b1c27f24ab5bc0f2cd26d191b52c13980df8bf Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Thu, 19 Nov 2026 00:23:36 +0900
-Subject: [PATCH 39/41] inkling2: one cache's attention launch is
+Subject: [PATCH 39/44] inkling2: one cache's attention launch is
  Forward.runAttention (split kernels for verify and decode rows, flash for
  prompt rows), the same launches
 
@@ -7928,7 +7928,7 @@ index f550bad8..375eac89 100644
 From ab041a22bdb64717c48f018ff2c7bc5c5c1d2687 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Thu, 19 Nov 2026 03:14:33 +0900
-Subject: [PATCH 40/41] inkling2: FP4 decode and verify attention is
+Subject: [PATCH 40/44] inkling2: FP4 decode and verify attention is
  tf_ik_attention_part4_{1,2,3} (a CTA a key head and one of kern.key_splits=24
  splits, its six query heads' rows packed into 16-row tiles, codes fetched 16
  bytes at a time) and tf_ik_attention_merge4; tf_ik_attention_flash4 serves
@@ -8596,7 +8596,7 @@ index b6e2f43b..8c979428 100644
 From a00020e14c2c4fd26d406d8770a2267d2a7ca908 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Thu, 19 Nov 2026 03:14:51 +0900
-Subject: [PATCH 41/41] inkling2: TF_INKLING_STREAMS (1 to 4, default 4) serves
+Subject: [PATCH 41/44] inkling2: TF_INKLING_STREAMS (1 to 4, default 4) serves
  that many requests at once: each on a slot of its own (local rings, drafter
  state), the global caches' regions in one shared pool (pool.zig: first fit,
  idle kept turns evicted oldest first, then compaction; rank 0 places, both
@@ -10558,6 +10558,1261 @@ index 5f8b8307..b9b462a2 100644
      .{ .name = "TF_INKLING_KV4", .raw = "0", .n = 0 },
      .{ .name = "TF_INKLING_KV4", .raw = "1", .n = 1 },
      .{ .name = "TF_INKLING_FP4", .raw = "off", .n = 0 },
+-- 
+2.56.1
+
+
+From 9f0d0ba5d1a4df835d8e441852457fd1d42451ee Mon Sep 17 00:00:00 2001
+From: LPFchan <me@lost.plus>
+Date: Thu, 19 Nov 2026 09:54:36 +0900
+Subject: [PATCH 42/44] cuda: vision_kernel<64, 8> (vit.Attention's 64-wide
+ heads, for Inkling 2's image tower: 16 heads of 64)
+
+---
+ zig/kernels/cuda/prefill_attention.cu | 3 +++
+ zig/src/cuda/vit.zig                  | 4 +++-
+ 2 files changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/zig/kernels/cuda/prefill_attention.cu b/zig/kernels/cuda/prefill_attention.cu
+index 1c6e0f07..e788e5f4 100644
+--- a/zig/kernels/cuda/prefill_attention.cu
++++ b/zig/kernels/cuda/prefill_attention.cu
+@@ -335,6 +335,9 @@ template __global__ void tf_prefill_attention::full_kernel<72, 8, 8>(const __nv_
+ // Head dim 80, eight warps, two blocks an SM (RADIO's tower, 16 heads of 80): full_kernel<80>'s bits, 1.35x faster.
+ template __global__ void tf_prefill_attention::vision_kernel<80, 8>(const __nv_bfloat16* __restrict__, __nv_bfloat16* __restrict__, int, int,
+     float);
++// Head dim 64, eight warps (Inkling 2's image tower, 16 heads of 64 over an image's patches and its class row).
++template __global__ void tf_prefill_attention::vision_kernel<64, 8>(const __nv_bfloat16* __restrict__, __nv_bfloat16* __restrict__, int, int,
++    float);
+ // Head dim 128, eight warps (MOSS-Image's denoiser, 24 heads of 128 over its image and prompt rows).
+ template __global__ void tf_prefill_attention::vision_kernel<128, 8>(const __nv_bfloat16* __restrict__, __nv_bfloat16* __restrict__, int, int,
+     float);
+diff --git a/zig/src/cuda/vit.zig b/zig/src/cuda/vit.zig
+index 4f765f5f..7ade49f7 100644
+--- a/zig/src/cuda/vit.zig
++++ b/zig/src/cuda/vit.zig
+@@ -272,8 +272,10 @@ const Full = struct {
+     }
+ };
+ 
+-/// Full attention by head dim: SigLIP2's 72, RADIO's 80 (full_kernel's bits in one barrier a tile), MOSS-Image's 128.
++/// Full attention by head dim: Inkling 2's 64, SigLIP2's 72, RADIO's 80 (full_kernel's bits in one barrier a tile),
++/// MOSS-Image's 128.
+ const fulls = [_]Full{
++    .{ .dim = 64, .warps = 8 },
+     .{ .dim = 72, .warps = 8, .slots = 8 },
+     .{ .dim = 80, .warps = 8 },
+     .{ .dim = 128, .warps = 8 },
+-- 
+2.56.1
+
+
+From e6aa780c68fafeb99904458fef9e784bd0a8d8ab Mon Sep 17 00:00:00 2001
+From: LPFchan <me@lost.plus>
+Date: Thu, 19 Nov 2026 09:54:36 +0900
+Subject: [PATCH 43/44] inkling2: the image tower (vision.zig,
+ inkling2_vision.cu) as SGLang's inkling2_vision.py: 20-pixel patches, the 32
+ x 32 position grid (clamp-to-edge bilinear), the class row, 23 pre-LN layers
+ of 16 heads of 64 with 2D rotary (vision_kernel<64>), layer scales, the 2 x 2
+ merge and both projections, in bf16 at torch's roundings; its rows' error
+ against float32 equals torch's own bf16 run's (3.3% on a 4,070-token
+ picture), 2.5 s for that picture on a GB10
+
+---
+ zig/build/cuda_kernels.zig           |   1 +
+ zig/kernels/cuda/inkling2_vision.cu  | 156 +++++++++++++++
+ zig/src/cuda/kernels.zig             |   1 +
+ zig/src/families/inkling2/vision.zig | 286 +++++++++++++++++++++++++++
+ 4 files changed, 444 insertions(+)
+ create mode 100644 zig/kernels/cuda/inkling2_vision.cu
+ create mode 100644 zig/src/families/inkling2/vision.zig
+
+diff --git a/zig/build/cuda_kernels.zig b/zig/build/cuda_kernels.zig
+index 688b055f..460053b0 100644
+--- a/zig/build/cuda_kernels.zig
++++ b/zig/build/cuda_kernels.zig
+@@ -57,6 +57,7 @@ pub const kernels = [_]Kernel{
+     .{ .name = "inkling2_dense", .flags = glue, .min_sm = 120 },
+     .{ .name = "inkling2_verify", .flags = glue, .min_sm = 120 },
+     .{ .name = "inkling2_draft", .flags = glue, .min_sm = 120, .arch_specific = true },
++    .{ .name = "inkling2_vision", .flags = glue, .min_sm = 120 }, // ours: Inkling 2's image tower steps around cuBLASLt
+     .{ .name = "qwen4_projection", .flags = glue },
+     .{ .name = "qwen4_gdn", .flags = glue },
+     .{ .name = "qwen4_hc", .flags = glue },
+diff --git a/zig/kernels/cuda/inkling2_vision.cu b/zig/kernels/cuda/inkling2_vision.cu
+new file mode 100644
+index 00000000..a90be04b
+--- /dev/null
++++ b/zig/kernels/cuda/inkling2_vision.cu
+@@ -0,0 +1,156 @@
++// Inkling 2's image tower steps around cuBLASLt (families/inkling2/vision.zig), as SGLang's inkling2_vision.py:
++// a bf16 residual rounded at every add, LayerNorm and GELU in fp32 with one rounding, 2D rotary on q and k in fp32.
++
++#include <cuda_bf16.h>
++#include <stdint.h>
++
++namespace {
++__device__ __forceinline__ float bf(__nv_bfloat16 x) { return __bfloat162float(x); }
++__device__ __forceinline__ __nv_bfloat16 tobf(float x) { return __float2bfloat16_rn(x); }
++__device__ __forceinline__ float rbf(float x) { return bf(tobf(x)); }
++
++// a block's sum (blockDim.x a multiple of 32, at most 1024); every thread gets it
++__device__ float block_sum(float v) {
++    __shared__ float part[32];
++    __shared__ float total;
++    for (int o = 16; o > 0; o >>= 1) v += __shfl_xor_sync(0xffffffffu, v, o);
++    const int lane = threadIdx.x & 31, warp = threadIdx.x >> 5;
++    __syncthreads();
++    if (lane == 0) part[warp] = v;
++    __syncthreads();
++    if (warp == 0) {
++        float s = lane < (int)(blockDim.x >> 5) ? part[lane] : 0.f;
++        for (int o = 16; o > 0; o >>= 1) s += __shfl_xor_sync(0xffffffffu, s, o);
++        if (lane == 0) total = s;
++    }
++    __syncthreads();
++    return total;
++}
++
++__device__ __forceinline__ float gelu(float x) { return 0.5f * x * (1.f + erff(x * 0.70710678118654752f)); }
++
++// one axis of the position grid at an output index: clamp-to-edge linear (align_corners=False), as SGLang's kernel
++__device__ __forceinline__ void axis(int i, int target, int size, int& s0, int& s1, float& w0, float& w1) {
++    float c = __fdiv_rn((float)size * ((float)i + 0.5f), (float)target) - 0.5f;
++    c = fmaxf(0.f, fminf(c, (float)size - 1.f));
++    s0 = (int)floorf(c);
++    s1 = min(s0 + 1, size - 1);
++    w1 = c - (float)s0;
++    w0 = 1.f - w1;
++}
++}  // namespace
++
++// x[1 + r0 + j] = bf16(bf16(acc[j]) + bf16(pos)) for patch rows r0 + j of an H x W grid (row 0 is the class row):
++// the patch embedding's product and the 32 x 32 position grid at the patch, a block a row
++extern "C" __global__ void ikv_embed(const float* __restrict__ acc, const __nv_bfloat16* __restrict__ grid,
++                                     __nv_bfloat16* __restrict__ x, int r0, int H, int W, int width, int size) {
++    const int r = r0 + blockIdx.x;
++    int y0, y1, x0, x1;
++    float wy0, wy1, wx0, wx1;
++    axis(r / W, H, size, y0, y1, wy0, wy1);
++    axis(r % W, W, size, x0, x1, wx0, wx1);
++    const __nv_bfloat16* g00 = grid + (long long)(y0 * size + x0) * width;
++    const __nv_bfloat16* g01 = grid + (long long)(y0 * size + x1) * width;
++    const __nv_bfloat16* g10 = grid + (long long)(y1 * size + x0) * width;
++    const __nv_bfloat16* g11 = grid + (long long)(y1 * size + x1) * width;
++    for (int c = threadIdx.x; c < width; c += blockDim.x) {
++        const float top = bf(g00[c]) * wx0 + bf(g01[c]) * wx1;
++        const float bottom = bf(g10[c]) * wx0 + bf(g11[c]) * wx1;
++        const float pos = rbf(top * wy0 + bottom * wy1);
++        x[(long long)(1 + r) * width + c] = tobf(rbf(acc[(long long)blockIdx.x * width + c]) + pos);
++    }
++}
++
++// x[0] = bf16(class + its position): the class row
++extern "C" __global__ void ikv_cls(const __nv_bfloat16* __restrict__ cls, const __nv_bfloat16* __restrict__ pos,
++                                   __nv_bfloat16* __restrict__ x, int width) {
++    for (int c = threadIdx.x; c < width; c += blockDim.x) x[c] = tobf(bf(cls[c]) + bf(pos[c]));
++}
++
++// LayerNorm of bf16 rows: y = bf16((x - mean) rstd w + b), fp32 statistics, a block a row
++extern "C" __global__ void ikv_ln(const __nv_bfloat16* __restrict__ x, const __nv_bfloat16* __restrict__ w,
++                                  const __nv_bfloat16* __restrict__ b, __nv_bfloat16* __restrict__ y, int cols,
++                                  float eps) {
++    const __nv_bfloat16* row = x + (long long)blockIdx.x * cols;
++    float s = 0.f;
++    for (int c = threadIdx.x; c < cols; c += blockDim.x) s += bf(row[c]);
++    const float mean = block_sum(s) / cols;
++    float v = 0.f;
++    for (int c = threadIdx.x; c < cols; c += blockDim.x) {
++        const float d = bf(row[c]) - mean;
++        v += d * d;
++    }
++    const float inv = rsqrtf(block_sum(v) / cols + eps);
++    for (int c = threadIdx.x; c < cols; c += blockDim.x)
++        y[(long long)blockIdx.x * cols + c] = tobf((bf(row[c]) - mean) * inv * bf(w[c]) + bf(b[c]));
++}
++
++// out = bf16(acc + bias) (bias may be null), then with `act` bf16(gelu(that)): a linear's output, or its GELU
++extern "C" __global__ void ikv_bias(const float* __restrict__ acc, const __nv_bfloat16* __restrict__ bias,
++                                    __nv_bfloat16* __restrict__ out, long long n, int cols, int act) {
++    for (long long i = blockIdx.x * (long long)blockDim.x + threadIdx.x; i < n; i += (long long)gridDim.x * blockDim.x) {
++        float v = rbf(acc[i] + (bias ? bf(bias[i % cols]) : 0.f));
++        if (act) v = gelu(v);
++        out[i] = tobf(v);
++    }
++}
++
++// x = bf16(x + bf16(bf16(acc + bias) gamma)): a branch's output through its layer scale into the residual
++extern "C" __global__ void ikv_residual(const float* __restrict__ acc, const __nv_bfloat16* __restrict__ bias,
++                                        const __nv_bfloat16* __restrict__ gamma, __nv_bfloat16* __restrict__ x,
++                                        long long n, int cols) {
++    for (long long i = blockIdx.x * (long long)blockDim.x + threadIdx.x; i < n; i += (long long)gridDim.x * blockDim.x) {
++        const int c = (int)(i % cols);
++        const float y = rbf(acc[i] + bf(bias[c]));
++        x[i] = tobf(bf(x[i]) + rbf(y * bf(gamma[c])));
++    }
++}
++
++// Rows r0 + j of q | k | v (acc [rows, 3 H 64] fp32, bias [3 H 64]) as bf16 into qkv [N, 3 H 64] (vit.Attention's
++// layout), q and k rotated by their 2D positions (pos [N, 2]: row then column; pair p < 16 turns by the column, the
++// rest by the row, at inv_freq[p % 16]); a warp a (row, head), a lane a pair
++extern "C" __global__ void ikv_qkv(const float* __restrict__ acc, const __nv_bfloat16* __restrict__ bias,
++                                   const int* __restrict__ pos, const float* __restrict__ inv_freq,
++                                   __nv_bfloat16* __restrict__ qkv, int r0, int rows, int H) {
++    const long long item = blockIdx.x * (long long)(blockDim.x >> 5) + (threadIdx.x >> 5);
++    if (item >= (long long)rows * H) return;
++    const int lane = threadIdx.x & 31;
++    const int j = (int)(item / H), h = (int)(item % H);
++    const int n = r0 + j;
++    const int width = H * 64;
++    const float* row = acc + (long long)j * 3 * width;
++    __nv_bfloat16* dst = qkv + (long long)n * 3 * width;
++    const int p = pos[2 * n + (lane < 16 ? 1 : 0)];
++    const float ang = (float)p * inv_freq[lane & 15];
++    const float c = cosf(ang), s = sinf(ang);
++    const int e = h * 64 + 2 * lane;
++    for (int which = 0; which < 2; ++which) {
++        const int at = which * width + e;
++        const float a = rbf(row[at] + bf(bias[at])), b = rbf(row[at + 1] + bf(bias[at + 1]));
++        dst[at] = tobf(fmaf(a, c, -b * s));
++        dst[at + 1] = tobf(fmaf(b, c, a * s));
++    }
++    const int at = 2 * width + e;
++    dst[at] = tobf(row[at] + bf(bias[at]));
++    dst[at + 1] = tobf(row[at + 1] + bf(bias[at + 1]));
++}
++
++// Each token's 2 x 2 patches side by side (out [rows cols, 4 width]): token (ty, tx) takes rows 1 + (2 ty + my) W +
++// 2 tx + mx of x (row 0 is the class row), (my, mx) in (0,0), (0,1), (1,0), (1,1) order; a block a token
++extern "C" __global__ void ikv_merge(const __nv_bfloat16* __restrict__ x, __nv_bfloat16* __restrict__ out, int cols,
++                                     int width) {
++    const int t = blockIdx.x, ty = t / cols, tx = t % cols, W = 2 * cols;
++    for (int c = threadIdx.x; c < 4 * width; c += blockDim.x) {
++        const int q = c / width, my = q >> 1, mx = q & 1;
++        out[(long long)t * 4 * width + c] = x[(long long)(1 + (2 * ty + my) * W + 2 * tx + mx) * width + c % width];
++    }
++}
++
++// Prompt rows take image rows: row r takes feature row map[r] (map[r] < 0: kept), a block a row
++extern "C" __global__ void ikv_inject(const __nv_bfloat16* __restrict__ feats, __nv_bfloat16* __restrict__ out,
++                                      const int* __restrict__ map, int d) {
++    const int r = blockIdx.x;
++    if (map[r] < 0) return;
++    const __nv_bfloat16* src = feats + (long long)map[r] * d;
++    for (int c = threadIdx.x; c < d; c += blockDim.x) out[(long long)r * d + c] = src[c];
++}
+diff --git a/zig/src/cuda/kernels.zig b/zig/src/cuda/kernels.zig
+index 9287640e..f8b42b9c 100644
+--- a/zig/src/cuda/kernels.zig
++++ b/zig/src/cuda/kernels.zig
+@@ -170,3 +170,4 @@ pub const qwen27_train: []const u8 = if (available) &Blob("fatbin_qwen27_train")
+ pub const inkling2_verify: []const u8 = if (available) &Blob("fatbin_inkling2_verify").bytes else &.{};
+ 
+ pub const inkling2_draft: []const u8 = if (available) &Blob("fatbin_inkling2_draft").bytes else &.{};
++pub const inkling2_vision: []const u8 = if (available) &Blob("fatbin_inkling2_vision").bytes else &.{};
+diff --git a/zig/src/families/inkling2/vision.zig b/zig/src/families/inkling2/vision.zig
+new file mode 100644
+index 00000000..d374a852
+--- /dev/null
++++ b/zig/src/families/inkling2/vision.zig
+@@ -0,0 +1,286 @@
++//! Inkling 2's image tower on CUDA as SGLang's inkling2_vision.py: an image's 20x20 patches to the language model's
++//! rows, one row a 40x40 tile (2 x 2 patches). Rank 0 holds it; its buffers are sized once for the largest image.
++const std = @import("std");
++const cuda = @import("cuda");
++const core = @import("core");
++const cfg = @import("config.zig");
++const wt = @import("weights.zig");
++
++pub const width = 1024;
++pub const heads = 16;
++pub const head_dim = 64;
++pub const mlp = 4096;
++pub const depth = 23;
++pub const patch = 20; // a patch's side in pixels
++pub const tile = 2 * patch; // an image token's side: its 2 x 2 patches
++pub const patch_in = 3 * patch * patch; // a patch's pixels, (py, px, channel)
++pub const grid = 32; // the position grid's side
++pub const proj = 4096;
++const eps: f32 = 1e-5;
++const chunk = 1024; // rows a linear's fp32 product covers
++const prefix = "model.visual.";
++
++const Layer = struct { ln1_w: u64, ln1_b: u64, qkv_w: u64, qkv_b: u64, out_w: u64, out_b: u64, ls1: u64, ln2_w: u64, ln2_b: u64, fc_w: u64, fc_b: u64, proj_w: u64, proj_b: u64, ls2: u64 };
++
++pub const Funcs = struct {
++    embed: cuda.Function,
++    cls: cuda.Function,
++    ln: cuda.Function,
++    bias: cuda.Function,
++    residual: cuda.Function,
++    qkv: cuda.Function,
++    merge: cuda.Function,
++    inject: cuda.Function,
++
++    pub fn load(m: cuda.Module) !Funcs {
++        var f: Funcs = undefined;
++        inline for (@typeInfo(Funcs).@"struct".field_names) |name| @field(f, name) = try m.function("ikv_" ++ name);
++        return f;
++    }
++};
++
++/// The device bytes the tower's buffers take for images of at most `tokens` tokens (its weights aside).
++pub fn scratchBytes(tokens: usize) usize {
++    const n = 4 * tokens + 1;
++    return 5 * n * width * 2 + chunk * cfg.hidden * 4 + chunk * mlp * 2 + chunk * patch_in * 2 + n * 8 + 8 * 256;
++}
++
++const Plan = struct { m: usize, n: usize, k: usize, out: cuda.cublaslt.DataType, plan: cuda.cublaslt.Linear };
++
++pub const Tower = struct {
++    gpa: std.mem.Allocator,
++    d: *const cuda.Driver,
++    lt: *const cuda.cublaslt.Library,
++    ws: u64, // the forward's cuBLASLt workspace: the tower runs on its stream, between its passes
++    ws_len: usize,
++    f: Funcs,
++    at: cuda.vit.Attention, // prefill_attention.cu's vision_kernel<64>: every row over every row
++    mem: cuda.DeviceBuffer,
++    scratch: cuda.DeviceBuffer,
++    max_tokens: usize,
++    layers: [depth]Layer = undefined,
++    patch_w: u64 = 0,
++    pos_grid: u64 = 0,
++    cls: u64 = 0,
++    cls_pos: u64 = 0,
++    pre_w: u64 = 0,
++    pre_b: u64 = 0,
++    proj_in: u64 = 0,
++    proj_out: u64 = 0,
++    inv_freq: u64 = 0,
++    plans: std.ArrayList(Plan) = .empty, // one encode's: its shapes follow the image's size
++
++    /// The tower's tensors from `path` (the checkpoint's dense/vision.safetensors), q, k and v as one projection.
++    pub fn load(gpa: std.mem.Allocator, io: std.Io, d: *const cuda.Driver, lt: *const cuda.cublaslt.Library, ws: u64, ws_len: usize, f: Funcs, path: []const u8, max_tokens: usize) !Tower {
++        var file = try core.safetensors.File.open(gpa, io, path);
++        defer file.closeCopied(io);
++        const L = struct { name: []const u8, shape: []const usize };
++        const one: []const L = &.{
++            .{ .name = "backbone.embeddings.patch_embedding.weight", .shape = &.{ width, patch_in } },
++            .{ .name = "backbone.embeddings.position_embedding", .shape = &.{ grid * grid, width } },
++            .{ .name = "backbone.embeddings.class_embedding", .shape = &.{width} },
++            .{ .name = "backbone.embeddings.cls_position_embedding", .shape = &.{width} },
++            .{ .name = "backbone.ln_pre.weight", .shape = &.{width} },
++            .{ .name = "backbone.ln_pre.bias", .shape = &.{width} },
++            .{ .name = "proj_in.weight", .shape = &.{ proj, 4 * width } },
++            .{ .name = "proj_out.weight", .shape = &.{ cfg.hidden, proj } },
++        };
++        const each: []const L = &.{
++            .{ .name = "ln_1.weight", .shape = &.{width} },          .{ .name = "ln_1.bias", .shape = &.{width} },
++            .{ .name = "self_attn.q_proj.weight", .shape = &.{ width, width } }, .{ .name = "self_attn.k_proj.weight", .shape = &.{ width, width } },
++            .{ .name = "self_attn.v_proj.weight", .shape = &.{ width, width } }, .{ .name = "self_attn.q_proj.bias", .shape = &.{width} },
++            .{ .name = "self_attn.k_proj.bias", .shape = &.{width} }, .{ .name = "self_attn.v_proj.bias", .shape = &.{width} },
++            .{ .name = "self_attn.out_proj.weight", .shape = &.{ width, width } }, .{ .name = "self_attn.out_proj.bias", .shape = &.{width} },
++            .{ .name = "ls_1.gamma", .shape = &.{width} },            .{ .name = "ln_2.weight", .shape = &.{width} },
++            .{ .name = "ln_2.bias", .shape = &.{width} },             .{ .name = "mlp.c_fc.weight", .shape = &.{ mlp, width } },
++            .{ .name = "mlp.c_fc.bias", .shape = &.{mlp} },           .{ .name = "mlp.c_proj.weight", .shape = &.{ width, mlp } },
++            .{ .name = "mlp.c_proj.bias", .shape = &.{width} },       .{ .name = "ls_2.gamma", .shape = &.{width} },
++        };
++        var nb: [96]u8 = undefined;
++        var total: usize = 16 * 4 + 256;
++        for (one) |e| total += std.mem.alignForward(usize, (try tensor(&file, e.name, e.shape)).len, 256);
++        for (0..depth) |i| for (each) |e| {
++            total += std.mem.alignForward(usize, (try tensor(&file, try layerName(&nb, i, e.name), e.shape)).len, 256);
++        };
++        var at_ = try cuda.vit.Attention.load(d);
++        errdefer at_.unload();
++        var t: Tower = .{ .gpa = gpa, .d = d, .lt = lt, .ws = ws, .ws_len = ws_len, .f = f, .at = at_, .mem = try cuda.DeviceBuffer.alloc(d, total), .scratch = undefined, .max_tokens = max_tokens };
++        errdefer t.mem.free();
++        t.scratch = try cuda.DeviceBuffer.alloc(d, scratchBytes(max_tokens));
++        errdefer t.scratch.free();
++        var at: u64 = t.mem.ptr;
++        const put = struct {
++            fn copy(dv: *const cuda.Driver, p: *u64, data: []const u8) !u64 {
++                const r = p.*;
++                try cuda.copy_source.synchronousCopy(dv, r, data, std.heap.page_allocator);
++                p.* += std.mem.alignForward(u64, data.len, 256);
++                return r;
++            }
++        }.copy;
++        const ptrs = [_]*u64{ &t.patch_w, &t.pos_grid, &t.cls, &t.cls_pos, &t.pre_w, &t.pre_b, &t.proj_in, &t.proj_out };
++        for (one, ptrs) |e, p| p.* = try put(d, &at, try tensor(&file, e.name, e.shape));
++        for (&t.layers, 0..) |*l, i| {
++            var v: [each.len]u64 = undefined;
++            for (each, 0..) |e, j| v[j] = try put(d, &at, try tensor(&file, try layerName(&nb, i, e.name), e.shape));
++            // q, k and v back to back (each a multiple of 256 bytes): one [3 width, width] projection, one [3 width] bias
++            if (v[3] != v[2] + width * width * 2 or v[4] != v[3] + width * width * 2 or v[6] != v[5] + width * 2 or v[7] != v[6] + width * 2) return error.InklingTensorShape;
++            l.* = .{ .ln1_w = v[0], .ln1_b = v[1], .qkv_w = v[2], .qkv_b = v[5], .out_w = v[8], .out_b = v[9], .ls1 = v[10], .ln2_w = v[11], .ln2_b = v[12], .fc_w = v[13], .fc_b = v[14], .proj_w = v[15], .proj_b = v[16], .ls2 = v[17] };
++        }
++        // the rotary's frequencies: 10000^(-4i / 64), i = 0 .. 15 (a quarter of a head: each axis turns half its pairs)
++        var inv: [16]f32 = undefined;
++        for (&inv, 0..) |*x, i| x.* = @floatCast(std.math.pow(f64, 10000.0, -@as(f64, @floatFromInt(4 * i)) / head_dim));
++        t.inv_freq = try put(d, &at, std.mem.sliceAsBytes(&inv));
++        return t;
++    }
++
++    fn tensor(file: *const core.safetensors.File, name: []const u8, shape: []const usize) ![]const u8 {
++        var full: [128]u8 = undefined;
++        return (try wt.get(file, try std.fmt.bufPrint(&full, prefix ++ "{s}", .{name}), .bf16, shape)).bytes;
++    }
++
++    fn layerName(nb: *[96]u8, i: usize, name: []const u8) ![]const u8 {
++        return std.fmt.bufPrint(nb, "backbone.layers.{d}.{s}", .{ i, name });
++    }
++
++    pub fn deinit(t: *Tower) void {
++        t.dropPlans();
++        t.plans.deinit(t.gpa);
++        t.scratch.free();
++        t.mem.free();
++        t.at.unload();
++    }
++
++    fn dropPlans(t: *Tower) void {
++        for (t.plans.items) |*p| p.plan.deinit();
++        t.plans.clearRetainingCapacity();
++    }
++
++    /// The tower's device bytes: weights and buffers.
++    pub fn bytes(t: *const Tower) usize {
++        return t.mem.len + t.scratch.len;
++    }
++
++    /// D[m, n] = X[m, k] . W[n, k]^T, fp32 or bf16 out.
++    fn linear(t: *Tower, s: cuda.Stream, x: u64, w: u64, out: u64, m: usize, n: usize, k: usize, kind: cuda.cublaslt.DataType) !void {
++        for (t.plans.items) |*p| if (p.m == m and p.n == n and p.k == k and p.out == kind) return p.plan.run(x, w, out, t.ws, t.ws_len, s.handle);
++        var p = try cuda.cublaslt.Linear.init(t.lt, m, n, k, kind, t.ws_len);
++        errdefer p.deinit();
++        try t.plans.append(t.gpa, .{ .m = m, .n = n, .k = k, .out = kind, .plan = p });
++        try p.run(x, w, out, t.ws, t.ws_len, s.handle);
++    }
++
++    fn go(f: cuda.Function, s: cuda.Stream, blocks: usize, threads: u32, args: anytype) !void {
++        var a: cuda.Args = .{};
++        inline for (args) |v| a.add(v);
++        try cuda.launch.launch(f, .{ .grid = .{ .x = @intCast(blocks) }, .block = .{ .x = threads } }, s, &a);
++    }
++
++    fn grid1(n: usize) usize {
++        return @min((n + 255) / 256, 65535);
++    }
++
++    /// An image's patches (`pixels`: [gh gw, patch_in], the tower's input values, raster order) to its rows at `out`
++    /// ([gh gw / 4, hidden] bf16, raster order of tiles), on `s`; waits for the device before it returns.
++    pub fn encode(t: *Tower, s: cuda.Stream, pixels: []const f32, gh: usize, gw: usize, out: u64) !void {
++        defer t.dropPlans();
++        if (gh < 2 or gw < 2 or gh % 2 != 0 or gw % 2 != 0) return error.InklingImageGrid;
++        const tokens = gh * gw / 4;
++        if (tokens > t.max_tokens or pixels.len != gh * gw * patch_in) return error.InklingImageGrid;
++        const n = gh * gw + 1; // the class row, then each patch
++        const f = t.f;
++        var at: u64 = t.scratch.ptr;
++        const take = struct {
++            fn next(p: *u64, len: usize) u64 {
++                const r = p.*;
++                p.* += std.mem.alignForward(u64, len, 256);
++                return r;
++            }
++        }.next;
++        const nmax = 4 * t.max_tokens + 1;
++        const x = take(&at, nmax * width * 2);
++        const xn = take(&at, nmax * width * 2); // a layer's normed rows, then its attention's output
++        const qkv = take(&at, 3 * nmax * width * 2); // [n, 3 width]; at the end the merged tiles, then proj_in's GELU
++        const merged = qkv;
++        const hidden_in = qkv + nmax * width * 2;
++        const acc = take(&at, chunk * cfg.hidden * 4);
++        const hid = take(&at, chunk * mlp * 2);
++        const pin = take(&at, chunk * patch_in * 2);
++        const pos = take(&at, nmax * 8);
++        if (at > t.scratch.ptr + t.scratch.len) return error.InklingImageGrid;
++        { // each row's (row, column) for the rotary: the class row (0, 0), patch (y, x) at (y + 1, x + 1)
++            const host = try t.gpa.alloc(i32, 2 * n);
++            defer t.gpa.free(host);
++            host[0] = 0;
++            host[1] = 0;
++            for (0..gh * gw) |i| {
++                host[2 + 2 * i] = @intCast(i / gw + 1);
++                host[3 + 2 * i] = @intCast(i % gw + 1);
++            }
++            try cuda.copy_source.enqueue(t.d, pos, std.mem.sliceAsBytes(host), s);
++        }
++        try go(f.cls, s, 1, 256, .{ t.cls, t.cls_pos, x, @as(i32, width) });
++        { // the patch embedding (no bias) plus the position grid at each patch, a chunk of rows at a time
++            const half = try t.gpa.alloc(u16, chunk * patch_in);
++            defer t.gpa.free(half);
++            var r: usize = 0;
++            while (r < n - 1) : (r += chunk) {
++                const rows: usize = @min(chunk, n - 1 - r);
++                for (pixels[r * patch_in ..][0 .. rows * patch_in], half[0 .. rows * patch_in]) |v, *h| h.* = bf16(v);
++                try cuda.copy_source.enqueue(t.d, pin, std.mem.sliceAsBytes(half[0 .. rows * patch_in]), s);
++                try t.linear(s, pin, t.patch_w, acc, rows, width, patch_in, .f32);
++                try go(f.embed, s, rows, 256, .{ acc, t.pos_grid, x, @as(i32, @intCast(r)), @as(i32, @intCast(gh)), @as(i32, @intCast(gw)), @as(i32, width), @as(i32, grid) });
++            }
++        }
++        try go(f.ln, s, n, 256, .{ x, t.pre_w, t.pre_b, x, @as(i32, width), eps });
++        const scale: f32 = 1.0 / @sqrt(@as(f32, head_dim));
++        for (t.layers) |l| {
++            try go(f.ln, s, n, 256, .{ x, l.ln1_w, l.ln1_b, xn, @as(i32, width), eps });
++            var r: usize = 0;
++            while (r < n) : (r += chunk) {
++                const rows: usize = @min(chunk, n - r);
++                try t.linear(s, xn + r * width * 2, l.qkv_w, acc, rows, 3 * width, width, .f32);
++                try go(f.qkv, s, (rows * heads + 7) / 8, 256, .{ acc, l.qkv_b, pos, t.inv_freq, qkv, @as(i32, @intCast(r)), @as(i32, @intCast(rows)), @as(i32, heads) });
++            }
++            try t.at.full(s, qkv, xn, n, heads, head_dim, scale); // every row over every row of the image, into xn
++            r = 0;
++            while (r < n) : (r += chunk) {
++                const rows: usize = @min(chunk, n - r);
++                try t.linear(s, xn + r * width * 2, l.out_w, acc, rows, width, width, .f32);
++                try go(f.residual, s, grid1(rows * width), 256, .{ acc, l.out_b, l.ls1, x + r * width * 2, @as(i64, @intCast(rows * width)), @as(i32, width) });
++            }
++            try go(f.ln, s, n, 256, .{ x, l.ln2_w, l.ln2_b, xn, @as(i32, width), eps });
++            r = 0;
++            while (r < n) : (r += chunk) {
++                const rows: usize = @min(chunk, n - r);
++                try t.linear(s, xn + r * width * 2, l.fc_w, acc, rows, mlp, width, .f32);
++                try go(f.bias, s, grid1(rows * mlp), 256, .{ acc, l.fc_b, hid, @as(i64, @intCast(rows * mlp)), @as(i32, mlp), @as(i32, 1) });
++                try t.linear(s, hid, l.proj_w, acc, rows, width, mlp, .f32);
++                try go(f.residual, s, grid1(rows * width), 256, .{ acc, l.proj_b, l.ls2, x + r * width * 2, @as(i64, @intCast(rows * width)), @as(i32, width) });
++            }
++        }
++        // each tile's four patches side by side, the projection in and its GELU, the projection out
++        try go(f.merge, s, tokens, 256, .{ x, merged, @as(i32, @intCast(gw / 2)), @as(i32, width) });
++        var r: usize = 0;
++        while (r < tokens) : (r += chunk) {
++            const rows: usize = @min(chunk, tokens - r);
++            try t.linear(s, merged + r * 4 * width * 2, t.proj_in, acc, rows, proj, 4 * width, .f32);
++            try go(f.bias, s, grid1(rows * proj), 256, .{ acc, @as(u64, 0), hidden_in + r * proj * 2, @as(i64, @intCast(rows * proj)), @as(i32, proj), @as(i32, 1) });
++            try t.linear(s, hidden_in + r * proj * 2, t.proj_out, out + r * cfg.hidden * 2, rows, cfg.hidden, proj, .bf16);
++        }
++        try s.synchronize(); // the encode's plans go on return
++    }
++};
++
++/// `v` (a bf16 value held in fp32) as bf16 bits, rounded to nearest even.
++pub fn bf16(v: f32) u16 {
++    const b: u32 = @bitCast(v);
++    if (std.math.isNan(v)) return @truncate((b >> 16) | 0x40);
++    return @truncate((b + 0x7fff + ((b >> 16) & 1)) >> 16);
++}
++
++test "the tower's buffers grow with its largest image" {
++    try std.testing.expect(scratchBytes(4096) < 200 << 20);
++    try std.testing.expect(scratchBytes(1) < 40 << 20);
++    try std.testing.expectEqual(@as(u16, 0x3f80), bf16(1.0));
++    try std.testing.expectEqual(@as(u16, 0xbf81), bf16(-1.0078125));
++}
+-- 
+2.56.1
+
+
+From 3f37f046a3bc0bc254baad072fc3e4492afa7aaf Mon Sep 17 00:00:00 2001
+From: LPFchan <me@lost.plus>
+Date: Thu, 19 Nov 2026 09:54:36 +0900
+Subject: [PATCH 44/44] inkling2: images in requests under --vision: the server
+ cuts each image into the tower's patches (SGLang's processor: orientation,
+ alpha over the checkerboard, bicubic only past the budget), rank 0's tower
+ encodes a request's images before the prompt pass that reaches them and
+ broadcasts the rows (link record images), both ranks write them over the
+ placeholders after the embeddings' norm; kept turns match by the server's
+ cache key, so a conversation resumes past its images and a same-size image
+ never resumes another's. TF_INKLING_VISION names the tower's file (rank 0),
+ TF_INKLING_VISION_DUMP writes each image's rows for checks; 0.83 GiB on rank
+ 0
+
+---
+ docs/vision.md                         |  25 +-
+ zig/src/families/inkling2/backend.zig  |  39 ++-
+ zig/src/families/inkling2/forward.zig  |   7 +-
+ zig/src/families/inkling2/images.zig   | 327 +++++++++++++++++++++++++
+ zig/src/families/inkling2/inkling2.zig |   2 +
+ zig/src/families/inkling2/link.zig     |  15 +-
+ zig/src/families/inkling2/native.zig   |  28 ++-
+ zig/src/platform/environment.zig       |   2 +
+ zig/src/platform/environment_test.zig  |   2 +
+ 9 files changed, 437 insertions(+), 10 deletions(-)
+ create mode 100644 zig/src/families/inkling2/images.zig
+
+diff --git a/docs/vision.md b/docs/vision.md
+index ec74cf1b..d237ade5 100644
+--- a/docs/vision.md
++++ b/docs/vision.md
+@@ -148,7 +148,8 @@ For Qwen, each image request carries its own multimodal rotary positions and con
+ `tensorfold-native serve` takes `--vision`, `--vision-max-images` (default 4) and `--vision-image-tokens` (default
+ 4,096; 13,312 for Nemotron 3.5 Super VL) for engines that read images: GLM-5.3-Flash, Qwen3.8-27B, Qwen3.8 Flash Next, Gemma 4
+ [31B](recipes/gemma-4-native.md#images) and [12B](recipes/gemma-4-12b-native.md#images) and Step-5-Preview on one
+-Mac, GLM-5.3-Flash on [CUDA ranks](recipes/glm-5.3-flash-cuda.md#requests) and Nemotron 3.5 Super VL on CUDA. Other
++Mac, GLM-5.3-Flash on [CUDA ranks](recipes/glm-5.3-flash-cuda.md#requests), Nemotron 3.5 Super VL and Inkling 2 Small on
++CUDA. Other
+ native engines refuse the flag at startup.
+ The CLI accepts explicit image budgets from 16 to 262,144 tokens; each engine still applies its own limits and memory admission.
+ 
+@@ -369,6 +370,28 @@ TensorFold's CUDA kernels (`zig/src/families/radio/`).
+   3,000 patch grids with the checkpoint's processor; `tf-cuda-test radio` compares the tower's and projector's rows
+   with a float32 reference.
+ 
++### Inkling 2 Small on CUDA
++
++With `--vision`, Inkling 2 Small reads images through the checkpoint's own tower (`dense/vision.safetensors`, named by
++`TF_INKLING_VISION` on rank 0), run in TensorFold's CUDA kernels (`zig/src/families/inkling2/vision.zig`,
++`inkling2_vision.cu`) as SGLang's `inkling2_vision.py` runs it.
++
++- **Processor:** SGLang's. EXIF orientation, transparency over the 8-pixel checkerboard (204 and 153), the image kept at
++  its own size while its 40-pixel tiles fit the budget, else Pillow's bicubic to the largest same-shape size that fits;
++  padded to whole tiles with -1, CLIP-normalized, and the tower's own step back to [-1, 1]. One token a 40 x 40 tile
++  (2 x 2 patches of 20 pixels), written as `<|content_image|><|unused_200054|><|end_message|>` by the chat template.
++- **Budget:** a request's images share `--vision-image-tokens` (4,096 by default; up to 4 images).
++- **Tower:** the checkpoint's bf16 weights, bf16 activations and fp32 sums: 23 layers of 16 heads of 64 with 2D
++  rotary positions, the class row, the 2 x 2 merge and the two projections. Its attention is `vision_kernel<64>`
++  (vit.Attention). Against a float32 run on the same pixels its rows' error equals torch's own bf16 run's (3.3% on a
++  4,070-token picture, 4.7% on a 300-token one). The image's rows replace its placeholders after the text embeddings'
++  norm. The tower takes 0.83 GiB on rank 0 (0.04 GiB on rank 1, for the rows it receives), and a 4,070-token image
++  about 2.5 s on a GB10. Rank 0 runs the tower before the prompt pass that reaches the image and broadcasts the rows.
++- **Prompt cache:** kept turns match an image by its content, so a conversation resumes past its images and another
++  image of the same size never resumes them.
++- **Checks:** `TF_INKLING_VISION_DUMP=DIR` makes rank 0 write each image's rows to `DIR/image-N.bin`, for comparison
++  with a reference.
++
+ ## Verification
+ 
+ Compare image requests with `draft: true` and `draft: false` at identical sampling settings and seed, then compare concurrent requests with their solo results.
+diff --git a/zig/src/families/inkling2/backend.zig b/zig/src/families/inkling2/backend.zig
+index 830fd2e0..c0329a32 100644
+--- a/zig/src/families/inkling2/backend.zig
++++ b/zig/src/families/inkling2/backend.zig
+@@ -118,7 +118,7 @@ pub const Backend = struct {
+     }
+ 
+     fn begin(b: *Backend, s: *lanes.Stream) !usize {
+-        if (s.images.len > 0) return error.InklingTextOnly;
++        if (s.images.len > 0) try b.admitImages(s);
+         if (s.sampling) |sp| if (sp.temperature > 0) return error.InklingGreedyOnly;
+         if (s.prompt().len == 0 or s.prompt().len + s.max_new > b.f.s.context) return error.InklingContext;
+         if (s.keys and b.f.edit == null) return error.InklingNoEdit;
+@@ -126,12 +126,13 @@ pub const Backend = struct {
+             if (l.stream == null) break i;
+         } else return error.InklingBusy;
+         const prompt = s.prompt();
++        const key = try keyOf(s);
+         const need = prompt.len + s.max_new + margin;
+         if (need > b.map.tokens) return error.InklingContext;
+         // one stream keeps today's single ring: its region is the whole pool, so a new prompt evicts the last one's
+         const capacity = if (b.streams == 1) b.map.tokens else std.mem.alignForward(usize, need, pool.unit);
+         const kept = b.entries();
+-        const entry = turns.find(kept, prompt, s.keys);
++        const entry = turns.find(kept, key, s.keys);
+         const at = if (entry) |i| kept[i].at else 0;
+         var moves: pool.Moves = .{};
+         const placed = try b.map.place(@intCast(lane), capacity, if (entry) |i| .{ .id = kept[i].region, .at = at } else null, &moves);
+@@ -152,6 +153,36 @@ pub const Backend = struct {
+         return lane;
+     }
+ 
++    /// The prompt as kept turns match it: an image's rows by the image (the server's cache key), else the prompt.
++    fn keyOf(s: *const lanes.Stream) ![]const u32 {
++        if (s.key.len == 0) return s.prompt();
++        if (s.key.len != s.prompt().len) return error.InklingImageGrid;
++        return s.key;
++    }
++
++    /// A request's images fit the rows the server sized them for, each inside its prompt.
++    fn admitImages(b: *Backend, s: *const lanes.Stream) !void {
++        const im = b.f.images orelse return error.InklingTextOnly;
++        var held: usize = 0;
++        var end: usize = 0;
++        for (s.images) |img| {
++            if (img.tokens == 0 or img.at < end or @as(usize, img.at) + img.tokens > s.prompt().len or img.gh * img.gw != img.tokens * 4) return error.InklingImageGrid;
++            end = @as(usize, img.at) + img.tokens;
++            held += img.tokens;
++        }
++        if (held > im.limits.image_tokens or s.images.len > im.limits.max_images) return error.InklingImageRows;
++    }
++
++    /// Rank 0: slot `lane`'s images a pass from `from` still embeds through the tower, and their rows to the peer.
++    fn encodeImages(b: *Backend, lane: usize, s: *const lanes.Stream, from: usize) !void {
++        const im = b.f.images.?;
++        try im.encode(b.f.stream, lane, s.images, from);
++        const p = b.peer orelse return;
++        var buf: [3 * @import("images.zig").max_images]u32 = undefined;
++        try b.tell(lane, .images, im.words(&buf), false);
++        try p.carry(im.rows.ptr, im.heldBytes());
++    }
++
+     fn run(b: *Backend, lane: usize, ids: []const u32, final: bool) !void {
+         try b.tell(lane, .rows, ids, final);
+         try b.f.bind(lane);
+@@ -171,10 +202,12 @@ pub const Backend = struct {
+             end = m;
+         };
+         const done = end == prompt.len;
++        if (b.f.images) |im| if (im.needs(lane, s.images, l.filling)) try b.encodeImages(lane, s, l.filling);
+         try b.run(lane, prompt[l.filling..end], done);
+         l.filling = end;
+         s.fill_at.store(@intCast(end), .monotonic);
+-        for (l.marks, 0..) |m, role| if (m == end) try b.save(lane, turns.entryFor(b.entries(), b.streams, role), s.keys, prompt[0..end]);
++        const key = try keyOf(s);
++        for (l.marks, 0..) |m, role| if (m == end) try b.save(lane, turns.entryFor(b.entries(), b.streams, role), s.keys, key[0..end]);
+         return done;
+     }
+ 
+diff --git a/zig/src/families/inkling2/forward.zig b/zig/src/families/inkling2/forward.zig
+index 57b68c1b..54f8a8ad 100644
+--- a/zig/src/families/inkling2/forward.zig
++++ b/zig/src/families/inkling2/forward.zig
+@@ -38,6 +38,7 @@ pub const Forward = struct {
+     blas_version: usize = 0,
+     drafter: ?*@import("draft.zig").Draft = null,
+     edit: ?*const @import("edit.zig").Edit = null, // TF_INKLING_EDIT
++    images: ?*@import("images.zig").Images = null, // --vision: image rows over their placeholders (images.zig)
+     editing: bool = false, // this request takes the edit: its own set of captured graphs
+     verifying: bool = false,
+     verify_start: usize = 0,
+@@ -124,6 +125,7 @@ pub const Forward = struct {
+     /// Slot `lane`'s request left: nothing more is absorbed for it.
+     pub fn free(f: *Forward, lane: usize) void {
+         if (lane < f.live.len) f.live[lane] = false;
++        if (f.images) |im| im.drop(lane);
+     }
+ 
+     /// A pool move (pool.zig) on this rank: its rows into the other region's layout in every pooled cache, then its
+@@ -600,7 +602,8 @@ pub const Forward = struct {
+         for (ids) |id| if (id >= cfg.vocabulary) return error.InklingToken;
+         if (f.drafter) |d| d.pass(rows); // on the host: a replayed graph's taps take its rows too
+         // a one-token step, or a verify window, replays its captured graph (a plain step with a drafter ingests on the host)
+-        if (f.graphs_on and final and rows < f.graphs[0][0].len and (f.verifying or f.drafter == null) and !f.verify_check) return f.replay(ids);
++        const images = if (f.images) |im| im.covers(f.lane, s.pos, rows) else false; // a captured pass splices none
++        if (f.graphs_on and final and rows < f.graphs[0][0].len and (f.verifying or f.drafter == null) and !f.verify_check and !images) return f.replay(ids);
+         return f.body(ids, final);
+     }
+ 
+@@ -639,6 +642,7 @@ pub const Forward = struct {
+         const s = f.s;
+         try f.embedding(ids, s.raw_embed);
+         try f.k.go(.norm, f.stream, .{ .x = @intCast(rows) }, 256, .{ s.raw_embed, f.w.embed_norm, s.partial, @as(i32, cfg.hidden) });
++        if (f.images) |im| try im.splice(f.stream, f.lane, s.pos, rows, s.partial);
+         f.history_offset = 0;
+         if (f.chunked(rows)) try f.layersChunked(rows) else for (f.w.layer, 0..) |l, i| {
+             try f.tap(i, .{ .first = 0, .count = rows });
+@@ -1013,6 +1017,7 @@ pub const Forward = struct {
+     /// its global rows already in its region; then its edit.
+     pub fn begin(f: *Forward, keys: bool, slot: usize, at: usize) !void {
+         f.live[f.lane] = true;
++        if (f.images) |im| im.drop(f.lane); // the last request's image rows are not this one's
+         if (slot == 0) {
+             try f.s.clear();
+             if (f.drafter) |d| d.pos = 0;
+diff --git a/zig/src/families/inkling2/images.zig b/zig/src/families/inkling2/images.zig
+new file mode 100644
+index 00000000..efc08157
+--- /dev/null
++++ b/zig/src/families/inkling2/images.zig
+@@ -0,0 +1,327 @@
++//! A request's images on both ranks (--vision): the server's HTTP thread cuts each into the tower's patches
++//! (`prepare`), rank 0's tower encodes them before the prompt pass that reaches them, the peer receives the rows, and
++//! both ranks write them over the image's placeholder rows once the prompt's embeddings are normed (Forward.body):
++//! SGLang feeds the tower's rows to the first layer as they are, without the text embeddings' norm.
++const std = @import("std");
++const cuda = @import("cuda");
++const core = @import("core");
++const lanes = @import("lanes");
++const cfg = @import("config.zig");
++const vision = @import("vision.zig");
++const picture = core.picture;
++
++/// What a request may hold: image tokens in all (the rows buffer, and the tower's largest image), and images.
++pub const Limits = struct { image_tokens: u32, max_images: u32 };
++
++/// The most images a request may hold (--vision-max-images): their spans ride in one record to the peer.
++pub const max_images = 64;
++
++/// Prompt rows [at, at + n) take image rows [row, row + n).
++pub const Span = struct { at: u32, n: u32, row: u32 };
++
++/// One image as the tower takes it: its patches ([gh gw, vision.patch_in], raster order), patch grid, tokens, identity.
++pub const Prepared = struct { pixels: []f32, gh: u32, gw: u32, tokens: u32, hash: u64 };
++
++/// The template's tokens around an image: `<|content_image|><|unused_200054|><|end_message|>`.
++pub const content_image: u32 = 200005;
++pub const image_token: u32 = 200054;
++pub const end_message: u32 = 200010;
++
++pub const Images = struct {
++    gpa: std.mem.Allocator,
++    io: std.Io,
++    d: *const cuda.Driver,
++    module: cuda.Module,
++    f: vision.Funcs,
++    tower: ?vision.Tower = null, // rank 0's; the peer receives the rows
++    rows: cuda.DeviceBuffer, // bf16 [limits.image_tokens, hidden]
++    map: cuda.DeviceBuffer, // i32 [prompt rows]: a pass's image row a prompt row (-1: its own)
++    host_map: []i32,
++    limits: Limits,
++    spans: std.ArrayList(Span) = .empty,
++    owner: ?usize = null, // the slot whose images the rows hold
++    dump: ?[]const u8 = null, // TF_INKLING_VISION_DUMP: rank 0 writes each image's rows there (checks)
++    dumped: usize = 0,
++    marks: struct { image: u32, open: u32, close: u32 } = .{ .image = image_token, .open = content_image, .close = end_message },
++    mark_ids: [3]u32 = .{ content_image, image_token, end_message },
++
++    /// The chat template writes each image's begin and end itself: the server expands the image token alone.
++    pub const template_wraps = true;
++
++    /// The rows and the map on every rank, and with `tower` (rank 0: TF_INKLING_VISION's file) the tower.
++    pub fn init(gpa: std.mem.Allocator, io: std.Io, d: *const cuda.Driver, limits: Limits, prompt_rows: usize, tower: ?[]const u8, lt: *const cuda.cublaslt.Library, ws: u64, ws_len: usize) !*Images {
++        if (limits.image_tokens == 0 or limits.max_images == 0 or limits.max_images > max_images) return error.InklingImageRows;
++        const v = try gpa.create(Images);
++        errdefer gpa.destroy(v);
++        var module = try cuda.Module.load(d, cuda.kernels.inkling2_vision);
++        errdefer module.unload();
++        v.* = .{ .gpa = gpa, .io = io, .d = d, .module = module, .f = try vision.Funcs.load(module), .rows = undefined, .map = undefined, .host_map = undefined, .limits = limits };
++        v.rows = try cuda.DeviceBuffer.alloc(d, @as(usize, limits.image_tokens) * cfg.hidden * 2);
++        errdefer v.rows.free();
++        v.map = try cuda.DeviceBuffer.alloc(d, prompt_rows * 4);
++        errdefer v.map.free();
++        v.host_map = try gpa.alloc(i32, prompt_rows);
++        errdefer gpa.free(v.host_map);
++        try v.spans.ensureTotalCapacity(gpa, limits.max_images);
++        errdefer v.spans.deinit(gpa);
++        const sys = @import("sys");
++        v.dump = sys.environment.path("TF_INKLING_VISION_DUMP", sys.getenv("TF_INKLING_VISION_DUMP")) catch return error.InvalidEnvironment;
++        if (tower) |path| v.tower = try vision.Tower.load(gpa, io, d, lt, ws, ws_len, v.f, path, limits.image_tokens);
++        return v;
++    }
++
++    pub fn deinit(v: *Images) void {
++        if (v.tower) |*t| t.deinit();
++        v.spans.deinit(v.gpa);
++        v.gpa.free(v.host_map);
++        v.map.free();
++        v.rows.free();
++        v.module.unload();
++        v.gpa.destroy(v);
++    }
++
++    /// Device bytes: the tower and the buffers.
++    pub fn bytes(v: *const Images) usize {
++        return (if (v.tower) |*t| t.bytes() else 0) + v.rows.len + v.map.len;
++    }
++
++    /// Info.vision's prepare, on the server's thread: the image's bytes at most `max_tokens` tiles of 40 pixels.
++    pub fn prepare(v: *Images, a: std.mem.Allocator, data: []const u8, max_tokens: u32) !Prepared {
++        return prepareBytes(v.io, a, data, max_tokens);
++    }
++
++    /// The words for the decoder's refusals the server cannot word.
++    pub fn explain(err: anyerror) ?[]const u8 {
++        return picture.decoderProblem(err);
++    }
++
++    /// The images of `imgs` ending past `from` that a pass from there still embeds.
++    pub fn after(imgs: []const lanes.stream.Image, from: usize) []const lanes.stream.Image {
++        for (imgs, 0..) |img, k| if (@as(usize, img.at) + img.tokens > from) return imgs[k..];
++        return imgs[imgs.len..];
++    }
++
++    /// Whether slot `lane`'s next pass from `from` needs its images through the tower first.
++    pub fn needs(v: *const Images, lane: usize, imgs: []const lanes.stream.Image, from: usize) bool {
++        return after(imgs, from).len > 0 and v.owner != lane;
++    }
++
++    /// Rank 0: `imgs` (in prompt order) ending past `from` through the tower into the rows, for slot `lane`.
++    pub fn encode(v: *Images, s: cuda.Stream, lane: usize, imgs: []const lanes.stream.Image, from: usize) !void {
++        v.owner = null;
++        v.spans.clearRetainingCapacity();
++        const t = &(v.tower orelse return error.InklingTextOnly);
++        var row: u32 = 0;
++        for (after(imgs, from)) |img| {
++            if (img.gh * img.gw != img.tokens * 4) return error.InklingImageGrid;
++            if (img.tokens > v.limits.image_tokens - row or v.spans.items.len == v.limits.max_images) return error.InklingImageRows;
++            try t.encode(s, img.pixels, img.gh, img.gw, v.rows.ptr + @as(u64, row) * cfg.hidden * 2);
++            v.spans.appendAssumeCapacity(.{ .at = img.at, .n = img.tokens, .row = row });
++            if (v.dump) |dir| try v.write(dir, row, img.tokens);
++            row += img.tokens;
++        }
++        v.owner = lane;
++    }
++
++    fn write(v: *Images, dir: []const u8, row: u32, n: u32) !void {
++        const host = try v.gpa.alloc(u8, @as(usize, n) * cfg.hidden * 2);
++        defer v.gpa.free(host);
++        try v.rows.download(@as(usize, row) * cfg.hidden * 2, host);
++        var name: [512]u8 = undefined;
++        const path = try std.fmt.bufPrint(&name, "{s}/image-{d}.bin", .{ dir, v.dumped });
++        try std.Io.Dir.cwd().writeFile(v.io, .{ .sub_path = path, .data = host });
++        std.log.info("inkling vision: image {d}'s {d} rows written to {s}", .{ v.dumped, n, path });
++        v.dumped += 1;
++    }
++
++    /// The spans as the peer's record carries them: at, n, row each.
++    pub fn words(v: *const Images, out: []u32) []u32 {
++        for (v.spans.items, 0..) |sp, i| out[3 * i ..][0..3].* = .{ sp.at, sp.n, sp.row };
++        return out[0 .. 3 * v.spans.items.len];
++    }
++
++    /// The peer: rank 0's spans (`words`) for slot `lane`; their rows arrive into `rows` next.
++    pub fn take(v: *Images, lane: usize, w: []const u32) !void {
++        v.owner = null;
++        v.spans.clearRetainingCapacity();
++        if (w.len % 3 != 0 or w.len / 3 > v.limits.max_images) return error.InklingCommand;
++        var i: usize = 0;
++        while (i < w.len) : (i += 3) {
++            const sp: Span = .{ .at = w[i], .n = w[i + 1], .row = w[i + 2] };
++            if (sp.row > v.limits.image_tokens or sp.n > v.limits.image_tokens - sp.row) return error.InklingCommand;
++            v.spans.appendAssumeCapacity(sp);
++        }
++        v.owner = lane;
++    }
++
++    /// The bytes of the rows the spans hold (what crosses to the peer).
++    pub fn heldBytes(v: *const Images) usize {
++        var n: usize = 0;
++        for (v.spans.items) |sp| n = @max(n, sp.row + sp.n);
++        return n * cfg.hidden * 2;
++    }
++
++    /// Slot `lane`'s request ended or another began on it: no pass takes these rows again.
++    pub fn drop(v: *Images, lane: usize) void {
++        if (v.owner != lane) return;
++        v.owner = null;
++        v.spans.clearRetainingCapacity();
++    }
++
++    /// Whether slot `lane`'s rows [pos, pos + rows) cross an image.
++    pub fn covers(v: *const Images, lane: usize, pos: usize, rows: usize) bool {
++        if (v.owner != lane) return false;
++        for (v.spans.items) |sp| if (sp.at < pos + rows and pos < @as(usize, sp.at) + sp.n) return true;
++        return false;
++    }
++
++    /// Slot `lane`'s prompt rows [pos, pos + rows), normed at `dst` (bf16 [rows, hidden]), take the image rows they cross.
++    pub fn splice(v: *Images, s: cuda.Stream, lane: usize, pos: usize, rows: usize, dst: u64) !void {
++        if (!v.covers(lane, pos, rows)) return;
++        if (rows > v.host_map.len) return error.InklingContext;
++        const m = v.host_map[0..rows];
++        @memset(m, -1);
++        for (v.spans.items) |sp| {
++            const lo = @max(pos, sp.at);
++            const hi = @min(pos + rows, @as(usize, sp.at) + sp.n);
++            var p = lo;
++            while (p < hi) : (p += 1) m[p - pos] = @intCast(sp.row + (p - sp.at));
++        }
++        try cuda.copy_source.enqueue(v.d, v.map.ptr, std.mem.sliceAsBytes(m), s);
++        var a: cuda.Args = .{};
++        inline for (.{ v.rows.ptr, dst, v.map.ptr, @as(i32, cfg.hidden) }) |x| a.add(x);
++        try cuda.launch.launch(v.f.inject, .{ .grid = .{ .x = @intCast(rows) }, .block = .{ .x = 256 } }, s, &a);
++    }
++};
++
++/// The size of the same shape whose 40-pixel tiles fit `max_tokens`: the image's own when it fits.
++pub fn fit(width: usize, height: usize, max_tokens: u32) error{ImageTooSmall}![2]usize {
++    if (max_tokens == 0) return error.ImageTooSmall;
++    if (tiles(width, height) <= max_tokens) return .{ width, height };
++    const w: f64 = @floatFromInt(width);
++    const h: f64 = @floatFromInt(height);
++    var s = @sqrt(@as(f64, @floatFromInt(max_tokens)) * vision.tile * vision.tile / (w * h));
++    while (true) : (s *= 0.99) {
++        const tw: usize = @max(1, @as(usize, @intFromFloat(@floor(w * s))));
++        const th: usize = @max(1, @as(usize, @intFromFloat(@floor(h * s))));
++        if (tiles(tw, th) <= max_tokens) return .{ tw, th };
++    }
++}
++
++fn tiles(width: usize, height: usize) usize {
++    return ((width + vision.tile - 1) / vision.tile) * ((height + vision.tile - 1) / vision.tile);
++}
++
++// The processor's CLIP normalization (float32), then the tower's own back to [-1, 1] (its bf16 constants).
++const mean = [3]f32{ 0.48145466, 0.4578275, 0.40821073 };
++const sd = [3]f32{ 0.26862954, 0.2613026, 0.2757771 };
++const clip_mean = [3]f32{ 0.48145466, 0.4578275, 0.40821073 };
++const clip_sd = [3]f32{ 0.26862954, 0.26130258, 0.27577711 };
++
++fn round(x: f32) f32 {
++    return @bitCast(@as(u32, vision.bf16(x)) << 16);
++}
++
++/// The tower's input for a channel value (-1: the padding): bf16((v / 255 - mean) / sd), then bf16(2 (x sd + mean) - 1).
++pub fn level(c: usize, v: f32) f32 {
++    const n = round((v / 255.0 - mean[c]) / sd[c]);
++    return round(2.0 * (n * round(clip_sd[c]) + round(clip_mean[c])) - 1.0);
++}
++
++/// Bytes to the tower's patches: decoded, EXIF-oriented, alpha over the 8-pixel checkerboard, shrunk (bicubic) only
++/// when its tiles exceed `max_tokens`, padded to whole tiles with -1 and normalized; one token a 40x40 tile.
++pub fn prepareBytes(io: std.Io, a: std.mem.Allocator, data: []const u8, max_tokens: u32) !Prepared {
++    var img = try decode(io, a, data);
++    defer img.deinit(a);
++    const size = try fit(img.width, img.height, max_tokens);
++    var pixels = img.pixels;
++    var resized: ?[]u8 = null;
++    defer if (resized) |r| a.free(r);
++    if (size[0] != img.width or size[1] != img.height) {
++        resized = try picture.resample.resize(a, .pillow, .of(img.pixels, img.width, img.height), size[0], size[1]);
++        pixels = resized.?;
++    }
++    const w = size[0];
++    const h = size[1];
++    const gh = 2 * ((h + vision.tile - 1) / vision.tile);
++    const gw = 2 * ((w + vision.tile - 1) / vision.tile);
++    var lut: [3][257]f32 = undefined;
++    for (0..3) |c| {
++        for (0..256) |v| lut[c][v] = level(c, @floatFromInt(v));
++        lut[c][256] = level(c, -1);
++    }
++    const out = try a.alloc(f32, gh * gw * vision.patch_in);
++    errdefer a.free(out);
++    const P = vision.patch;
++    for (0..gh) |py0| for (0..gw) |px0| {
++        const dst = out[(py0 * gw + px0) * vision.patch_in ..][0..vision.patch_in];
++        for (0..P) |dy| for (0..P) |dx| {
++            const y = py0 * P + dy;
++            const x = px0 * P + dx;
++            for (0..3) |c| dst[(dy * P + dx) * 3 + c] = if (y < h and x < w) lut[c][pixels[(y * w + x) * 3 + c]] else lut[c][256];
++        };
++    };
++    const grid = [2]u32{ @intCast(gh), @intCast(gw) };
++    return .{ .pixels = out, .gh = grid[0], .gw = grid[1], .tokens = grid[0] * grid[1] / 4, .hash = picture.identity.withGrid(picture.identity.ofBytes(0x1c2b, data), grid) };
++}
++
++/// PNG, JPEG or WebP bytes to oriented RGB; transparency over Inkling's checkerboard (204 and 153, 8-pixel squares).
++fn decode(io: std.Io, a: std.mem.Allocator, data: []const u8) picture.Error!picture.Rgb {
++    const s = switch (picture.sniff(data)) {
++        .png => try picture.png.decodeWithLimits(a, data, .{}),
++        .jpeg => try picture.jpeg.decodeWithLimits(io, a, data, .{}),
++        .webp => try picture.webp.decodeWithLimits(io, a, data, .{}),
++        .unknown => return error.Invalid,
++    };
++    defer a.free(s.data);
++    if (s.channels != 4) return picture.finish(a, s); // opaque: its orientation alone
++    const o = if (s.orientation >= 2 and s.orientation <= 8) s.orientation else 1;
++    const turned = o >= 5;
++    const w, const h = if (turned) .{ s.height, s.width } else .{ s.width, s.height };
++    const out = try a.alloc(u8, w * h * 3);
++    for (0..h) |y| for (0..w) |x| {
++        const sx, const sy = switch (o) {
++            2 => .{ s.width - 1 - x, y },
++            3 => .{ s.width - 1 - x, s.height - 1 - y },
++            4 => .{ x, s.height - 1 - y },
++            5 => .{ y, x },
++            6 => .{ y, s.height - 1 - x },
++            7 => .{ s.width - 1 - y, s.height - 1 - x },
++            8 => .{ s.width - 1 - y, x },
++            else => .{ x, y },
++        };
++        const px = s.data[(sy * s.width + sx) * 4 ..][0..4];
++        const bg: u32 = if ((x / 8 + y / 8) % 2 == 0) 204 else 153;
++        for (out[(y * w + x) * 3 ..][0..3], px[0..3]) |*c, v| c.* = @intCast((@as(u32, v) * px[3] + bg * (255 - @as(u32, px[3])) + 127) / 255);
++    };
++    return .{ .width = w, .height = h, .pixels = out };
++}
++
++test "an image keeps its size while its tiles fit, else shrinks to the largest that fits" {
++    try std.testing.expectEqual([2]usize{ 1920, 1080 }, try fit(1920, 1080, 4096));
++    const s = try fit(4032, 3024, 4096);
++    try std.testing.expect(tiles(s[0], s[1]) <= 4096 and tiles(s[0], s[1]) > 3900);
++    try std.testing.expectEqual([2]usize{ 1, 1 }, try fit(1, 1, 1));
++    try std.testing.expectError(error.ImageTooSmall, fit(10, 10, 0));
++}
++
++test "the tower's input levels: white near 1, black near -1, the padding just under -1" {
++    try std.testing.expect(@abs(level(0, 255) - 1.0) < 0.01);
++    try std.testing.expect(@abs(level(1, 0) + 1.0) < 0.01);
++    try std.testing.expect(level(2, -1) < -1.0);
++}
++
++test "a span's rows land on the prompt rows it covers, in any pass that crosses it" {
++    var map: [8]i32 = undefined;
++    var v: Images = undefined;
++    v.spans = .empty;
++    try v.spans.append(std.testing.allocator, .{ .at = 5, .n = 6, .row = 0 });
++    defer v.spans.deinit(std.testing.allocator);
++    v.owner = 1;
++    v.host_map = &map;
++    try std.testing.expect(v.covers(1, 0, 8) and v.covers(1, 10, 4) and !v.covers(1, 11, 4) and !v.covers(0, 0, 8) and !v.covers(1, 0, 5));
++    v.drop(0);
++    try std.testing.expect(v.owner == 1);
++    v.drop(1);
++    try std.testing.expect(v.owner == null and v.spans.items.len == 0);
++}
+diff --git a/zig/src/families/inkling2/inkling2.zig b/zig/src/families/inkling2/inkling2.zig
+index 6f8317df..b9893753 100644
+--- a/zig/src/families/inkling2/inkling2.zig
++++ b/zig/src/families/inkling2/inkling2.zig
+@@ -17,4 +17,6 @@ test {
+     _ = @import("link.zig");
+     _ = @import("turns.zig");
+     _ = @import("pool.zig");
++    _ = @import("images.zig");
++    _ = @import("vision.zig");
+ }
+diff --git a/zig/src/families/inkling2/link.zig b/zig/src/families/inkling2/link.zig
+index c84a350e..d3c65c36 100644
+--- a/zig/src/families/inkling2/link.zig
++++ b/zig/src/families/inkling2/link.zig
+@@ -7,7 +7,8 @@ const pool = @import("pool.zig");
+ /// place: a pool move (pool.Move: src start and capacity, dst start and capacity, count; the slot in `lane`, or none);
+ /// release: the slot's request left. Every other record runs on the slot it names.
+ /// verify_many: a shared verify pass (Forward.verifyBatch): the stream count n, each stream's slot and rows, the ids.
+-pub const Kind = enum(u32) { begin = 1, rows, end, verify, keep, draft, keep_draft, save, place, release, verify_many };
++/// images: the slot's image spans (images.zig: at, n, row each), their rows broadcast next (`carry`).
++pub const Kind = enum(u32) { begin = 1, rows, end, verify, keep, draft, keep_draft, save, place, release, verify_many, images };
+ /// Up to `inline_ids` ids ride in the header itself, so a verify, keep or draft record is one broadcast.
+ const inline_ids = 12;
+ const Header = extern struct { kind: u32, rows: u32 = 0, final: u32 = 0, lane: u32 = 0, ids: [inline_ids]u32 = @splat(0) };
+@@ -34,6 +35,11 @@ pub const Link = struct {
+         try l.lib.check(l.lib.api.ncclBroadcast(ptr, ptr, bytes, .u8, 0, l.comm, l.stream.handle), "inkling command");
+     }
+ 
++    /// Rank 0's `bytes` at `ptr` into the same place on the peer, after the record that names them.
++    pub fn carry(l: *Link, ptr: u64, bytes: usize) !void {
++        if (bytes > 0) try l.broadcast(ptr, bytes);
++    }
++
+     pub fn send(l: *Link, lane: u32, kind: Kind, ids: []const u32, final: bool) !void {
+         if (ids.len * 4 > l.ids.len) return error.InklingCommandRows;
+         var header: Header = .{ .kind = @backingInt(kind), .rows = @intCast(ids.len), .final = @intFromBool(final), .lane = lane };
+@@ -70,7 +76,7 @@ pub const Link = struct {
+                     try f.begin(header.ids[0] == 1, header.ids[1], header.ids[2]);
+                 },
+                 .release => f.free(header.lane),
+-                .rows, .verify, .keep, .draft, .keep_draft, .save, .verify_many => {
++                .rows, .verify, .keep, .draft, .keep_draft, .save, .verify_many, .images => {
+                     if (header.rows == 0 or header.rows > ids.len or header.final > 1) return error.InklingCommand;
+                     const values = ids[0..header.rows];
+                     if (values.len <= inline_ids) @memcpy(values, header.ids[0..values.len]) else {
+@@ -80,6 +86,11 @@ pub const Link = struct {
+                     }
+                     switch (kind) {
+                         .rows => try f.run(values, header.final != 0),
++                        .images => {
++                            const im = f.images orelse return error.InklingCommand;
++                            try im.take(header.lane, values);
++                            try l.carry(im.rows.ptr, im.heldBytes());
++                        },
+                         .verify => {
+                             var sampled: [8]u32 = undefined;
+                             try f.verify(values, &sampled);
+diff --git a/zig/src/families/inkling2/native.zig b/zig/src/families/inkling2/native.zig
+index fc4993f3..096a7f02 100644
+--- a/zig/src/families/inkling2/native.zig
++++ b/zig/src/families/inkling2/native.zig
+@@ -12,6 +12,7 @@ const kernels = @import("kernels.zig");
+ const forward = @import("forward.zig");
+ const backend = @import("backend.zig");
+ const link = @import("link.zig");
++const images = @import("images.zig");
+ 
+ pub const model_type = "inkling2";
+ pub const greedy_only = true;
+@@ -22,7 +23,7 @@ pub const prompt_rows: u32 = state.prompt_rows;
+ pub const snap_lookahead: u32 = 0;
+ pub const explains_open = true;
+ pub const Room = struct { ctx: *anyopaque, read: *const fn (*anyopaque) ?u64 };
+-pub const Options = struct { context: usize, drafts: bool, segments: usize = 1, slide: bool = false, lanes: u32 = 1, lanes_fixed: bool = false, room: ?Room = null };
++pub const Options = struct { context: usize, drafts: bool, segments: usize = 1, slide: bool = false, lanes: u32 = 1, lanes_fixed: bool = false, room: ?Room = null, vision: ?images.Limits = null };
+ pub const Loaded = struct {
+     backend: lanes.backend.Backend,
+     facts: lanes.Model,
+@@ -32,6 +33,7 @@ pub const Loaded = struct {
+     ctx: *anyopaque,
+     deinit: *const fn (*anyopaque) void,
+     target: *anyopaque,
++    vision: ?*images.Images = null, // --vision: the server's image offer (cuda_vision_offer.zig)
+ };
+ 
+ const Owned = struct {
+@@ -49,6 +51,7 @@ const Owned = struct {
+     peer: ?link.Link = null,
+     draft: ?@import("draft.zig").Draft = null,
+     edit: ?@import("edit.zig").Edit = null,
++    images: ?*images.Images = null,
+ };
+ 
+ pub fn place() !cfg.Share {
+@@ -69,6 +72,14 @@ fn editDir() !?[]const u8 {
+     };
+ }
+ 
++/// TF_INKLING_VISION: the checkpoint's dense/vision.safetensors, rank 0's image tower under --vision.
++fn visionFile() !?[]const u8 {
++    return environment.path("TF_INKLING_VISION", @import("sys").getenv("TF_INKLING_VISION")) catch {
++        std.log.err("TF_INKLING_VISION: expected the checkpoint's dense/vision.safetensors", .{});
++        return error.InvalidEnvironment;
++    };
++}
++
+ fn expertsDir() !?[]const u8 {
+     return environment.path("TF_INKLING_EXPERTS", @import("sys").getenv("TF_INKLING_EXPERTS")) catch {
+         std.log.err("TF_INKLING_EXPERTS: expected the full checkpoint's folder", .{});
+@@ -201,6 +212,13 @@ fn openPair(gpa: std.mem.Allocator, io: std.Io, ctx: *const cuda.Context, dir: [
+         std.log.info("inkling2 rank {d}: refusal edit from {s}, for requests that ask", .{ share.rank, path });
+     }
+     errdefer if (own.edit) |*e| e.deinit();
++    if (o.vision) |lim| {
++        const file = if (share.rank == 0) (try visionFile()) orelse return error.InklingNoVision else null;
++        own.images = try images.Images.init(gpa, io, ctx.d, lim, own.s.rows, file, &own.lt, own.s.workspace, 64 << 20);
++        own.f.images = own.images;
++        std.log.info("inkling2 rank {d}: images, {d} tokens and {d} images a request at most ({d:.2} GiB{s})", .{ share.rank, lim.image_tokens, lim.max_images, @as(f64, @floatFromInt(own.images.?.bytes())) / (1 << 30), if (share.rank == 0) " with the tower" else "" });
++    }
++    errdefer if (own.images) |v| v.deinit();
+     errdefer if (own.draft) |*d| d.deinit();
+     if (o.drafts) {
+         own.draft = try @import("draft.zig").Draft.init(gpa, io, ctx.d, dir, share, o.context, own.s.rows, if (quant) |*q| q else null, kv4, streams, true);
+@@ -230,7 +248,7 @@ fn openPair(gpa: std.mem.Allocator, io: std.Io, ctx: *const cuda.Context, dir: [
+         release(own);
+         std.c._exit(0);
+     }
+-    return .{ .backend = own.b.backend(), .facts = backend.Backend.facts(o.drafts, try draftFloor(), streams), .rows = if (o.drafts) 8 else 1, .stream_bytes = kv, .free_streams = @intCast(streams), .ctx = own, .deinit = release, .target = own };
++    return .{ .backend = own.b.backend(), .facts = backend.Backend.facts(o.drafts, try draftFloor(), streams), .rows = if (o.drafts) 8 else 1, .stream_bytes = kv, .free_streams = @intCast(streams), .ctx = own, .deinit = release, .target = own, .vision = own.images };
+ }
+ 
+ fn release(p: *anyopaque) void {
+@@ -245,6 +263,7 @@ fn release(p: *anyopaque) void {
+     if (o.group) |*g| if (g.fast) |f| f.deinit();
+     if (o.draft) |*d| d.deinit();
+     if (o.edit) |*e| e.deinit();
++    if (o.images) |v| v.deinit();
+     o.s.deinit();
+     o.w.deinit();
+     o.lt.close();
+@@ -268,7 +287,10 @@ pub fn explain(_: ?*anyopaque, err: anyerror) ?[]const u8 {
+         error.InklingCaptured => "Inkling uses native operators; captured-kernel directories are unsupported",
+         error.InklingSingleRequest, error.InklingBusy => "Inkling serves at most TF_INKLING_STREAMS requests at once (default 4); use --parallel at most that",
+         error.InklingStreams => "TF_INKLING_STREAMS must be 1 to 4",
+-        error.InklingTextOnly => "Inkling's initial native profile supports text only",
++        error.InklingTextOnly => "this Inkling server reads text only; start it with --vision (rank 0 with TF_INKLING_VISION) for images",
++        error.InklingNoVision => "--vision needs TF_INKLING_VISION on rank 0: the checkpoint's dense/vision.safetensors",
++        error.InklingImageGrid => "an image's patches do not match its tokens or its place in the prompt",
++        error.InklingImageRows => "the request's images exceed the image tokens or images the server holds (--vision-image-tokens, --vision-max-images, at most 64 images)",
+         error.InklingGreedyOnly => "Inkling's initial native profile supports greedy decoding; set temperature to 0",
+         error.InklingDraftPosition => "Inkling draft features do not match the committed target prefix",
+         error.InklingVerifyMismatch => "Inkling batched verification differs from the plain target; the audit refused generation",
+diff --git a/zig/src/platform/environment.zig b/zig/src/platform/environment.zig
+index c4c99522..81512977 100644
+--- a/zig/src/platform/environment.zig
++++ b/zig/src/platform/environment.zig
+@@ -33,6 +33,8 @@ pub const rules = [_]Rule{
+     .{ .name = "TF_INKLING_FP4", .scope = .cuda, .kind = .word, .words = &.{ "off", "attn", "all" }, .forms = "off, attn (Q, K, V, R, gate and O as NVFP4) or all (also the output head)" },
+     .{ .name = "TF_INKLING_EXPERTS", .scope = .cuda, .kind = .path, .forms = "the full Inkling checkpoint folder without control characters (every rank then runs half of every expert)" },
+     .{ .name = "TF_INKLING_EDIT", .scope = .cuda, .kind = .path, .forms = "tools/export_edit.py's refusal-edit folder without control characters (requests naming TENSORFOLD_KEYS_MODEL take it)" },
++    .{ .name = "TF_INKLING_VISION", .scope = .cuda, .kind = .path, .forms = "the checkpoint's dense/vision.safetensors without control characters (rank 0's image tower under --vision)" },
++    .{ .name = "TF_INKLING_VISION_DUMP", .scope = .cuda, .kind = .path, .forms = "a folder without control characters (rank 0 writes each image's rows there, for checks)" },
+     .{ .name = "TF_INKLING_DRAFT_FLOOR", .scope = .cuda, .kind = .real, .max = 1, .forms = "a chained draft chance from 0 to 1 (default 0.6: drafts under it are not verified or drafted further; 0 keeps the acceptance-rate depth rule)" },
+     .{ .name = "TF_INKLING_GRAPHS", .scope = .cuda, .kind = .flag, .forms = "0 or 1 (default 1: one-token and verify steps replay CUDA graphs)" },
+     .{ .name = "TF_INKLING_PROMPT_ROWS", .scope = .cuda, .kind = .u32, .min = 1, .max = 16384, .forms = "prompt rows a pass, 1 to 16384 (default 256; scratch grows about 0.55 MB a row)" },
+diff --git a/zig/src/platform/environment_test.zig b/zig/src/platform/environment_test.zig
+index b9b462a2..6e87484e 100644
+--- a/zig/src/platform/environment_test.zig
++++ b/zig/src/platform/environment_test.zig
+@@ -81,6 +81,8 @@ const valid = [_]Case{
+     .{ .name = "TF_INKLING_GRAPHS", .raw = "0", .n = 0 },
+     .{ .name = "TF_INKLING_GRAPHS", .raw = "1", .n = 1 },
+     .{ .name = "TF_INKLING_EDIT", .raw = "/models/inkling2/edit", .n = 0 },
++    .{ .name = "TF_INKLING_VISION", .raw = "/models/inkling2/exl3/dense/vision.safetensors", .n = 0 },
++    .{ .name = "TF_INKLING_VISION_DUMP", .raw = "/tmp/ikv", .n = 0 },
+     .{ .name = "TF_INKLING_DRAFT_FLOOR", .raw = "0", .n = 0 },
+     .{ .name = "TF_INKLING_DRAFT_FLOOR", .raw = "0.6", .n = @bitCast(@as(f64, 0.6)) },
+     .{ .name = "TF_INKLING_RANK", .raw = "0", .n = 0 },
 -- 
 2.56.1
 
