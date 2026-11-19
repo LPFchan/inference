@@ -164,6 +164,7 @@ async def lifespan(_app):
             if saved_fixed is not None:
                 registry.swap_fixed(saved_fixed)
             manager.preset_lock = None
+            manager.mirror = False
             presets._set_active(None)
             presets._set_pre_preset_fixed(None)
             if initial_model:

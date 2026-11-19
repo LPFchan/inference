@@ -75,7 +75,7 @@ class PresetManager:
         data = self._load()
         return data.get("presets", {}).get(name)
 
-    def upsert(self, name, description, models, fixed, gpus=None):
+    def upsert(self, name, description, models, fixed, gpus=None, mirror=False):
         data = self._load()
         if "presets" not in data:
             data["presets"] = {}
@@ -86,6 +86,8 @@ class PresetManager:
         }
         if gpus is not None:
             preset["gpus"] = list(gpus)
+        if mirror:
+            preset["mirror"] = True
         data["presets"][name] = preset
         self._save(data)
 
@@ -134,10 +136,12 @@ class PresetManager:
             gpu_list = preset.get("gpus")
             intended_mask = set(gpu_list) if gpu_list is not None else None
             same_preset = manager.preset_lock == name
+            mirror = bool(preset.get("mirror"))
             current, cleared_runtime_overrides = await manager.prepare_preset_activation(
                 name,
                 manual_control=manual_control,
                 gpu_mask=intended_mask,
+                mirror=mirror,
             )
             # Remote models run on another machine's GPU, so a preset neither
             # stops them nor counts them as occupying its own GPUs. Classify each
@@ -206,7 +210,7 @@ class PresetManager:
 
             restored_fixed = None
             has_gpu_mask = preset.get("gpus") is not None
-            if not target and not preset.get("fixed") and not has_gpu_mask:
+            if not target and not preset.get("fixed") and not has_gpu_mask and not mirror:
                 manager.preset_lock = None
                 manager.preset_allows_manual_control = False
                 manager.gpu_mask = None

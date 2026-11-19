@@ -198,12 +198,14 @@ async def status(request: Request):
             "started": active.started.isoformat(),
             "running": active.is_running(),
             **manager.override_metadata(name),
+            "mirror_gpu": manager.mirror_gpu(name),
         }
     return {
         "models": registry.list_all(),
         "fixed": registry.list_fixed(),
         "active": active_info,
         "gpu_count": manager.gpu_count,
+        "mirror": manager.mirror,
         "runtime_overrides": {
             name: manager.override_metadata(name)
             for name in manager.runtime_override_names()
