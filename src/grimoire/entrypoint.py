@@ -164,6 +164,7 @@ async def lifespan(_app):
             if saved_fixed is not None:
                 registry.swap_fixed(saved_fixed)
             manager.preset_lock = None
+            manager.mirror = False
             presets._set_active(None)
             presets._set_pre_preset_fixed(None)
             if initial_model:
@@ -323,13 +324,17 @@ FALLBACK_HOLD_SECONDS = 60
 _fallback_until: dict[str, float] = {}
 
 
-async def _with_fallback(model_name, request, attempt):
-    """Run ``attempt(active)`` on the model, or on its ``fallback`` backend when it cannot be reached."""
+async def _with_fallback(model_name, request, attempt, replica=None):
+    """Run ``attempt(active)`` on the model, or on its ``fallback`` backend when it cannot be reached.
+
+    ``replica`` names the mirrored copy chosen to serve the request (see
+    ``ModelManager.pick_replica``); the fallback still belongs to ``model_name``.
+    """
     cfg = registry.get(model_name) or {}
     fallback = cfg.get("fallback")
     if not fallback or time.monotonic() >= _fallback_until.get(model_name, 0):
         try:
-            return await attempt(await manager.start_model(model_name, evict=is_admin(request)))
+            return await attempt(await manager.start_replica(model_name, replica, evict=is_admin(request)))
         except _UNREACHABLE as e:
             if not fallback:
                 raise
@@ -365,6 +370,7 @@ async def chat_completions(request: Request):
             user_hash, history_conversation_id
         )
         conversation_id = _kv_conversation_id(request, history_conversation_id)
+        replica = manager.pick_replica(model_name, conversation_id, user_hash)
         return await _with_fallback(model_name, request, lambda active: _proxy_chat(
             requested_model,
             payload,
@@ -374,7 +380,7 @@ async def chat_completions(request: Request):
             history_conversation_id=history_conversation_id,
             record_usage=request.headers.get("x-grimoire-cache-warm") != "1",
             request=request,
-        ))
+        ), replica=replica)
     except HTTPException:
         raise
     except KeyError as e:
@@ -420,32 +426,45 @@ async def chat_responses(request: Request):
         payload.pop("max_output_tokens", None)
         payload.pop("max_tokens", None)
 
-    async def attempt(active):
-        client = get_proxy_client()
-        headers = _backend_request_headers(request.headers)
-        # The public proxy authenticated this request; key the session by its caller.
-        caller = request.headers.get(config.INTERNAL_AUTH_SUB_HEADER)
-        headers.update(active.remote_headers(request.headers, account_hash(caller) if caller else None))
+    # The public proxy authenticated this request; key the session by its caller.
+    caller = request.headers.get(config.INTERNAL_AUTH_SUB_HEADER)
+    caller_hash = account_hash(caller) if caller else None
+    served = None
 
-        forwarded = copy.deepcopy(payload)
-        requested_cfg = registry.get(model_name) or active.cfg
-        forwarded = apply_chat_template_kwargs(
-            forwarded,
-            requested_cfg,
-            registry.get_family_defaults(requested_cfg.get("family")),
-        )
-        forwarded["model"] = await active.get_backend_model_id()
-        req = client.build_request(
-            "POST",
-            _active_backend_url(active, "v1/responses"),
-            headers=headers,
-            params=request.query_params,
-            json=forwarded,
-        )
-        return await send_while_connected(client, req, request)
+    async def attempt(active):
+        nonlocal served
+        # In flight on this copy until the response ends (see _proxy_chat).
+        active.inflight = getattr(active, "inflight", 0) + 1
+        served = active
+        try:
+            client = get_proxy_client()
+            headers = _backend_request_headers(request.headers)
+            headers.update(active.remote_headers(request.headers, caller_hash))
+
+            forwarded = copy.deepcopy(payload)
+            requested_cfg = registry.get(model_name) or active.cfg
+            forwarded = apply_chat_template_kwargs(
+                forwarded,
+                requested_cfg,
+                registry.get_family_defaults(requested_cfg.get("family")),
+            )
+            forwarded["model"] = await active.get_backend_model_id()
+            req = client.build_request(
+                "POST",
+                _active_backend_url(active, "v1/responses"),
+                headers=headers,
+                params=request.query_params,
+                json=forwarded,
+            )
+            return await send_while_connected(client, req, request)
+        except BaseException:
+            active.inflight -= 1
+            served = None
+            raise
 
     try:
-        upstream = await _with_fallback(model_name, request, attempt)
+        replica = manager.pick_replica(model_name, caller_key=caller_hash)
+        upstream = await _with_fallback(model_name, request, attempt, replica=replica)
     except HTTPException:
         raise
     except LoadRefused as e:
@@ -459,6 +478,7 @@ async def chat_responses(request: Request):
             async for chunk in upstream.aiter_raw():
                 yield chunk
         finally:
+            served.inflight -= 1
             await upstream.aclose()
 
     response_headers = _backend_response_headers(upstream.headers)

@@ -385,6 +385,11 @@ Patch chain in `patches/atomic-llama-cpp/`, applied in order by `Dockerfile`:
 
 ## Recent Changes
 
+- 2026-11-20: **Mirror mode: one model on both GPUs** — With the `mirror`
+  preset active, any model loaded from the picker also starts a hidden copy
+  on the other GPU, and chats to it use both: each conversation stays on its
+  GPU, new work goes to the less busy one. Loading another model replaces
+  both copies; other presets drop the copies.
 - 2026-11-20: **DeepSeek-V4.1-Flash-1017 tries the Sparks first again** —
   The Sparks run DeepSeek-V4.1-Flash-1017 or Inkling-2-Small, one at a time,
   whichever the operator picks. Grimoire sends DeepSeek requests to

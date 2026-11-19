@@ -38,6 +38,7 @@ async def get_preset(name: str, request: Request):
         "models": preset.get("models", []),
         "fixed": preset.get("fixed", {}),
         "gpus": preset.get("gpus"),
+        "mirror": bool(preset.get("mirror")),
         "loaded": loaded,
         "active": presets.get_active_name() == name,
     }
@@ -95,7 +96,11 @@ async def upsert_preset(name: str, request: Request):
                     raise HTTPException(status_code=400,
                         detail=f"Model '{model}' pinned to GPU {gpu_id} not in 'gpus' {gpus}")
 
-    presets.upsert(name, description, models, fixed if fixed else {}, gpus=gpus)
+    mirror = data.get("mirror", False)
+    if not isinstance(mirror, bool):
+        raise HTTPException(status_code=400, detail="'mirror' must be a boolean")
+
+    presets.upsert(name, description, models, fixed if fixed else {}, gpus=gpus, mirror=mirror)
     return {"status": "saved", "name": name}
 
 

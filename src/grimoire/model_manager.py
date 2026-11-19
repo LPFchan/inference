@@ -350,6 +350,14 @@ def runtime_command_signature(cfg):
         return None
 
 
+MIRROR_SUFFIX = "@mirror"
+
+
+def mirror_twin_name(model_name):
+    """Manager-internal name of a model's mirror-mode twin (never in the registry)."""
+    return f"{model_name}{MIRROR_SUFFIX}"
+
+
 class ActiveModel:
     """Manage a running model backend process (llama-server)."""
 
@@ -369,6 +377,10 @@ class ActiveModel:
         self.started = datetime.now(timezone.utc)
         self.backend_model_id = None
         self.status = config.MODEL_STATUS_LOADING
+        # Chat requests this process is serving now; picks the least busy replica.
+        self.inflight = 0
+        # Set on a mirror-mode twin: the model this process is a copy of.
+        self.twin_of = None
         self._unloading = False
         self._unload_token = None
         self.backend_type = cfg.get("backend", BACKEND_LLAMA)
@@ -669,6 +681,10 @@ class ModelManager:
         self.gpu_mask = None  # set[int] or None (None = all GPUs available)
         self._runtime_overrides: dict[str, RuntimeModelOverride] = {}
         self._pending_overrides: dict[str, RuntimeModelOverride] = {}
+        # Mirror mode (set by a preset): each loaded model gets a twin on the other GPU.
+        self.mirror = False
+        # (model, conversation) -> replica that holds the conversation's KV cache.
+        self._replica_affinity: OrderedDict[tuple[str, str], str] = OrderedDict()
 
     def _override(self, model_name, *, include_pending=True):
         if include_pending and model_name in self._pending_overrides:
@@ -743,7 +759,7 @@ class ModelManager:
             } if not override.empty else None,
         }
 
-    async def prepare_preset_activation(self, name, *, manual_control, gpu_mask):
+    async def prepare_preset_activation(self, name, *, manual_control, gpu_mask, mirror=False):
         async with self._lock:
             cleared = []
             if not manual_control:
@@ -752,6 +768,11 @@ class ModelManager:
             self.preset_lock = name
             self.preset_allows_manual_control = manual_control
             self.gpu_mask = set(gpu_mask) if gpu_mask is not None else None
+            self.mirror = mirror
+            if not mirror:
+                for twin_name, twin in list(self.active.items()):
+                    if getattr(twin, "twin_of", None) is not None:
+                        await self._stop_active_model(twin_name, twin)
             active = self.list_active()
         return active, cleared
 
@@ -783,6 +804,8 @@ class ModelManager:
         if signature is None:
             return None, None
         for active_name, active in self.active.items():
+            if getattr(active, "twin_of", None) is not None:
+                continue
             if ready_only and active.status != config.MODEL_STATUS_LOADED:
                 continue
             if not active.is_running() and active.status != config.MODEL_STATUS_FAILED:
@@ -809,6 +832,65 @@ class ModelManager:
                 return active_name, active
         return None, None
 
+    REPLICA_AFFINITY_CAP = 4096
+
+    def pick_replica(self, model_name, conversation_key=None, caller_key=None):
+        """Pick which copy of a mirrored model serves one chat request.
+
+        A model has copies on other GPUs when mirror mode started a twin for it,
+        or when its registry entry lists `replica_peers`. Only loaded copies are
+        candidates, so an unmirrored model is served by itself as before. A conversation
+        stays on the copy that already holds its KV cache. Anything else goes to
+        the copy with the fewest requests in flight; ties go to a copy chosen by
+        hashing the caller, so one client's back-to-back requests keep landing
+        where their prompt is already cached.
+        """
+        peers = list((registry.get(model_name) or {}).get("replica_peers") or [])
+        if mirror_twin_name(model_name) in self.active:
+            peers.append(mirror_twin_name(model_name))
+        if not peers:
+            return model_name
+        ready = [
+            name for name in dict.fromkeys([model_name, *peers])
+            if (active := self.active.get(name)) is not None
+            and active.status == config.MODEL_STATUS_LOADED and active.is_running()
+        ]
+        if not ready:
+            return model_name
+
+        affinity = (model_name, conversation_key) if conversation_key else None
+        if affinity is not None:
+            held = self._replica_affinity.get(affinity)
+            if held in ready:
+                self._replica_affinity.move_to_end(affinity)
+                return held
+
+        tie_key = conversation_key or caller_key or ""
+        start = int(hashlib.sha256(tie_key.encode()).hexdigest(), 16) % len(ready)
+        order = ready[start:] + ready[:start]
+        choice = min(order, key=lambda name: getattr(self.active[name], "inflight", 0))
+
+        if affinity is not None:
+            self._replica_affinity[affinity] = choice
+            self._replica_affinity.move_to_end(affinity)
+            while len(self._replica_affinity) > self.REPLICA_AFFINITY_CAP:
+                self._replica_affinity.popitem(last=False)
+        return choice
+
+    async def start_replica(self, model_name, replica=None, *, evict=True):
+        """Return the loaded copy `pick_replica` chose, or start the model itself.
+
+        A mirror twin is not in the registry, so it is looked up here rather
+        than started by name. If the chosen copy stopped since it was picked,
+        the request goes to the model as usual.
+        """
+        if replica and replica != model_name:
+            active = self.active.get(replica)
+            if (active is not None and active.status == config.MODEL_STATUS_LOADED
+                    and active.is_running()):
+                return active
+        return await self.start_model(model_name, evict=evict)
+
     def _build_route_table(self):
         """Map each ready model -> its replica backends for the proxy workers.
 
@@ -831,8 +913,12 @@ class ModelManager:
 
         models = {}
         for name in running:
+            if getattr(running[name], "twin_of", None) is not None:
+                continue
             replicas = [entry(name)]
-            for peer in (registry.get(name) or {}).get("replica_peers", []) or []:
+            peers = list((registry.get(name) or {}).get("replica_peers", []) or [])
+            peers.append(mirror_twin_name(name))
+            for peer in peers:
                 if peer != name and peer in running:
                     replicas.append(entry(peer))
             models[name] = {"status": "loaded", "replicas": replicas}
@@ -1087,6 +1173,67 @@ class ModelManager:
             self._publish_routes()
         if drop_on_success and self.active.get(name) is active:
             self.active.pop(name, None)
+        await self._stop_twin(name)
+
+    async def _stop_twin(self, model_name):
+        """Stop the mirror-mode twin of a model that stopped or was evicted."""
+        twin = self.active.get(mirror_twin_name(model_name))
+        if twin is not None:
+            await self._stop_active_model(mirror_twin_name(model_name), twin)
+
+    async def _start_twin_locked(self, model_name, primary, *, evict=True):
+        """In mirror mode, start a copy of a just-loaded model on another GPU.
+
+        Only a local model on one GPU gets a twin. A budgeted model gets one
+        only where it fits without evicting anything, so a small encoder never
+        pushes a chat model's twin out. A failed twin is logged and skipped; the
+        model keeps serving from its one copy.
+        """
+        cfg = primary.cfg
+        if (not self.mirror or primary.twin_of is not None
+                or cfg.get("backend") == BACKEND_VLLM_REMOTE or cfg.get("cpu-only")
+                or cfg.get("gpu-ids") is not None or len(primary.gpus) != 1):
+            return None
+        twin_name = mirror_twin_name(model_name)
+        existing = self.active.get(twin_name)
+        if existing is not None and existing.is_running():
+            return existing
+        others = [gpu for gpu in self._allowed_gpus() if gpu not in primary.gpus]
+        if not others:
+            return None
+        gpu = others[0]
+        try:
+            budget = self._model_budget_mib(cfg)
+            if budget is not None:
+                free = await asyncio.to_thread(self._get_gpu_free_vram_mib, gpu)
+                if free is None or free < budget:
+                    logger.info("Mirror: no room for %s on GPU %s; serving one copy", model_name, gpu)
+                    return None
+                placement, incumbents = GpuPlacement((gpu,)), []
+            else:
+                placement, incumbents = self._allocate_exclusive(gpu)
+            if incumbents and not evict:
+                logger.info("Mirror: twin of %s would unload %s; serving one copy",
+                            model_name, ", ".join(name for name, _ in incumbents))
+                return None
+            for name, incumbent in incumbents:
+                logger.info("Mirror: evicting %s from GPU %s for the twin of %s", name, gpu, model_name)
+                await self._stop_active_model(name, incumbent)
+            twin = ActiveModel(twin_name, cfg, self._find_available_port(gpu), placement)
+            twin.twin_of = model_name
+            self.active[twin_name] = twin
+            try:
+                await self._start_active_model(twin)
+            except Exception:
+                twin.status = config.MODEL_STATUS_FAILED
+                await self._stop_active_model(twin_name, twin)
+                raise
+        except Exception as exc:
+            logger.warning("Mirror: twin of %s did not start (%s); serving one copy", model_name, exc)
+            return None
+        logger.info("Mirror: started twin of %s on GPU %s, port %s", model_name, gpu, twin.port)
+        self._publish_routes()
+        return twin
 
     async def _restore_incumbents(self, incumbents):
         """Best-effort restart of incumbents evicted during failed replacement startup."""
@@ -1213,6 +1360,7 @@ class ModelManager:
         for name, incumbent in stopped_incumbents:
             if self.active.get(name) is incumbent:
                 self.active.pop(name, None)
+            await self._stop_twin(name)
         logger.info("Started %s on GPU placement %s, port %s", model_name, active.gpus, port)
         self._publish_routes()
         return active
@@ -1251,7 +1399,10 @@ class ModelManager:
                     f"Preset '{self.preset_lock}' is active. "
                     f"Deactivate the preset before manually starting models."
                 )
-            return await self._start_model_locked(model_name, evict=evict)
+            active = await self._start_model_locked(model_name, evict=evict)
+            if self.mirror and active.name == model_name:
+                await self._start_twin_locked(model_name, active, evict=evict)
+            return active
 
     def _require_manual_control(self):
         if self.preset_lock is not None and not self.preset_allows_manual_control:
@@ -1488,7 +1639,15 @@ class ModelManager:
 
     def list_active(self):
         """List all running active models."""
-        return [name for name, active in self.active.items() if active.is_running()]
+        return [
+            name for name, active in self.active.items()
+            if active.is_running() and getattr(active, "twin_of", None) is None
+        ]
+
+    def mirror_gpu(self, model_name):
+        """GPU of the model's mirror-mode twin, or None."""
+        twin = self.active.get(mirror_twin_name(model_name))
+        return twin.gpu if twin is not None and twin.is_running() else None
 
     async def shutdown(self, keep_remote=False):
         """Gracefully stop all active models.

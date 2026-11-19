@@ -255,6 +255,30 @@ class PresetRuntimeResetTests(unittest.TestCase):
             manager.start_model.assert_awaited_once_with("target", _preset_bypass=True)
             self.assertEqual(presets.get_active_name(), "locked")
 
+    def test_mirror_preset_stays_active_with_manual_control(self):
+        with tempfile.TemporaryDirectory() as td:
+            presets = PresetManager(state_dir=td)
+            presets.upsert("mirror", "", [], {}, mirror=True)
+            manager = MagicMock()
+            manager.preset_lock = None
+            async def prepare(name, **kwargs):
+                manager.preset_lock = name
+                manager.prepare_kwargs = kwargs
+                return ["loaded"], []
+            manager.prepare_preset_activation = AsyncMock(side_effect=prepare)
+            manager.stop_model = AsyncMock(return_value=True)
+            manager.start_model = AsyncMock()
+            manager.active = {}
+            registry = MagicMock()
+            registry.swap_fixed.return_value = {}
+
+            result = run(presets.activate("mirror", manager, registry))
+
+            self.assertEqual(manager.prepare_kwargs, {"manual_control": True, "gpu_mask": None, "mirror": True})
+            self.assertEqual(result["stopped"], ["loaded"])
+            self.assertEqual(result["active"], "mirror")
+            self.assertEqual(presets.get_active_name(), "mirror")
+
     def test_locked_activation_clears_overrides_restarts_targets_and_reports(self):
         with tempfile.TemporaryDirectory() as td:
             presets = PresetManager(state_dir=td)
