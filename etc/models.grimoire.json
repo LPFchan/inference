@@ -441,7 +441,7 @@
       ],
       "ctx-size": 120000,
       "predict": 16384,
-      "parallel": 1,
+      "parallel": 16,
       "n-gpu-layers": 999,
       "cache-type-k": "turbo4",
       "cache-type-v": "turbo4",
@@ -453,7 +453,8 @@
       "family": "gemma4",
       "extra-args": [
         "--lora",
-        "/models/gguf/eastself-gemma4-12b-experiment-lora-lora-tokenrep.gguf"
+        "/models/gguf/eastself-gemma4-12b-experiment-lora-lora-tokenrep.gguf",
+        "--kv-unified"
       ],
       "added": "2026-07-15T03:43:14.525959+00:00"
     },
@@ -464,7 +465,7 @@
       ],
       "ctx-size": 120000,
       "predict": 16384,
-      "parallel": 1,
+      "parallel": 16,
       "n-gpu-layers": 999,
       "cache-type-k": "turbo4",
       "cache-type-v": "turbo4",
@@ -476,7 +477,8 @@
       "family": "gemma4",
       "extra-args": [
         "--lora",
-        "/models/gguf/eastself-gemma4-12b-dec20260718-v2-lora-tokenrep.gguf"
+        "/models/gguf/eastself-gemma4-12b-dec20260718-v2-lora-tokenrep.gguf",
+        "--kv-unified"
       ],
       "added": "2026-07-19T08:36:31.088696+00:00"
     },
@@ -507,7 +509,7 @@
       ],
       "ctx-size": 120000,
       "predict": 16384,
-      "parallel": 1,
+      "parallel": 16,
       "n-gpu-layers": 999,
       "cache-type-k": "turbo4",
       "cache-type-v": "turbo4",
@@ -517,7 +519,9 @@
         "cache_read": 0.04
       },
       "family": "gemma4",
-      "extra-args": [],
+      "extra-args": [
+        "--kv-unified"
+      ],
       "added": "2026-08-27T04:07:38.596447+00:00"
     },
     "eastself-gemma4-12b-sft-final": {
@@ -527,7 +531,7 @@
       ],
       "ctx-size": 120000,
       "predict": 16384,
-      "parallel": 1,
+      "parallel": 16,
       "n-gpu-layers": 999,
       "cache-type-k": "turbo4",
       "cache-type-v": "turbo4",
@@ -539,7 +543,8 @@
       "family": "gemma4",
       "extra-args": [
         "--lora",
-        "/models/gguf/eastself-gemma4-12b-sft-final-lora-tokenrep.gguf"
+        "/models/gguf/eastself-gemma4-12b-sft-final-lora-tokenrep.gguf",
+        "--kv-unified"
       ],
       "added": "2026-08-27T04:07:38.612493+00:00"
     },
@@ -550,7 +555,7 @@
       ],
       "ctx-size": 120000,
       "predict": 16384,
-      "parallel": 1,
+      "parallel": 16,
       "n-gpu-layers": 999,
       "cache-type-k": "turbo4",
       "cache-type-v": "turbo4",
@@ -560,7 +565,9 @@
         "cache_read": 0.04
       },
       "family": "gemma4",
-      "extra-args": [],
+      "extra-args": [
+        "--kv-unified"
+      ],
       "added": "2026-08-27T04:07:38.623155+00:00"
     },
     "eastself-gemma4-12b-rft-marie-bilingual-step1": {
@@ -570,7 +577,7 @@
       ],
       "ctx-size": 120000,
       "predict": 16384,
-      "parallel": 1,
+      "parallel": 16,
       "n-gpu-layers": 999,
       "cache-type-k": "turbo4",
       "cache-type-v": "turbo4",
@@ -582,7 +589,8 @@
       "family": "gemma4",
       "extra-args": [
         "--lora-scaled",
-        "/models/gguf/eastself-gemma4-12b-sft-final-lora-tokenrep.gguf:1.0,/models/gguf/eastself-gemma4-12b-rft-marie-bilingual-step1-lora.gguf:1.0"
+        "/models/gguf/eastself-gemma4-12b-sft-final-lora-tokenrep.gguf:1.0,/models/gguf/eastself-gemma4-12b-rft-marie-bilingual-step1-lora.gguf:1.0",
+        "--kv-unified"
       ],
       "added": "2026-08-27T04:07:38.637026+00:00"
     },
@@ -593,7 +601,7 @@
       ],
       "ctx-size": 120000,
       "predict": 16384,
-      "parallel": 1,
+      "parallel": 16,
       "n-gpu-layers": 999,
       "cache-type-k": "turbo4",
       "cache-type-v": "turbo4",
@@ -605,7 +613,8 @@
       "family": "gemma4",
       "extra-args": [
         "--lora-scaled",
-        "/models/gguf/eastself-gemma4-12b-sft-final-lora-tokenrep.gguf:1.0,/models/gguf/eastself-gemma4-12b-rft-marie-diagnostic-step1-v2-lora.gguf:1.0"
+        "/models/gguf/eastself-gemma4-12b-sft-final-lora-tokenrep.gguf:1.0,/models/gguf/eastself-gemma4-12b-rft-marie-diagnostic-step1-v2-lora.gguf:1.0",
+        "--kv-unified"
       ],
       "added": "2026-08-27T04:07:38.650491+00:00"
     },
@@ -616,7 +625,7 @@
       ],
       "ctx-size": 120000,
       "predict": 16384,
-      "parallel": 1,
+      "parallel": 16,
       "n-gpu-layers": 999,
       "cache-type-k": "turbo4",
       "cache-type-v": "turbo4",
@@ -628,7 +637,8 @@
       "family": "gemma4",
       "extra-args": [
         "--lora-scaled",
-        "/models/gguf/eastself-gemma4-12b-sft-final-lora-tokenrep.gguf:1.0,/models/gguf/eastself-gemma4-12b-rft-marie-memory-positive-step1-lora.gguf:1.0"
+        "/models/gguf/eastself-gemma4-12b-sft-final-lora-tokenrep.gguf:1.0,/models/gguf/eastself-gemma4-12b-rft-marie-memory-positive-step1-lora.gguf:1.0",
+        "--kv-unified"
       ],
       "added": "2026-08-27T04:07:38.664937+00:00"
     },
@@ -639,7 +649,7 @@
       ],
       "ctx-size": 120000,
       "predict": 16384,
-      "parallel": 1,
+      "parallel": 16,
       "n-gpu-layers": 999,
       "cache-type-k": "turbo4",
       "cache-type-v": "turbo4",
@@ -651,7 +661,8 @@
       "family": "gemma4",
       "extra-args": [
         "--lora-scaled",
-        "/models/gguf/eastself-gemma4-12b-sft-final-lora-tokenrep.gguf:1.0,/models/gguf/eastself-gemma4-12b-rft-stage0-source-memory-v5-step1-lora.gguf:1.0"
+        "/models/gguf/eastself-gemma4-12b-sft-final-lora-tokenrep.gguf:1.0,/models/gguf/eastself-gemma4-12b-rft-stage0-source-memory-v5-step1-lora.gguf:1.0",
+        "--kv-unified"
       ],
       "added": "2026-08-27T04:07:38.679657+00:00"
     },
@@ -662,7 +673,7 @@
       ],
       "ctx-size": 120000,
       "predict": 16384,
-      "parallel": 1,
+      "parallel": 16,
       "n-gpu-layers": 999,
       "cache-type-k": "turbo4",
       "cache-type-v": "turbo4",
@@ -674,7 +685,8 @@
       "family": "gemma4",
       "extra-args": [
         "--lora-scaled",
-        "/models/gguf/eastself-gemma4-12b-sft-final-lora-tokenrep.gguf:1.0,/models/gguf/eastself-gemma4-12b-dpo-stage0-v1-step1-lora.gguf:1.0"
+        "/models/gguf/eastself-gemma4-12b-sft-final-lora-tokenrep.gguf:1.0,/models/gguf/eastself-gemma4-12b-dpo-stage0-v1-step1-lora.gguf:1.0",
+        "--kv-unified"
       ],
       "added": "2026-08-27T04:07:38.694599+00:00"
     },
@@ -685,7 +697,7 @@
       ],
       "ctx-size": 120000,
       "predict": 16384,
-      "parallel": 1,
+      "parallel": 16,
       "n-gpu-layers": 999,
       "cache-type-k": "turbo4",
       "cache-type-v": "turbo4",
@@ -697,7 +709,8 @@
       "family": "gemma4",
       "extra-args": [
         "--lora-scaled",
-        "/models/gguf/eastself-gemma4-12b-sft-final-lora-tokenrep.gguf:1.0,/models/gguf/eastself-gemma4-12b-distributional-reward-step1-lora.gguf:1.0"
+        "/models/gguf/eastself-gemma4-12b-sft-final-lora-tokenrep.gguf:1.0,/models/gguf/eastself-gemma4-12b-distributional-reward-step1-lora.gguf:1.0",
+        "--kv-unified"
       ],
       "added": "2026-08-27T04:07:38.710027+00:00"
     },
@@ -708,7 +721,7 @@
       ],
       "ctx-size": 120000,
       "predict": 16384,
-      "parallel": 1,
+      "parallel": 16,
       "n-gpu-layers": 999,
       "cache-type-k": "turbo4",
       "cache-type-v": "turbo4",
@@ -720,7 +733,8 @@
       "family": "gemma4",
       "extra-args": [
         "--lora-scaled",
-        "/models/gguf/eastself-gemma4-12b-sft-final-lora-tokenrep.gguf:1.0,/models/gguf/eastself-gemma4-12b-online-reward-k5-step1-lora.gguf:1.0"
+        "/models/gguf/eastself-gemma4-12b-sft-final-lora-tokenrep.gguf:1.0,/models/gguf/eastself-gemma4-12b-online-reward-k5-step1-lora.gguf:1.0",
+        "--kv-unified"
       ],
       "added": "2026-08-27T04:07:38.724990+00:00"
     },
@@ -731,7 +745,7 @@
       ],
       "ctx-size": 120000,
       "predict": 16384,
-      "parallel": 1,
+      "parallel": 16,
       "n-gpu-layers": 999,
       "cache-type-k": "turbo4",
       "cache-type-v": "turbo4",
@@ -743,7 +757,8 @@
       "family": "gemma4",
       "extra-args": [
         "--lora",
-        "/models/gguf/eastself-gemma4-12b-boundary-pilot-sft-final-lora-tokenrep.gguf"
+        "/models/gguf/eastself-gemma4-12b-boundary-pilot-sft-final-lora-tokenrep.gguf",
+        "--kv-unified"
       ],
       "added": "2026-08-29T06:16:27.976526+00:00"
     },
@@ -754,7 +769,7 @@
       ],
       "ctx-size": 120000,
       "predict": 16384,
-      "parallel": 1,
+      "parallel": 16,
       "n-gpu-layers": 999,
       "cache-type-k": "turbo4",
       "cache-type-v": "turbo4",
@@ -766,7 +781,8 @@
       "family": "gemma4",
       "extra-args": [
         "--lora-scaled",
-        "/models/gguf/eastself-gemma4-12b-boundary-pilot-sft-final-lora-tokenrep.gguf:1.0,/models/gguf/eastself-gemma4-12b-tier1-online-canary-v1-step1-lora.gguf:1.0"
+        "/models/gguf/eastself-gemma4-12b-boundary-pilot-sft-final-lora-tokenrep.gguf:1.0,/models/gguf/eastself-gemma4-12b-tier1-online-canary-v1-step1-lora.gguf:1.0",
+        "--kv-unified"
       ],
       "added": "2026-08-29T16:05:16.062669+00:00"
     },
@@ -777,7 +793,7 @@
       ],
       "ctx-size": 120000,
       "predict": 16384,
-      "parallel": 1,
+      "parallel": 16,
       "n-gpu-layers": 999,
       "cache-type-k": "turbo4",
       "cache-type-v": "turbo4",
@@ -789,7 +805,8 @@
       "family": "gemma4",
       "extra-args": [
         "--lora-scaled",
-        "/models/gguf/eastself-gemma4-12b-boundary-pilot-sft-final-lora-tokenrep.gguf:1.0,/models/gguf/eastself-gemma4-12b-tier1-stronger-canary-v1-round1-lora.gguf:1.0"
+        "/models/gguf/eastself-gemma4-12b-boundary-pilot-sft-final-lora-tokenrep.gguf:1.0,/models/gguf/eastself-gemma4-12b-tier1-stronger-canary-v1-round1-lora.gguf:1.0",
+        "--kv-unified"
       ],
       "added": "2026-08-30T01:24:12.581325+00:00"
     },
@@ -800,7 +817,7 @@
       ],
       "ctx-size": 120000,
       "predict": 16384,
-      "parallel": 1,
+      "parallel": 16,
       "n-gpu-layers": 999,
       "cache-type-k": "turbo4",
       "cache-type-v": "turbo4",
@@ -812,7 +829,8 @@
       "family": "gemma4",
       "extra-args": [
         "--lora-scaled",
-        "/models/gguf/eastself-gemma4-12b-boundary-pilot-sft-final-lora-tokenrep.gguf:1.0,/models/gguf/eastself-gemma4-12b-tier1-stronger-canary-v1-round2-lora.gguf:1.0"
+        "/models/gguf/eastself-gemma4-12b-boundary-pilot-sft-final-lora-tokenrep.gguf:1.0,/models/gguf/eastself-gemma4-12b-tier1-stronger-canary-v1-round2-lora.gguf:1.0",
+        "--kv-unified"
       ],
       "added": "2026-08-30T08:19:22.542960+00:00"
     },
@@ -823,7 +841,7 @@
       ],
       "ctx-size": 120000,
       "predict": 16384,
-      "parallel": 1,
+      "parallel": 16,
       "n-gpu-layers": 999,
       "cache-type-k": "turbo4",
       "cache-type-v": "turbo4",
@@ -835,7 +853,8 @@
       "family": "gemma4",
       "extra-args": [
         "--lora-scaled",
-        "/models/gguf/eastself-gemma4-12b-boundary-pilot-sft-final-lora-tokenrep.gguf:1.0,/models/gguf/eastself-gemma4-12b-tier1-stronger-canary-v1-round3-lora.gguf:1.0"
+        "/models/gguf/eastself-gemma4-12b-boundary-pilot-sft-final-lora-tokenrep.gguf:1.0,/models/gguf/eastself-gemma4-12b-tier1-stronger-canary-v1-round3-lora.gguf:1.0",
+        "--kv-unified"
       ],
       "added": "2026-08-30T17:51:36.096494+00:00"
     },
@@ -846,7 +865,7 @@
       ],
       "ctx-size": 120000,
       "predict": 16384,
-      "parallel": 1,
+      "parallel": 16,
       "n-gpu-layers": 999,
       "cache-type-k": "turbo4",
       "cache-type-v": "turbo4",
@@ -858,7 +877,8 @@
       "family": "gemma4",
       "extra-args": [
         "--lora-scaled",
-        "/models/gguf/eastself-gemma4-12b-boundary-pilot-sft-final-lora-tokenrep.gguf:1.0,/models/gguf/eastself-gemma4-12b-tier1-dose-v1-control-lora.gguf:1.0"
+        "/models/gguf/eastself-gemma4-12b-boundary-pilot-sft-final-lora-tokenrep.gguf:1.0,/models/gguf/eastself-gemma4-12b-tier1-dose-v1-control-lora.gguf:1.0",
+        "--kv-unified"
       ],
       "added": "2026-08-31T11:22:37.516757+00:00"
     },
@@ -869,7 +889,7 @@
       ],
       "ctx-size": 120000,
       "predict": 16384,
-      "parallel": 1,
+      "parallel": 16,
       "n-gpu-layers": 999,
       "cache-type-k": "turbo4",
       "cache-type-v": "turbo4",
@@ -881,7 +901,8 @@
       "family": "gemma4",
       "extra-args": [
         "--lora-scaled",
-        "/models/gguf/eastself-gemma4-12b-boundary-pilot-sft-final-lora-tokenrep.gguf:1.0,/models/gguf/eastself-gemma4-12b-tier1-dose-v1-stronger-lora.gguf:1.0"
+        "/models/gguf/eastself-gemma4-12b-boundary-pilot-sft-final-lora-tokenrep.gguf:1.0,/models/gguf/eastself-gemma4-12b-tier1-dose-v1-stronger-lora.gguf:1.0",
+        "--kv-unified"
       ],
       "added": "2026-08-31T11:22:37.579559+00:00"
     },

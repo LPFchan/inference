@@ -289,9 +289,7 @@ async def _forward_chat(
             # Pin the request to the same slot we save and restore. Without
             # this, llama-server assigns any idle slot (`id_slot` defaults to
             # -1), so on a model running more than one slot the cache would be
-            # restored into slot 0 while the request ran somewhere else. That is
-            # invisible today only because every registered model sets
-            # parallel=1.
+            # restored into slot 0 while the request ran somewhere else.
             payload["id_slot"] = CONVERSATION_SLOT
             slot_url = _active_backend_url(active, f"slots/{CONVERSATION_SLOT}")
             prev_conv = getattr(active, "_current_conv_id", None)

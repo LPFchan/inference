@@ -385,6 +385,15 @@ Patch chain in `patches/atomic-llama-cpp/`, applied in order by `Dockerfile`:
 
 ## Recent Changes
 
+- 2026-11-20: **Gemma 12B serves 16 requests per copy** — All 19
+  `gemma-4-12b` entries (base and eastself checkpoints) now run with
+  `parallel: 16` and `--kv-unified`: the 16 slots share the full 120k context
+  instead of each getting a fixed 7.5k slice. Measured on one 3090 (384-token
+  replies, temperature 0): 62 tok/s alone, about 160 tok/s total at 4 or 8 at
+  once, 226 tok/s at 16; VRAM stayed at 9.5 GiB, and one 66k-token prompt
+  still answered correctly. The llama-server process holds one CPU core at
+  100% under load (token sampling), which is why the total flattens;
+  `top_k: 1` did not raise it in this test (210 tok/s).
 - 2026-11-20: **transcribe.lost.plus is retired** — The operator no longer
   uses it. The `transcribe.lost.plus` DNS record, the `yeowoolmac-stt`
   Cloudflare tunnel, its host-only configuration rule and the Mac's tunnel
