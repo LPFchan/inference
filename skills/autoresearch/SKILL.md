@@ -15,8 +15,9 @@ docs and commits.
 ## Slots
 
 - M4 Pro 24 GB: `yeowoolmac-the-rest.tail.lost.plus`, `main` tmux session.
-- Nemotron backend `plus.lost.inference.stt` stays booted out; no auto-restore.
-  Preserve gateway/tunnel, oMLX settings and every existing model/data/result.
+- The Nemotron transcription service is retired (2026-11-20); no STT
+  LaunchAgent is left to pause. Preserve oMLX settings and every existing
+  model/data/result.
 - At most four model workers. Slot 1 is `ROOT/.gpu-loop.lock` (serial drivers);
   launch every other model process (`train.py` or a `batching.py` probe) in
   tmux with `parallel.py run ROOT [--job-dir DIR] [--wait N] -- COMMAND`.

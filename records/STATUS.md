@@ -1,6 +1,6 @@
 # Current Status
 
-**Snapshot:** 2026-11-18
+**Snapshot:** 2026-11-20
 **Posture:** The Grimoire gateway serves local llama.cpp models and admits remote vLLM models through Mangchi's residency agent. The local engine remains TheTom's turboquant fork with turbo4 KV. Mangchi model artifacts are managed separately from the gateway.
 **Focus:** Qwen3-ASR autoresearch. Mangchi's residency agent has no launch spec since Qwen3.8 Flash-Next retired (2026-11-18); Mangchi serves MiniMax-H3-Image.
 
@@ -363,7 +363,7 @@
   existing trials retain their frozen code. Four-slot admission PR21 is
   merged as `6497a26`; numerical external evaluator stays `f119906` although
   main includes its reporting fix. No benchmark CI is configured.
-- Preserve all models/audio/results, gateway/tunnel and disabled oMLX settings.
+- Preserve all models/audio/results and disabled oMLX settings.
   No Grimoire operations, automatic serving restore or global fleet edits.
 
 ## Migration Summary
@@ -385,6 +385,16 @@ Patch chain in `patches/atomic-llama-cpp/`, applied in order by `Dockerfile`:
 
 ## Recent Changes
 
+- 2026-11-20: **transcribe.lost.plus is retired** — The operator no longer
+  uses it. The `transcribe.lost.plus` DNS record, the `yeowoolmac-stt`
+  Cloudflare tunnel, its host-only configuration rule and the Mac's tunnel
+  token are deleted. The three `plus.lost.inference.stt*` LaunchAgents are
+  booted out and their plists removed; nothing listens on 8791 or 8792. The
+  service had no hub registration of its own (it used `chat-v1`). The MLX
+  export, `~/inference/.venv-stt`, logs and every model/audio/result file stay
+  on the Mac. oMLX (`plus.lost.omlx`) stays stopped and disabled.
+  [`deploy/yeowoolmac`](../deploy/yeowoolmac/README.md) keeps the export and
+  benchmark procedure.
 - 2026-11-20: **Mirror mode: one model on both GPUs** — With the `mirror`
   preset active, any model loaded from the picker also starts a hidden copy
   on the other GPU, and chats to it use both: each conversation stays on its

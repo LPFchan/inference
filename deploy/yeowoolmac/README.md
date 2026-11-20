@@ -1,10 +1,17 @@
 # Mac transcription
 
-Nemotron 3.5 Transcribe 30B-A4B runs on yeowoolmac's **The Rest** partition
-(M4 Pro, 24 GB). The native MLX backend binds loopback `8791`; the inference
-Common Auth gateway binds loopback `8792`, using the existing `chat-v1` token
+**Retired on 2026-11-20.** `https://transcribe.lost.plus` no longer exists:
+its DNS record, the `yeowoolmac-stt` Cloudflare tunnel, the tunnel token and
+the three `plus.lost.inference.stt*` LaunchAgents are gone. The MLX export in
+`~/models/stt/nemotron-transcribe-20261029`, `~/inference/.venv-stt` and the
+benchmark results stay on the Mac. This page keeps the export and benchmark
+procedure, and the installation steps the service used.
+
+Nemotron 3.5 Transcribe 30B-A4B ran on yeowoolmac's **The Rest** partition
+(M4 Pro, 24 GB). The native MLX backend bound loopback `8791`; the inference
+Common Auth gateway bound loopback `8792`, using the existing `chat-v1` token
 scope and `chat` browser visibility. A dedicated `yeowoolmac-stt` Cloudflare
-tunnel fronts `https://transcribe.lost.plus`. No Grimoire process is required.
+tunnel fronted `https://transcribe.lost.plus`. No Grimoire process was required.
 
 ## Model preparation
 
@@ -69,7 +76,8 @@ serially with a four-request admission limit. Temporary audio is deleted.
 ## Frozen benchmark
 
 Use the existing 2,624 FLEURS test WAVs and manifest; preserve all previous
-predictions. Run against the same backend that serves production:
+predictions. The runner posts to the MLX backend on loopback `8791`; start it
+by hand first, with the backend command and environment from `install-stt.sh`:
 
 ```sh
 PYTHONPATH=src .venv-stt/bin/python scripts/stt-benchmark.py \

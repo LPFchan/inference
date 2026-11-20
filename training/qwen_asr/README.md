@@ -498,6 +498,8 @@ oMLX settings unchanged, runs the bounded command, then restores the backend
 and checks health on normal exit or handled interruption. SIGKILL/power loss
 can prevent shell cleanup; inspect the slot directory and LaunchAgent before
 recovering. This is temporary service downtime, not concurrent serving/training.
+The Mac transcription service was retired on 2026-11-20; with no backend
+LaunchAgent loaded, the wrapper just runs the command.
 
 ## Ongoing single-worker hill-climb
 
