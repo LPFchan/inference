@@ -54,6 +54,8 @@ RUN git init third_party/llama.cpp-b12590 \
     && test "$(git -C third_party/llama.cpp-b12590 rev-parse HEAD)" = "${LLAMA_SHA}" \
     && cmake -S tools/vision -B build-vision -G Ninja \
         -DCMAKE_BUILD_TYPE=Release \
+        -DSTRATA_VISION_CUDA=ON \
+        -DCMAKE_CUDA_ARCHITECTURES="${CUDA_ARCHITECTURES}" \
         -DLLAMA_DIR=/app/third_party/llama.cpp-b12590 \
     && cmake --build build-vision -j"$(nproc)" --target maya-vision
 

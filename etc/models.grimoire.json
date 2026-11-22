@@ -979,7 +979,7 @@
         "completion",
         "multimodal"
       ],
-      "ctx-size": 262144,
+      "ctx-size": 196608,
       "added": "2026-11-22T04:18:06.697061+00:00",
       "family": "inkling"
     }

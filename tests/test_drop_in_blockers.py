@@ -885,6 +885,32 @@ class DropInBlockerTests(unittest.TestCase):
         finally:
             entrypoint.usage_store = old_usage_store
 
+    def test_cache_warm_skipped_for_remote_backend(self):
+        from unittest import mock
+
+        called = []
+
+        async def fake_with_fallback(*args, **kwargs):
+            called.append((args, kwargs))
+            return {"ok": True}
+
+        with mock.patch.object(entrypoint, "require_api", return_value=("sub", "hash")), \
+             mock.patch.object(entrypoint.registry, "resolve", return_value="Inkling-2-Mini"), \
+             mock.patch.object(entrypoint.registry, "get", return_value={"backend": "vllm-remote"}), \
+             mock.patch.object(entrypoint, "_with_fallback", side_effect=fake_with_fallback):
+            request = mock.MagicMock()
+            request.headers = {"x-grimoire-cache-warm": "1"}
+            request.json = mock.AsyncMock(return_value={
+                "model": "Inkling-2-Mini",
+                "messages": [{"role": "user", "content": "hi"}],
+                "n_predict": 0,
+                "stream": False,
+            })
+            resp = asyncio.run(entrypoint.chat_completions(request))
+            self.assertEqual(resp.status_code, 200)
+            self.assertEqual(json.loads(resp.body), {"status": "skipped", "reason": "remote_backend"})
+            self.assertEqual(called, [])
+
     def test_history_delete_cascades_messages(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = str(Path(tmp) / "history.sqlite3")

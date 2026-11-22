@@ -61,6 +61,7 @@ from grimoire.registry import (
     resolve_path,
     _looks_like_local_path,
     BACKEND_LLAMA,
+    BACKEND_VLLM_REMOTE,
 )
 from grimoire.model_manager import (
     build_cmd,
@@ -364,6 +365,10 @@ async def chat_completions(request: Request):
             detail=f"Model '{requested_model}' was not found in the registry."
         )
 
+    is_cache_warm = request.headers.get("x-grimoire-cache-warm") == "1"
+    if is_cache_warm and (registry.get(model_name) or {}).get("backend") == BACKEND_VLLM_REMOTE:
+        return JSONResponse(status_code=200, content={"status": "skipped", "reason": "remote_backend"})
+
     try:
         history_conversation_id = _history_conversation_id(request, payload)
         history_conversation_id = _validated_history_conversation_id(
@@ -378,7 +383,7 @@ async def chat_completions(request: Request):
             user_hash=user_hash,
             conversation_id=conversation_id,
             history_conversation_id=history_conversation_id,
-            record_usage=request.headers.get("x-grimoire-cache-warm") != "1",
+            record_usage=not is_cache_warm,
             request=request,
         ), replica=replica)
     except HTTPException:

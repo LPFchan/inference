@@ -386,19 +386,23 @@ Patch chain in `patches/atomic-llama-cpp/`, applied in order by `Dockerfile`:
 ## Recent Changes
 
 - 2026-11-22: **Inkling-2-Mini served on GPU 1 via `maya-ik2`** — Built
-  `alesha-pro/maya-inkling-mini` (`e819852`) plus CPU `maya-vision`
-  (`llama.cpp` `b12590` / `34ff2e0`) in [`docker/maya-ik2`](../docker/maya-ik2/Dockerfile)
-  as the `maya-ik2` compose service (`NVIDIA_VISIBLE_DEVICES=1`, internal port
-  18000). Weights (`Inkling-2-Mini-UD-Q4_K_XL.gguf`, `mmproj-BF16.gguf`,
-  `mtp.safetensors`) and extracted tokenizer live under
-  `/home/yeowool/models/inkling-2-mini`. Runs with 262,144 context, FP8 KV,
-  DSpark drafter, and CPU vision at 23,507 MiB VRAM on GPU 1 (867 MiB free).
-  Registered in Grimoire as `Inkling-2-Mini` (`vllm-remote`,
-  `http://maya-ik2:18000`, `family: inkling`) and paired with the `single-gpu`
-  preset so GPU 0 stays free for on-demand local `llama-server` models.
-  Verified through Grimoire: text (`reasoning_effort: none`, 95.5 tok/s cold),
-  reasoning (`reasoning_effort: low`, `437 * 4 = 1748`, 186.0 tok/s with
-  drafter), and vision (64×64 red PNG -> `Red` in 0.47 s).
+  `alesha-pro/maya-inkling-mini` (`e819852`) plus CUDA `maya-vision`
+  (`llama.cpp` `b12590` / `34ff2e0`, `-DSTRATA_VISION_CUDA=ON`) in
+  [`docker/maya-ik2`](../docker/maya-ik2/Dockerfile) as the `maya-ik2` compose
+  service (`NVIDIA_VISIBLE_DEVICES=1`, internal port 18000). Weights
+  (`Inkling-2-Mini-UD-Q4_K_XL.gguf`, `mmproj-BF16.gguf`, `mtp.safetensors`) and
+  extracted tokenizer live under `/home/yeowool/models/inkling-2-mini`. Runs
+  with 196,608 context, FP8 KV, DSpark drafter, and GPU vision at 23,802 MiB
+  VRAM on GPU 1 (572 MiB free). Registered in Grimoire as `Inkling-2-Mini`
+  (`vllm-remote`, `http://maya-ik2:18000`, `family: inkling`) and paired with
+  the `single-gpu` preset so GPU 0 stays free for on-demand local `llama-server`
+  models. Grimoire also skips `x-grimoire-cache-warm: 1` requests for
+  `vllm-remote` backends so the web UI's `n_predict: 0` warm request (which
+  omits tools) no longer wipes single-sequence remote KV caches or triggers
+  phantom completions. Verified through Grimoire: Turn 2 reused all 2,432
+  cached prompt tokens (`prompt_ms: 77.9 ms`, `138.7 tok/s`), and a 221 KB
+  screenshot encoded and answered (`Inkling-2-Mini`) in 1.76 s total (down from
+  ~84 s on CPU vision).
 - 2026-11-20: **Gemma 12B serves 16 requests per copy** — All 19
   `gemma-4-12b` entries (base and eastself checkpoints) now run with
   `parallel: 16` and `--kv-unified`: the 16 slots share the full 120k context
