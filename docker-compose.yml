@@ -83,3 +83,24 @@ services:
       - GRIMOIRE_GATEWAY_URL=http://grimoire:9001
     depends_on:
       - grimoire
+
+  # Dedicated Inkling-2-Mini engine (alesha-pro/maya-inkling-mini) pinned to GPU 1.
+  # Paired with Grimoire's `single-gpu` preset (GPU 0 free for local llama.cpp) and
+  # registered as a `vllm-remote` model at http://maya-ik2:18000.
+  maya-ik2:
+    build:
+      context: ./docker/maya-ik2
+    image: maya-ik2:local
+    container_name: maya-ik2
+    runtime: nvidia
+    restart: unless-stopped
+    volumes:
+      - ${MODELS_DIR}:/models
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=1
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:18000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s

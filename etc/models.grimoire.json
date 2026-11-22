@@ -970,6 +970,18 @@
       "ctx-size": 524288,
       "added": "2026-11-17T20:36:43.644416+00:00",
       "family": "inkling"
+    },
+    "Inkling-2-Mini": {
+      "backend": "vllm-remote",
+      "remote-url": "http://maya-ik2:18000",
+      "backend-model-id": "inkling-2-mini",
+      "capabilities": [
+        "completion",
+        "multimodal"
+      ],
+      "ctx-size": 262144,
+      "added": "2026-11-22T04:18:06.697061+00:00",
+      "family": "inkling"
     }
   },
   "fixed": {
