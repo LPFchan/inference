@@ -14,7 +14,9 @@
     "IK2_GATE_BF16": "1",
     "IK2_Q8_UNROLL": "1",
     "IK2_BATCH_PREFILL": "1",
-    "IK2_DRAFT_CTX": "65536"
+    "IK2_DRAFT_CTX": "65536",
+    "IK2_SLOT_KEEP": "8",
+    "IK2_SLOT_RAM_GB": "8"
   },
   "tokenizer": "/models/inkling-2-mini/tokenizer",
   "model_name": "inkling-2-mini",

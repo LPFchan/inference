@@ -1,0 +1,554 @@
+diff --git a/src/ik2/ik2_draft.cu b/src/ik2/ik2_draft.cu
+index 41f6eff..2081f8b 100644
+--- a/src/ik2/ik2_draft.cu
++++ b/src/ik2/ik2_draft.cu
+@@ -532,6 +532,44 @@ void propose(Drafter* d, int anchor, const float* anchor_h, int P, const uint16_
+ }
+ 
+ size_t bytes(const Drafter* d) { return d->vram; }
++
++// A conversation parked in host RAM (the serve loop's IK2_SLOT_KEEP): each layer's context cache, slots 0 .. min(P, cap)
++// - 1 (the positions themselves before a ring wraps, the whole ring after), K then V, and f_rnn last.
++size_t context_bytes(const Drafter* d, int P) {
++    const size_t KD = (size_t) d->KV * 128;
++    size_t b = (size_t) d->C * 4;
++    for (const auto& l : d->L) b += 2 * (size_t) std::min(P, l.cap) * KD * (l.kc16 ? 2 : 4);
++    return b;
++}
++static void copy_context(Drafter* d, int P, uint8_t* host, bool save) {
++    const size_t KD = (size_t) d->KV * 128;
++    cu(cudaStreamSynchronize(d->s), "drafter park");
++    size_t at = 0;
++    auto one = [&](void* dev, size_t n) {
++        cu(save ? cudaMemcpy(host + at, dev, n, cudaMemcpyDeviceToHost)
++                : cudaMemcpy(dev, host + at, n, cudaMemcpyHostToDevice),
++           "drafter park");
++        at += n;
++    };
++    for (auto& l : d->L) {
++        const size_t n = (size_t) std::min(P, l.cap) * KD * (l.kc16 ? 2 : 4);
++        one(l.kc16 ? (void*) l.kc16 : (void*) l.kc, n);
++        one(l.kc16 ? (void*) l.vc16 : (void*) l.vc, n);
++    }
++    one(d->f_rnn, (size_t) d->C * 4);
++}
++void save_context(Drafter* d, int P, uint8_t* out) { copy_context(d, P, out, true); }
++void load_context(Drafter* d, int P, const uint8_t* in) { copy_context(d, P, const_cast<uint8_t*>(in), false); }
++int f_rnn_dim(const Drafter* d) { return d->C; }
++void save_f_rnn(Drafter* d, float* out) {
++    cu(cudaStreamSynchronize(d->s), "drafter f_rnn");
++    cu(cudaMemcpy(out, d->f_rnn, (size_t) d->C * 4, cudaMemcpyDeviceToHost), "drafter f_rnn");
++}
++void load_f_rnn(Drafter* d, const float* in) {
++    cu(cudaStreamSynchronize(d->s), "drafter f_rnn");
++    cu(cudaMemcpy(d->f_rnn, in, (size_t) d->C * 4, cudaMemcpyHostToDevice), "drafter f_rnn");
++}
++
+ void set_head_q8(Drafter* d, const int8_t* q8, const uint16_t* q8d) { d->head_q8 = q8, d->head_q8d = q8d; }
+ 
+ }  // namespace ik2::draft
+diff --git a/src/ik2/ik2_draft.hpp b/src/ik2/ik2_draft.hpp
+index 296da57..33dd6a8 100644
+--- a/src/ik2/ik2_draft.hpp
++++ b/src/ik2/ik2_draft.hpp
+@@ -47,5 +47,14 @@ void propose(Drafter* d, int anchor, const float* anchor_h, int P, const uint16_
+ void set_head_q8(Drafter* d, const int8_t* q8, const uint16_t* q8d);
+ /// VRAM it holds, bytes.
+ size_t bytes(const Drafter* d);
++/// A conversation of P positions kept in host RAM and brought back (the serve loop's IK2_SLOT_KEEP): the bytes of its
++/// context caches (each layer's slots 0 .. min(P, cap) - 1, and f_rnn), and their copy out to / back from `host`.
++size_t context_bytes(const Drafter* d, int P);
++void save_context(Drafter* d, int P, uint8_t* out);
++void load_context(Drafter* d, int P, const uint8_t* in);
++/// Save / restore the Markov head's f_rnn vector ([C] F32) for exact-length prompt snapshots.
++int f_rnn_dim(const Drafter* d);
++void save_f_rnn(Drafter* d, float* out);
++void load_f_rnn(Drafter* d, const float* in);
+ 
+ }  // namespace ik2::draft
+diff --git a/src/ik2/ik2_main.cu b/src/ik2/ik2_main.cu
+index 86f0df1..3d3b5de 100644
+--- a/src/ik2/ik2_main.cu
++++ b/src/ik2/ik2_main.cu
+@@ -5254,8 +5254,12 @@ int main(int argc, char** argv) {
+         // goes back to that point instead of the start. Full-layer KV needs nothing: positions rewrite cleanly.
+         struct Snap {
+             int pos = -1;
++            bool shared = false;
++            uint64_t tick = 0;
+             std::vector<float*> h;   // [layer * 4 + conv]
+             std::vector<std::vector<uint8_t>> kv_k, kv_v;
++            std::vector<float> last;    // prompt-end logits [n_vocab] when saved at end of prompt
++            std::vector<float> f_rnn;   // drafter f_rnn [C] when saved at end of prompt
+         };
+         const size_t kv_elem_b = g_kv_fp8 ? 1 : 2;
+         std::vector<Snap> snaps(8);
+@@ -5274,7 +5278,7 @@ int main(int argc, char** argv) {
+                 }
+             }
+         }
+-        int snap_next = 0;
++        uint64_t snap_tick = 0;
+         auto snap_copy = [&](Snap& sn, bool save) {
+             const size_t cc[4] = {KD, KD, C, C};
+             const cudaMemcpyKind kv_dir = save ? cudaMemcpyDeviceToHost : cudaMemcpyHostToDevice;
+@@ -5311,8 +5315,49 @@ int main(int argc, char** argv) {
+             }
+             for (auto& D : g_dev) CU(cudaStreamSynchronize(D.s));
+         };
++        auto pick_snap_slot = [&](int pos) {
++            for (int i = 0; i < (int) snaps.size(); ++i)
++                if (snaps[i].pos == pos) return i;
++            for (int i = 0; i < (int) snaps.size(); ++i)
++                if (snaps[i].pos < 0) return i;
++            int victim = -1;
++            for (int i = 0; i < (int) snaps.size(); ++i)
++                if (!snaps[i].shared && (victim < 0 || snaps[i].tick < snaps[victim].tick)) victim = i;
++            if (victim < 0) {
++                for (int i = 0; i < (int) snaps.size(); ++i)
++                    if (victim < 0 || snaps[i].tick < snaps[victim].tick) victim = i;
++            }
++            return victim;
++        };
++        auto save_snap = [&](int pos, bool is_shared, bool with_logits) {
++            const int idx = pick_snap_slot(pos);
++            Snap& sn = snaps[idx];
++            const bool keep_shared = (sn.pos == pos) && sn.shared;
++            sn.pos = pos;
++            sn.shared = is_shared || keep_shared;
++            sn.tick = ++snap_tick;
++            snap_copy(sn, true);
++            if (with_logits) {
++                sn.last = last;
++                if (drafter) {
++                    sn.f_rnn.resize((size_t) ik2::draft::f_rnn_dim(drafter));
++                    ik2::draft::save_f_rnn(drafter, sn.f_rnn.data());
++                } else {
++                    sn.f_rnn.clear();
++                }
++            } else {
++                sn.last.clear();
++                sn.f_rnn.clear();
++            }
++            return idx;
++        };
+         auto reset = [&]() {
+-            for (auto& sn : snaps) sn.pos = -1;
++            for (auto& sn : snaps) {
++                sn.pos = -1;
++                sn.shared = false;
++                sn.last.clear();
++                sn.f_rnn.clear();
++            }
+             for (int vis = 0; vis < (int) M.V.size(); ++vis) {
+                 Layer& Ly = bind_visit(M, vis);
+                 use_dev(Ly.dev);
+@@ -5325,6 +5370,206 @@ int main(int argc, char** argv) {
+             hist_sig.clear();
+             last.clear();
+         };
++        // IK2_SLOT_KEEP (8; 0: off): conversations and shared system prompts kept in host RAM.  A request from another
++        // session parks the held conversation (at its latest snapshot) and any shared prefix snapshot (captured while
++        // the drafter's context is fresh) into host RAM, so returning sessions or new sessions sharing a system prompt
++        // restore by copy instead of reading the prompt from token 0.  Bounded by IK2_SLOT_RAM_GB (default: half of
++        // free RAM over a 4 GiB reserve) and IK2_SLOT_KEEP; LRU non-shared entries are evicted before shared prefixes.
++        struct Park {
++            std::vector<int> ids;                               // the tokens before its point
++            std::vector<uint64_t> sig;                          // their pictures' hashes (as hist_sig: may be shorter)
++            std::vector<std::vector<uint8_t>> h, kv_k, kv_v;    // conv histories [visit * 4 + conv]; K / V [visit]
++            std::vector<uint8_t> draft;                         // the drafter's context caches
++            std::vector<float> last;                            // prompt-end logits [n_vocab] when parked at prompt end
++            std::vector<float> f_rnn;                           // drafter f_rnn [C] when parked at prompt end
++            bool shared = false;
++            size_t bytes = 0;
++            uint64_t tick = 0;
++        };
++        std::vector<std::unique_ptr<Park>> parks;
++        const size_t kParkMax = getenv("IK2_SLOT_KEEP") ? (size_t) std::clamp(atoi(getenv("IK2_SLOT_KEEP")), 0, 64) : 8;
++        const bool park_on = kParkMax > 0;
++        const double park_cap_gib = getenv("IK2_SLOT_RAM_GB") ? std::atof(getenv("IK2_SLOT_RAM_GB")) : 0.0;
++        constexpr int kParkLeast = 2048;       // a shorter non-shared conversation is read again in about a second
++        constexpr int kSharedParkLeast = 256;  // shared system prompts benefit across sessions even when compact
++        constexpr int kParkGain = 1024;        // a parked conversation comes back when it saves at least this many tokens
++        uint64_t park_tick = 0;
++        double park_trimmed = -1e9;
++        auto ram_free_now = []() -> double {
++#ifdef _WIN32
++            MEMORYSTATUSEX ms{};
++            ms.dwLength = sizeof(ms);
++            return GlobalMemoryStatusEx(&ms) ? (double) std::min(ms.ullAvailPhys, ms.ullAvailPageFile) : 0.0;
++#else
++            double kb = 0;
++            if (FILE* f = std::fopen("/proc/meminfo", "r")) {
++                char line[256];
++                while (std::fgets(line, sizeof line, f))
++                    if (std::sscanf(line, "MemAvailable: %lf kB", &kb) == 1) break;
++                std::fclose(f);
++            }
++            return kb * 1024;
++#endif
++        };
++        auto starts = [](const std::vector<int>& a, const std::vector<uint64_t>& as, const std::vector<int>& b,
++                         const std::vector<uint64_t>& bs) {
++            if (a.size() > b.size()) return false;
++            for (size_t i = 0; i < a.size(); ++i)
++                if (a[i] != b[i] || (i < as.size() ? as[i] : 0) != (i < bs.size() ? bs[i] : 0)) return false;
++            return true;
++        };
++        auto ring = [&](int v) { return M.L[M.V[v].l].sliding && M.V[v].kv_cap < ctx; };
++        auto park_snap = [&](const Snap& sn, const std::vector<int>& src_ids, const std::vector<uint64_t>& src_sig,
++                             const Park* keep) {
++            const double t0 = now(), G = 1073741824.0;
++            const int pos = sn.pos;
++            if (pos <= 0 || (size_t) pos > src_ids.size()) return;
++            if (sn.shared) {
++                for (auto& ep : parks) {
++                    if (ep->shared && ep->ids.size() == (size_t) pos && starts(ep->ids, ep->sig, src_ids, src_sig)) {
++                        ep->tick = ++park_tick;
++                        return;
++                    }
++                }
++            }
++            const size_t row_b = (size_t) KD * kv_elem_b, cc[4] = {KD, KD, C, C};
++            size_t need = (drafter ? ik2::draft::context_bytes(drafter, pos) : 0) +
++                          (sn.last.size() + sn.f_rnn.size()) * 4;
++            for (int v = 0; v < (int) M.V.size(); ++v)
++                need += (size_t) 3 * (2 * KD + 2 * C) * 4 + 2 * (size_t) (ring(v) ? std::min(pos, c.window) : pos) * row_b;
++            if (!sn.shared) {
++                // (the same conversation parked at an earlier point: this one replaces it; never drop a shared prefix)
++                for (size_t i = 0; i < parks.size();)
++                    if (parks[i].get() != keep && !parks[i]->shared &&
++                        starts(parks[i]->ids, parks[i]->sig, src_ids, src_sig) &&
++                        parks[i]->ids.size() <= (size_t) pos)
++                        parks.erase(parks.begin() + (long) i);
++                    else
++                        ++i;
++            }
++            size_t held = 0;
++            for (auto& p : parks) held += p->bytes;
++            double free_b = ram_free_now();
++#ifdef _WIN32
++            if ((double) need > ((double) held + free_b - 4 * G) / 2 - (double) held && now() - park_trimmed > 60) {
++                park_trimmed = now();
++                SetProcessWorkingSetSize(GetCurrentProcess(), (SIZE_T) -1, (SIZE_T) -1);
++                free_b = ram_free_now();
++            }
++#endif
++            double room = ((double) held + free_b - 4 * G) / 2;
++            if (park_cap_gib > 0) room = std::min(room, park_cap_gib * G);
++            while (!parks.empty() && ((double) (held + need) > room || parks.size() >= kParkMax)) {
++                int lru = -1;
++                for (int i = 0; i < (int) parks.size(); ++i)
++                    if (parks[i].get() != keep && !parks[i]->shared && (lru < 0 || parks[i]->tick < parks[lru]->tick))
++                        lru = i;
++                if (lru < 0) {
++                    for (int i = 0; i < (int) parks.size(); ++i)
++                        if (parks[i].get() != keep && (lru < 0 || parks[i]->tick < parks[lru]->tick)) lru = i;
++                }
++                if (lru < 0) break;
++                held -= parks[lru]->bytes;
++                parks.erase(parks.begin() + lru);
++            }
++            if ((double) (held + need) > room || parks.size() >= kParkMax) {
++                std::fprintf(stderr, "ik2 slots: a %s of %d tokens not kept (%.2f GiB; room for %.2f GiB)\n",
++                             sn.shared ? "shared prefix" : "conversation", pos, need / G, std::max(0.0, room - held) / G);
++                return;
++            }
++            auto p = std::make_unique<Park>();
++            try {
++                p->ids.assign(src_ids.begin(), src_ids.begin() + pos);
++                p->sig.assign(src_sig.begin(), src_sig.begin() + (long) std::min(src_sig.size(), (size_t) pos));
++                p->shared = sn.shared;
++                p->last = sn.last;
++                p->f_rnn = sn.f_rnn;
++                p->h.resize(M.V.size() * 4);
++                p->kv_k.resize(M.V.size());
++                p->kv_v.resize(M.V.size());
++                for (int v = 0; v < (int) M.V.size(); ++v) {
++                    Layer& Ly = bind_visit(M, v);
++                    use_dev(Ly.dev);
++                    for (int i = 0; i < 4; ++i) {
++                        p->h[v * 4 + i].resize(3 * cc[i] * 4);
++                        CU(cudaMemcpyAsync(p->h[v * 4 + i].data(), sn.h[v * 4 + i], 3 * cc[i] * 4, cudaMemcpyDeviceToHost, g_s));
++                    }
++                    if (ring(v)) {
++                        const size_t n = (size_t) std::min(pos, c.window) * row_b;
++                        p->kv_k[v].assign(sn.kv_k[v].begin(), sn.kv_k[v].begin() + (long) n);
++                        p->kv_v[v].assign(sn.kv_v[v].begin(), sn.kv_v[v].begin() + (long) n);
++                    } else {
++                        const size_t n = (size_t) pos * row_b;
++                        p->kv_k[v].resize(n);
++                        p->kv_v[v].resize(n);
++                        CU(cudaMemcpyAsync(p->kv_k[v].data(), g_kv_fp8 ? (void*) Ly.kc8 : (void*) Ly.kc, n,
++                                           cudaMemcpyDeviceToHost, g_s));
++                        CU(cudaMemcpyAsync(p->kv_v[v].data(), g_kv_fp8 ? (void*) Ly.vc8 : (void*) Ly.vc, n,
++                                           cudaMemcpyDeviceToHost, g_s));
++                    }
++                }
++                for (auto& D : g_dev) CU(cudaStreamSynchronize(D.s));
++                if (drafter) {
++                    p->draft.resize(ik2::draft::context_bytes(drafter, pos));
++                    ik2::draft::save_context(drafter, pos, p->draft.data());
++                }
++            } catch (const std::bad_alloc&) {
++                std::fprintf(stderr, "ik2 slots: a %s of %d tokens not kept (no RAM for %.2f GiB)\n",
++                             sn.shared ? "shared prefix" : "conversation", pos, need / G);
++                return;
++            }
++            p->bytes = need;
++            p->tick = ++park_tick;
++            parks.push_back(std::move(p));
++            std::fprintf(stderr, "ik2 slots: kept a %s of %d tokens (%.2f GiB) in %.0f ms; %zu kept, %.2f GiB\n",
++                         sn.shared ? "shared prefix" : "conversation", pos, need / G, (now() - t0) * 1e3,
++                         parks.size(), (held + need) / G);
++        };
++        auto park_restore = [&](Park& p, bool exact_end) {
++            const double t0 = now();
++            const int pos = (int) p.ids.size();
++            const size_t row_b = (size_t) KD * kv_elem_b, cc[4] = {KD, KD, C, C};
++            for (auto& sn : snaps) {
++                sn.pos = -1;
++                sn.shared = false;
++                sn.last.clear();
++                sn.f_rnn.clear();
++            }
++            Snap& sn = snaps[0];
++            for (int v = 0; v < (int) M.V.size(); ++v) {
++                Layer& Ly = bind_visit(M, v);
++                use_dev(Ly.dev);
++                for (int i = 0; i < 4; ++i)
++                    CU(cudaMemcpyAsync(sn.h[v * 4 + i], p.h[v * 4 + i].data(), 3 * cc[i] * 4, cudaMemcpyHostToDevice, g_s));
++                if (ring(v)) {
++                    std::copy(p.kv_k[v].begin(), p.kv_k[v].end(), sn.kv_k[v].begin());
++                    std::copy(p.kv_v[v].begin(), p.kv_v[v].end(), sn.kv_v[v].begin());
++                } else {
++                    const size_t n = (size_t) pos * row_b;
++                    CU(cudaMemcpyAsync(g_kv_fp8 ? (void*) Ly.kc8 : (void*) Ly.kc, p.kv_k[v].data(), n,
++                                       cudaMemcpyHostToDevice, g_s));
++                    CU(cudaMemcpyAsync(g_kv_fp8 ? (void*) Ly.vc8 : (void*) Ly.vc, p.kv_v[v].data(), n,
++                                       cudaMemcpyHostToDevice, g_s));
++                }
++            }
++            for (auto& D : g_dev) CU(cudaStreamSynchronize(D.s));
++            sn.pos = pos;
++            sn.shared = p.shared;
++            sn.tick = ++snap_tick;
++            sn.last = p.last;
++            sn.f_rnn = p.f_rnn;
++            snap_copy(sn, false);
++            if (drafter) {
++                if (!p.draft.empty()) ik2::draft::load_context(drafter, pos, p.draft.data());
++                if (!p.f_rnn.empty()) ik2::draft::load_f_rnn(drafter, p.f_rnn.data());
++            }
++            hist = p.ids;
++            hist_sig = p.sig;
++            last = exact_end ? p.last : std::vector<float>{};
++            p.tick = ++park_tick;
++            std::fprintf(stderr, "ik2 slots: back to a %s of %d tokens in %.0f ms\n",
++                         p.shared ? "shared prefix" : "conversation", pos, (now() - t0) * 1e3);
++        };
+         auto parse_ints = [](const std::string& t) {
+             std::vector<int> v;
+             for (const char* p = t.c_str(); *p;) {
+@@ -5413,6 +5658,8 @@ int main(int argc, char** argv) {
+                 continue;
+             }
+             std::vector<int> stops;
++            std::vector<int> req_marks;
++            int shared_pos = -1, tail_pos = -1;
+             if (serve_maya) {
+                 in >> max_new;
+                 std::string w;
+@@ -5430,6 +5677,9 @@ int main(int argc, char** argv) {
+                     else if (k == "top_p") top_p = std::atof(v.c_str());
+                     else if (k == "top_k") top_k = std::atoi(v.c_str());
+                     else if (k == "seed") seed = std::atoll(v.c_str());
++                    else if (k == "shared") shared_pos = std::atoi(v.c_str());
++                    else if (k == "tail") tail_pos = std::atoi(v.c_str());
++                    else if (k == "marks") req_marks = parse_ints(v);
+                 }
+                 stops = eos_ids;
+             } else {
+@@ -5459,30 +5709,80 @@ int main(int argc, char** argv) {
+                     continue;
+                 }
+             }
++            std::vector<int> rmarks;
++            auto add_mark = [&](int p) {
++                if (p > 0 && p < (int) ids.size() && g_img.at(p) < 0) rmarks.push_back(p);
++            };
++            add_mark(shared_pos);
++            add_mark(tail_pos);
++            for (int p : req_marks) add_mark(p);
++            std::sort(rmarks.begin(), rmarks.end());
++            rmarks.erase(std::unique(rmarks.begin(), rmarks.end()), rmarks.end());
++            if (shared_pos <= 0 || shared_pos >= (int) ids.size() || g_img.at(shared_pos) >= 0) shared_pos = -1;
+             busy = true;
+             if (seed >= 0) rng.seed((uint64_t) seed);
+             g_cancel = 0;
+             size_t L = 0;   // (a picture's position is the same only with the same rows: its hash beside its token)
+             auto hsig = [&](size_t i) { return i < hist_sig.size() ? hist_sig[i] : (uint64_t) 0; };
+             while (L < hist.size() && L < ids.size() && hist[L] == ids[L] && hsig(L) == sig[L]) ++L;
++            auto snap_usable = [&](const Snap& sn) {
++                return sn.pos >= 0 && sn.pos <= (int) L &&
++                       (sn.pos < (int) ids.size() || (sn.pos == (int) ids.size() && !sn.last.empty()));
++            };
++            if (park_on && (hist.size() >= (size_t) kSharedParkLeast || !parks.empty())) {
++                int live = 0;
++                if (L == hist.size() && (L < ids.size() || !last.empty())) live = (int) L;
++                else
++                    for (auto& sn : snaps)
++                        if (snap_usable(sn)) live = std::max(live, sn.pos);
++                int top = -1;
++                for (int i = 0; i < (int) snaps.size(); ++i)
++                    if (snaps[i].pos >= 0 && (top < 0 || snaps[i].pos > snaps[top].pos)) top = i;
++                Park* back = nullptr;
++                for (auto& p : parks) {
++                    const bool usable =
++                        p->ids.size() < ids.size() || (p->ids.size() == ids.size() && !p->last.empty());
++                    const int gain = (p->shared && live == 0) ? (kSharedParkLeast - 1) : kParkGain;
++                    if (usable && (int) p->ids.size() > live + gain &&
++                        (!back || p->ids.size() > back->ids.size()) && starts(p->ids, p->sig, ids, sig))
++                        back = p.get();
++                }
++                if (top >= 0 && snaps[top].pos >= kParkLeast && snaps[top].pos > live + kParkGain)
++                    park_snap(snaps[top], hist, hist_sig, back);
++                if (back) {
++                    park_restore(*back, back->ids.size() == ids.size());
++                    L = hist.size();
++                }
++            }
+             if (L < hist.size() || L == ids.size()) {
+-                // back to the latest snapshot at or before L that leaves a token to run (one past it is dropped:
+-                // its position's state follows from a prefix the request does not share)
++                // back to the latest snapshot at or before L (exact prompt-end snapshots with saved logits also serve
++                // identical-prompt resends without re-prefilling)
+                 int best = -1;
+                 for (int i = 0; i < (int) snaps.size(); ++i)
+-                    if (snaps[i].pos >= 0 && snaps[i].pos <= (int) L && snaps[i].pos < (int) ids.size() &&
+-                        (best < 0 || snaps[i].pos > snaps[best].pos))
++                    if (snap_usable(snaps[i]) && (best < 0 || snaps[i].pos > snaps[best].pos))
+                         best = i;
+                 if (L == hist.size() && L == ids.size() && !last.empty()) {
+                     // (the same tokens again: the last logits answer)
+                 } else if (best >= 0) {
+                     const int sp = snaps[best].pos;
+                     snap_copy(snaps[best], false);
+-                    for (auto& sn : snaps)
+-                        if (sn.pos > sp) sn.pos = -1;
++                    for (auto& sn : snaps) {
++                        if (sn.pos > sp) {
++                            sn.pos = -1;
++                            sn.shared = false;
++                            sn.last.clear();
++                            sn.f_rnn.clear();
++                        }
++                    }
+                     hist.resize(sp);
+                     if (hist_sig.size() > (size_t) sp) hist_sig.resize(sp);
+-                    last.clear();
++                    if (sp == (int) ids.size()) {
++                        last = snaps[best].last;
++                        if (drafter && !snaps[best].f_rnn.empty())
++                            ik2::draft::load_f_rnn(drafter, snaps[best].f_rnn.data());
++                    } else {
++                        last.clear();
++                    }
+                     L = sp;
+                 } else {
+                     reset(), L = 0;
+@@ -5501,33 +5801,55 @@ int main(int argc, char** argv) {
+                 if (T_sup > 0 && (n_gpu == 1 || dual()) && (int) (ids.size() - L) > 64) {
+                     BigScratch bs;
+                     const int T_pass = big_begin(M, g_dev[0].W, dev_cache(0), (int) (ids.size() - L), (int) ids.size(), bs);
+-                    for (size_t p0 = L; p0 < ids.size(); p0 += T_pass) {
++                    for (size_t p0 = L; p0 < ids.size(); ) {
+                         if (g_cancel) {   // (a prompt half run: nothing of it is kept)
+                             cancelled = true;
+                             break;
+                         }
+-                        const int n = (int) std::min<size_t>(T_pass, ids.size() - p0);
+-                        const bool last_c = p0 + n == ids.size();
++                        int n = (int) std::min<size_t>(T_pass, ids.size() - p0);
++                        int hit_mark = -1;
++                        for (int mp : rmarks) {
++                            if (mp > (int) p0 && mp <= (int) (p0 + n)) {
++                                n = mp - (int) p0;
++                                hit_mark = mp;
++                                break;
++                            }
++                        }
++                        const bool last_c = p0 + (size_t) n == ids.size();
+                         std::vector<float> lo;
+                         forward_prefill_sup(M, ids.data() + p0, n, (int) p0, sub_chunk,
+                                             last_c ? OutMode::kLogits : OutMode::kNone, lo, nullptr, t_exp);
+                         if (last_c) last = std::move(lo);
++                        p0 += (size_t) n;
++                        if (hit_mark > 0 && !last_c) {
++                            const int si = save_snap(hit_mark, hit_mark == shared_pos, false);
++                            if (park_on && hit_mark == shared_pos && hit_mark >= kSharedParkLeast)
++                                park_snap(snaps[si], ids, sig, nullptr);
++                        }
+                         if (serve_maya) {   // (read, total, ms, tok/s, reused)
+                             const double ms = (now() - t0) * 1e3;
+-                            std::printf("PP %zu %zu %.0f %.1f %d\n", p0 + n, ids.size(), ms,
+-                                        (p0 + n - L) / std::max(1e-3, ms / 1e3), (int) L);
++                            std::printf("PP %zu %zu %.0f %.1f %d\n", p0, ids.size(), ms,
++                                        (p0 - L) / std::max(1e-3, ms / 1e3), (int) L);
+                             std::fflush(stdout);
+                         }
+                     }
+                     big_end(g_dev[0].W, dev_cache(0), bs);
+                 } else {
+-                    for (size_t p0 = L; p0 < ids.size(); p0 += chunk) {
++                    for (size_t p0 = L; p0 < ids.size(); ) {
+                         if (g_cancel) {   // (a prompt half run: nothing of it is kept)
+                             cancelled = true;
+                             break;
+                         }
+-                        const int n = (int) std::min<size_t>(chunk, ids.size() - p0);
+-                        const bool last_c = p0 + n == ids.size();
++                        int n = (int) std::min<size_t>(chunk, ids.size() - p0);
++                        int hit_mark = -1;
++                        for (int mp : rmarks) {
++                            if (mp > (int) p0 && mp <= (int) (p0 + n)) {
++                                n = mp - (int) p0;
++                                hit_mark = mp;
++                                break;
++                            }
++                        }
++                        const bool last_c = p0 + (size_t) n == ids.size();
+                         std::vector<float> lo;
+                         forward(M, ids.data() + p0, n, (int) p0, false, last_c ? OutMode::kLogits : OutMode::kNone,
+                                 std::string(), lo, nullptr, t_exp);
+@@ -5536,10 +5858,16 @@ int main(int argc, char** argv) {
+                             ik2::draft::write_context(drafter, g_taps, g_taps_ld, 0, n, (int) p0);
+                             if (last_c) ik2::draft::set_f_rnn(drafter, g_taps, g_taps_ld, n - 1);
+                         }
++                        p0 += (size_t) n;
++                        if (hit_mark > 0 && !last_c) {
++                            const int si = save_snap(hit_mark, hit_mark == shared_pos, false);
++                            if (park_on && hit_mark == shared_pos && hit_mark >= kSharedParkLeast)
++                                park_snap(snaps[si], ids, sig, nullptr);
++                        }
+                         if (serve_maya && ids.size() - L > (size_t)chunk) {
+                             const double ms = (now() - t0) * 1e3;
+-                            std::printf("PP %zu %zu %.0f %.1f %d\n", p0 + n, ids.size(), ms,
+-                                        (p0 + n - L) / std::max(1e-3, ms / 1e3), cached);
++                            std::printf("PP %zu %zu %.0f %.1f %d\n", p0, ids.size(), ms,
++                                        (p0 - L) / std::max(1e-3, ms / 1e3), cached);
+                             std::fflush(stdout);
+                         }
+                     }
+@@ -5556,10 +5884,7 @@ int main(int argc, char** argv) {
+             if (L < ids.size()) {
+                 hist = ids;
+                 hist_sig = sig;
+-                Snap& sn = snaps[snap_next];
+-                snap_next = (snap_next + 1) % (int) snaps.size();
+-                sn.pos = (int) hist.size();
+-                snap_copy(sn, true);
++                save_snap((int) hist.size(), false, true);
+             }
+             place_decode(M, (int)ids.size());
+             const double t1 = now();
