@@ -579,10 +579,70 @@ def _mount_webui():
     logger.info("Serving llama.cpp webui from %s", WEBUI_DIR)
 
 
+_MCP_TOKEN_CACHE: dict[tuple[str, str], tuple[str, float]] = {}
+_MCP_TOKEN_REFRESH_MARGIN_S = 60.0
+
+
+def _canonical_mcp_resource(parsed) -> str:
+    host = (parsed.hostname or "").lower().rstrip(".")
+    port = parsed.port
+    default_port = 443 if parsed.scheme == "https" else 80
+    netloc = f"{host}:{port}" if port and port != default_port else host
+    path = (parsed.path or "").rstrip("/") or "/"
+    return f"{parsed.scheme}://{netloc}{path}"
+
+
+async def _mint_first_party_mcp_token(
+    user_hash: str,
+    mcp_session: str,
+    resource: str,
+    *,
+    force_refresh: bool = False,
+) -> str | None:
+    """Exchange a browser lp_auth session for a short-lived resource-bound MCP Bearer token."""
+    cache_key = (user_hash, resource)
+    now = time.monotonic()
+    if not force_refresh:
+        cached = _MCP_TOKEN_CACHE.get(cache_key)
+        if cached and cached[1] - _MCP_TOKEN_REFRESH_MARGIN_S > now:
+            return cached[0]
+
+    try:
+        resp = await get_proxy_client().post(
+            f"{config.AUTH_ORIGIN}/api/chat/web-mcp-token",
+            headers={
+                "Cookie": f"{config.AUTH_COOKIE_NAME}={mcp_session}",
+                "Origin": config.AUTH_ORIGIN,
+            },
+            json={"resource": resource},
+            timeout=config.AUTH_TIMEOUT_S,
+        )
+    except httpx.HTTPError as exc:
+        logger.warning("Failed to mint MCP token for %s: %s", resource, exc)
+        return None
+
+    if resp.status_code != 200:
+        logger.info("MCP token mint for %s returned HTTP %s", resource, resp.status_code)
+        _MCP_TOKEN_CACHE.pop(cache_key, None)
+        return None
+
+    try:
+        data = resp.json()
+        token = data.get("access_token")
+        expires_in = float(data.get("expires_in", 300))
+    except (ValueError, TypeError, AttributeError):
+        return None
+    if not isinstance(token, str) or not token:
+        return None
+
+    _MCP_TOKEN_CACHE[cache_key] = (token, now + max(expires_in, 0.0))
+    return token
+
+
 @app.api_route("/cors-proxy", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"])
 async def cors_proxy(request: Request):
     """CORS proxy for MCP server connections — enables browser-to-MCP via the gateway."""
-    require_api(request)
+    _, user_hash = require_api(request)
     target_url = request.query_params.get("url")
     if not target_url:
         return JSONResponse(status_code=400, content={"error": "Missing 'url' query parameter"})
@@ -653,10 +713,14 @@ async def cors_proxy(request: Request):
         headers[key] = value
     mcp_session = request.headers.get(config.INTERNAL_MCP_SESSION_HEADER, "")
     has_explicit_auth = any(k.lower() in {"authorization", "x-api-key"} for k in headers)
+    minted_resource: str | None = None
     if mcp_session and not has_explicit_auth and config.is_first_party_mcp_target(parsed):
-        headers["Cookie"] = f"{config.AUTH_COOKIE_NAME}={mcp_session}"
-        for drop_key in [k for k in headers if k.lower() in {"origin", "referer"}]:
-            del headers[drop_key]
+        minted_resource = _canonical_mcp_resource(parsed)
+        mcp_token = await _mint_first_party_mcp_token(user_hash, mcp_session, minted_resource)
+        if mcp_token:
+            headers["Authorization"] = f"Bearer {mcp_token}"
+            for drop_key in [k for k in headers if k.lower() in {"origin", "referer"}]:
+                del headers[drop_key]
     headers.setdefault("Accept", "application/json, text/event-stream")
     headers["Host"] = parsed.netloc
 
@@ -669,6 +733,19 @@ async def cors_proxy(request: Request):
                 content=body or None,
                 extensions={"sni_hostname": parsed.hostname},
             )
+            if upstream.status_code == 401 and minted_resource and mcp_session:
+                refreshed = await _mint_first_party_mcp_token(
+                    user_hash, mcp_session, minted_resource, force_refresh=True
+                )
+                if refreshed:
+                    headers["Authorization"] = f"Bearer {refreshed}"
+                    upstream = await client.request(
+                        method=request.method,
+                        url=pinned_url,
+                        headers=headers,
+                        content=body or None,
+                        extensions={"sni_hostname": parsed.hostname},
+                    )
         except httpx.RequestError as e:
             return JSONResponse(status_code=502, content={"error": f"Proxy error: {e}"})
 

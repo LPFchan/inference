@@ -191,8 +191,16 @@ def _mock_cors_proxy_upstream(monkeypatch):
     return seen
 
 
-def test_cors_proxy_forwards_lp_auth_cookie_to_first_party_mcp_only(monkeypatch):
+def test_cors_proxy_mints_bearer_token_for_first_party_mcp_only(monkeypatch):
     seen = _mock_cors_proxy_upstream(monkeypatch)
+    entrypoint._MCP_TOKEN_CACHE.clear()
+    mint_calls = []
+
+    async def fake_mint(user_hash, mcp_session, resource, *, force_refresh=False):
+        mint_calls.append((user_hash, mcp_session, resource, force_refresh))
+        return f"lpoa_minted_{len(mint_calls)}"
+
+    monkeypatch.setattr(entrypoint, "_mint_first_party_mcp_token", fake_mint)
     client = TestClient(entrypoint.app)
     headers = {
         **AUTH,
@@ -208,12 +216,16 @@ def test_cors_proxy_forwards_lp_auth_cookie_to_first_party_mcp_only(monkeypatch)
         content=b"{}",
     )
     assert resp.status_code == 200
-    assert seen["headers"].get("Cookie") == f"{config.AUTH_COOKIE_NAME}=sess-123"
+    assert seen["headers"].get("Authorization") == "Bearer lpoa_minted_1"
+    assert "Cookie" not in seen["headers"]
     assert config.INTERNAL_MCP_SESSION_HEADER not in {k.lower() for k in seen["headers"]}
     assert "origin" not in {k.lower() for k in seen["headers"]}
     assert "referer" not in {k.lower() for k in seen["headers"]}
+    assert len(mint_calls) == 1
+    assert mint_calls[0][1] == "sess-123"
+    assert mint_calls[0][2] == "https://joongna.lost.plus/mcp"
 
-    # Explicit x-proxy-header-authorization takes precedence and does not also attach Cookie.
+    # Explicit x-proxy-header-authorization takes precedence and does not mint.
     resp_authz = client.post(
         "/cors-proxy",
         params={"url": "https://joongna.lost.plus/mcp"},
@@ -222,9 +234,9 @@ def test_cors_proxy_forwards_lp_auth_cookie_to_first_party_mcp_only(monkeypatch)
     )
     assert resp_authz.status_code == 200
     assert seen["headers"].get("authorization") == "Bearer explicit-tok"
-    assert "Cookie" not in seen["headers"]
+    assert len(mint_calls) == 1
 
-    # Passage, vault, auth, chat, non-/mcp paths, and third-party domains never get lp_auth.
+    # Passage, vault, auth, chat, non-/mcp paths, and third-party domains never mint or receive auth.
     for blocked_url in (
         "https://passage.lost.plus/mcp",
         "https://vault.lost.plus/mcp",
@@ -240,5 +252,7 @@ def test_cors_proxy_forwards_lp_auth_cookie_to_first_party_mcp_only(monkeypatch)
             content=b"{}",
         )
         assert r.status_code == 200
+        assert "Authorization" not in seen["headers"], f"Token leaked to {blocked_url}"
         assert "Cookie" not in seen["headers"], f"Cookie leaked to {blocked_url}"
         assert config.INTERNAL_MCP_SESSION_HEADER not in {k.lower() for k in seen["headers"]}
+    assert len(mint_calls) == 1
