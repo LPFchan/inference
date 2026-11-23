@@ -562,3 +562,70 @@ def test_attachment_only_user_message_falls_back_to_assistant_reply(title_env, m
     assert resp.json() == {"conversation_id": conv["id"], "title": "Red Spider Lily Identification"}
     assert "red spider lily" in seen_prompts[0]
     assert "/9j/4AAQ" not in seen_prompts[0]
+
+
+def test_first_exchange_skips_tool_preamble_and_stops_before_turn_two(title_env, monkeypatch):
+    store, _, _, client, headers = title_env
+    user_hash = auth.account_hash("user-1")
+
+    store.upsert_conversation_tree(
+        user_hash,
+        {"id": "conv-url", "name": "New chat", "lastModified": 999, "model": "Inkling-2-Small"},
+    )
+    store.create_message_branch(
+        user_hash,
+        "conv-url",
+        {"id": "u1", "parent": None, "role": "user", "content": "https://x.com/example/status/123 what's this??"},
+    )
+    store.create_message_branch(
+        user_hash,
+        "conv-url",
+        {
+            "id": "a1-preamble",
+            "parent": "u1",
+            "role": "assistant",
+            "content": "let me pull up that link first, one sec.",
+            "toolCalls": json.dumps([{"id": "tc1", "type": "function", "function": {"name": "tweet_fetch", "arguments": "{}"}}]),
+        },
+    )
+    store.create_message_branch(
+        user_hash,
+        "conv-url",
+        {"id": "t1", "parent": "a1-preamble", "role": "tool", "content": "raw tweet json"},
+    )
+    store.create_message_branch(
+        user_hash,
+        "conv-url",
+        {
+            "id": "a1-final",
+            "parent": "t1",
+            "role": "assistant",
+            "content": "That thread is a breakdown of the 2014 MH370 satellite video hoax.",
+            "model": "Inkling-2-Small",
+        },
+    )
+    store.create_message_branch(
+        user_hash,
+        "conv-url",
+        {"id": "u2", "parent": "a1-final", "role": "user", "content": "unrelated follow-up"},
+    )
+    store.create_message_branch(
+        user_hash,
+        "conv-url",
+        {"id": "a2", "parent": "u2", "role": "assistant", "content": "Turn two answer should not leak."},
+    )
+
+    seen_prompts = []
+
+    async def fake_completion(model_name, prompt_text, caller_hash):
+        seen_prompts.append(prompt_text)
+        return "MH370 Video Hoax Breakdown"
+
+    monkeypatch.setattr(history_route, "_call_title_completion", fake_completion)
+
+    resp = client.post("/history/conv-url/title", headers=headers)
+    assert resp.status_code == 200
+    assert resp.json() == {"conversation_id": "conv-url", "title": "MH370 Video Hoax Breakdown"}
+    assert "MH370 satellite video hoax" in seen_prompts[0]
+    assert "let me pull up that link" not in seen_prompts[0]
+    assert "Turn two answer" not in seen_prompts[0]

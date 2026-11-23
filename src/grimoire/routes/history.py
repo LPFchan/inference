@@ -286,8 +286,24 @@ def _active_message_path(conv: dict) -> list[dict]:
     return messages
 
 
+def _has_tool_calls(msg: dict) -> bool:
+    """Return True when a stored message carries one or more tool calls."""
+    tc = msg.get("toolCalls") if "toolCalls" in msg else msg.get("tool_calls")
+    if not tc:
+        return False
+    if isinstance(tc, str):
+        stripped = tc.strip()
+        if not stripped or stripped == "[]":
+            return False
+        try:
+            return bool(json.loads(stripped))
+        except ValueError:
+            return True
+    return bool(tc)
+
+
 def _extract_first_exchange(path: list[dict]) -> tuple[str, str]:
-    """Extract clamped first user text and first non-empty assistant text after it."""
+    """Extract clamped first user text and the final assistant reply of Turn 1."""
     filtered = [
         m for m in path
         if m.get("type") != "root" and m.get("role") != "tool"
@@ -301,15 +317,22 @@ def _extract_first_exchange(path: list[dict]) -> tuple[str, str]:
             break
 
     assistant_text = ""
+    fallback_assistant_text = ""
     if user_idx is not None:
         for msg in filtered[user_idx + 1:]:
-            if msg.get("role") == "assistant":
+            role = msg.get("role")
+            if role == "user":
+                break
+            if role == "assistant":
                 candidate = _extract_text_content(msg.get("content")).strip()
-                if candidate:
+                if not candidate:
+                    continue
+                fallback_assistant_text = candidate
+                if not _has_tool_calls(msg):
                     assistant_text = candidate
-                    break
 
-    return user_text[:_TITLE_TEXT_CLAMP], assistant_text[:_TITLE_TEXT_CLAMP]
+    chosen_assistant = assistant_text or fallback_assistant_text
+    return user_text[:_TITLE_TEXT_CLAMP], chosen_assistant[:_TITLE_TEXT_CLAMP]
 
 
 def _build_title_prompt(user_text: str, assistant_text: str) -> str:
