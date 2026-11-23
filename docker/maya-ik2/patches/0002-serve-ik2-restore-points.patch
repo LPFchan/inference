@@ -1,0 +1,92 @@
+diff --git a/serve/server.py b/serve/server.py
+index 358af91..ecb5858 100644
+--- a/serve/server.py
++++ b/serve/server.py
+@@ -176,7 +176,7 @@ def nvml_pids(pid: int | None, listed: set) -> set:
+ CONTEXT_MIN, CONTEXT_FALLBACK_MAX = models.CONTEXT_MIN, models.CONTEXT_FALLBACK_MAX
+ CONTEXT_TESTED, CONTEXT_TESTED_DEFAULT = models.CONTEXT_TESTED, models.CONTEXT_TESTED_DEFAULT
+ # the engine log's lines a report carries (maya.py's --report reads the same ones)
+-REPORT_LINES = re.compile(r"glm fast:|glm prefill: (?:CUDA|HIP)|glm split|glm stat|glm slots|glm vram|ds4 serve: prompt read|glm prefill: \d|ERR|error|"
++REPORT_LINES = re.compile(r"glm fast:|glm prefill: (?:CUDA|HIP)|glm split|glm stat|glm slots|glm vram|ik2 slots:|ds4 serve: prompt read|glm prefill: \d|ERR|error|"
+                           r"failed|out of memory|WARNING", re.I)
+ IM_END = "<|im_end|>"
+ IMAGE_PAD = "<|image_pad|>"
+@@ -921,6 +921,57 @@ def deepseek_restore_points(ids, user_id, system_id=None, tail=512, least=RESTOR
+     return out
+ 
+ 
++IK2_RESTORE_LEAST = 256     # maya-ik2 saves a Snap in ~4 ms, so even compact system prompts benefit across sessions
++
++
++def inkling_restore_points(ids, user_id, system_id=None, tail=512, least=IK2_RESTORE_LEAST) -> dict:
++    """Where maya-ik2 keeps restore points for this Inkling 2 prompt -> {"marks": [pos, ...], "tail": pos, "shared": pos}.
++    - "shared": the boundary after tools + system prompt (right before the template's `Thinking effort level:` system
++      message when one sits before the first `<|message_user|>`, else at the first `<|message_user|>`), so sessions
++      sharing the same system prompt and tools reuse it even across reasoning_effort changes;
++    - marks: the first `<|message_user|>` (when distinct from `shared`, giving 0-token reuse for same-effort sessions)
++      and the last `<|message_user|>` / post-user `<|message_system|>` turn boundary (for edits/retries);
++    - "tail": `tail` tokens before the end when the last turn is long."""
++    if user_id is None or len(ids) < 2:
++        return {}
++    first = None
++    try:
++        first = ids.index(user_id)
++    except ValueError:
++        pass
++    effort_pos = None
++    if first is not None and system_id is not None:
++        for i in range(first - 1, -1, -1):
++            if ids[i] == system_id:
++                effort_pos = i
++                break
++    last = None
++    if first is not None:
++        for i in range(len(ids) - 1, first - 1, -1):
++            t = ids[i]
++            if t == user_id or t == system_id:
++                last = i
++                break
++    shared = None
++    if effort_pos is not None and effort_pos >= least:
++        shared = effort_pos
++    elif first is not None and first >= least:
++        shared = first
++    marks, out = [], {}
++    if shared is not None:
++        out["shared"] = shared
++    if first is not None and first >= least and first != shared:
++        marks.append(first)
++    if last is not None and last >= least and last != first and last != shared:
++        marks.append(last)
++    t = len(ids) - tail
++    if tail > 0 and t >= least and (last is None or t > last) and (shared is None or t > shared):
++        out["tail"] = t
++    if marks:
++        out["marks"] = sorted(marks)
++    return out
++
++
+ def narrate_start(log_path: str, offset: int, args: list, done: threading.Event, heartbeat=20.0) -> None:
+     """While the engine starts, say in the server window what it is doing, from its log: the start reads tens of GB
+     into RAM and locks part of it for the GPU, and on many PCs everything is slow or frozen for a minute or more -
+@@ -2638,6 +2689,9 @@ class Service:
+         # DeepSeek's turn openers: where its last user turn starts and its system prompt ends (MAYA_DS4_RESTORE_POINTS)
+         self.ds_user_id = (_special_ids("<｜User｜>") or [None])[0]
+         self.ds_system_id = (_special_ids("<｜System｜>") or [None])[0]
++        # Inkling 2's turn openers: where its system prompt (+ tools / thinking effort) ends and turns open
++        self.ik2_user_id = (_special_ids("<|message_user|>") or [None])[0]
++        self.ik2_system_id = (_special_ids("<|message_system|>") or [None])[0]
+         # ... and a model that spells a role marker out of ordinary pieces ('<|', 'user', '|>') has ended its turn just
+         # the same: the text stops there.  Only markers that are special tokens in this vocabulary count.
+         self.stop_texts = [s for s in ("<|user|>", "<|observation|>", "<|endoftext|>", "<｜end▁of▁sentence｜>", "<｜User｜>",
+@@ -4677,6 +4731,10 @@ class Service:
+                            else deepseek_restore_points)(ids, self.ds_user_id, self.ds_system_id, tail)
+                     if pts:
+                         sampling = {**(sampling or {}), "_restore": pts}
++                elif on and getattr(self.template, "inkling", False):
++                    pts = inkling_restore_points(ids, self.ik2_user_id, self.ik2_system_id, tail)
++                    if pts:
++                        sampling = {**(sampling or {}), "_restore": pts}
+ 
+                 def attempts(prompt, left):
+                     """The engine's tokens.  When its numbers went non-finite (a NaN or an infinity in a route: the

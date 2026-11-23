@@ -1,6 +1,6 @@
 # Current Status
 
-**Snapshot:** 2026-11-22
+**Snapshot:** 2026-11-23
 **Posture:** The Grimoire gateway serves local llama.cpp models and admits remote vLLM models through Mangchi's residency agent. The local engine remains TheTom's turboquant fork with turbo4 KV. Mangchi model artifacts are managed separately from the gateway.
 **Focus:** Qwen3-ASR autoresearch. Mangchi's residency agent has no launch spec since Qwen3.8 Flash-Next retired (2026-11-18); Mangchi serves MiniMax-H3-Image.
 
@@ -385,6 +385,10 @@ Patch chain in `patches/atomic-llama-cpp/`, applied in order by `Dockerfile`:
 
 ## Recent Changes
 
+- 2026-11-23: **Inkling-2-Mini cross-session prefix caching & RAM session parking (`maya-ik2`)** — Added two build-time patches under [`docker/maya-ik2/patches/`](../docker/maya-ik2/patches/) on top of `e819852`:
+  (1) `serve/server.py` sends `shared=`, `marks=`, and `tail=` restore points for Inkling-2-Mini (capturing tools + system prompt before `Thinking effort level:`, first `<|message_user|>`, and last turn opener);
+  (2) `src/ik2/ik2_main.cu` + `ik2_draft.{hpp,cu}` save mid-prefill snapshots at those marks, pin shared snapshots against turn eviction, save prompt-end logits + drafter `f_rnn` so exact-length resends/regenerates hit 100% cache instead of resetting to 0, and park conversations + shared prefixes in host RAM (`IK2_SLOT_KEEP=8`, `IK2_SLOT_RAM_GB=8` in [`ik2-mini.json`](../docker/maya-ik2/ik2-mini.json)).
+  Verified end-to-end through Grimoire on GPU 1 (`23,752 MiB` used, `622 MiB` free): exact resend dropped from `2,693 ms` to `0.0 ms` (`6,157/6,157` cached, identical greedy output); new sessions sharing the system prompt hit `4,117/4,134` (`83 ms`, same effort) and `4,107/4,136` (`151 ms`, different `reasoning_effort`); after an unrelated session wiped the GPU, both a new session sharing the system prompt (`4,107/4,134`, `145 ms`) and returning sessions (`6,241/6,251`, `63 ms`; exact resend `6,157/6,157`, `0.0 ms`, identical greedy output) restored from host RAM.
 - 2026-11-22: **Inkling-2-Mini served on GPU 1 via `maya-ik2`** — Built
   `alesha-pro/maya-inkling-mini` (`e819852`) plus CUDA `maya-vision`
   (`llama.cpp` `b12590` / `34ff2e0`, `-DSTRATA_VISION_CUDA=ON`) in

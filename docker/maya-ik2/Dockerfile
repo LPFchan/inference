@@ -40,6 +40,11 @@ RUN git init . \
     && git checkout --detach "${MAYA_SHA}" \
     && test "$(git rev-parse HEAD)" = "${MAYA_SHA}"
 
+COPY patches /tmp/maya-patches
+RUN for p in /tmp/maya-patches/*.patch; do \
+        echo "Applying $p..." && git apply "$p"; \
+    done && rm -rf /tmp/maya-patches
+
 RUN cmake -S . -B build -G Ninja \
         -DCMAKE_BUILD_TYPE=Release \
         -DSTRATA_ENABLE_CUDA=ON \
