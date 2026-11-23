@@ -639,6 +639,7 @@ async def cors_proxy(request: Request):
             if original_key.lower() in {
                 "host", "content-length", "cookie", "x-forwarded-for", "accept-encoding",
                 config.INTERNAL_AUTH_SUB_HEADER, config.INTERNAL_AUTH_ROLE_HEADER,
+                config.INTERNAL_MCP_SESSION_HEADER,
                 "x-grimoire-expected-sub",
             }:
                 continue
@@ -650,6 +651,12 @@ async def cors_proxy(request: Request):
         }:
             continue
         headers[key] = value
+    mcp_session = request.headers.get(config.INTERNAL_MCP_SESSION_HEADER, "")
+    has_explicit_auth = any(k.lower() in {"authorization", "x-api-key"} for k in headers)
+    if mcp_session and not has_explicit_auth and config.is_first_party_mcp_target(parsed):
+        headers["Cookie"] = f"{config.AUTH_COOKIE_NAME}={mcp_session}"
+        for drop_key in [k for k in headers if k.lower() in {"origin", "referer"}]:
+            del headers[drop_key]
     headers.setdefault("Accept", "application/json, text/event-stream")
     headers["Host"] = parsed.netloc
 

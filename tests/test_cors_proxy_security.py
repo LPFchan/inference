@@ -155,3 +155,90 @@ def test_h3_reference_carries_the_official_prompts():
     assert "input_text: <USER_REQUEST>" in response.text
     assert '{"expanded_caption": "...", "aspect_ratio": "W:H"}' in response.text
     assert client.get("/references/other.md").status_code == 404
+
+
+def _mock_cors_proxy_upstream(monkeypatch):
+    seen = {}
+
+    class Upstream:
+        status_code = 200
+        content = b'{"jsonrpc":"2.0","id":1,"result":{"tools":[]}}'
+        headers = {"content-type": "application/json"}
+
+    class Client:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def request(self, **kwargs):
+            seen.clear()
+            seen.update(kwargs)
+            return Upstream()
+
+    monkeypatch.setattr(
+        entrypoint.socket,
+        "getaddrinfo",
+        lambda *_args, **_kwargs: [
+            (entrypoint.socket.AF_INET, entrypoint.socket.SOCK_STREAM, 6, "", ("104.21.1.2", 443))
+        ],
+    )
+    monkeypatch.setattr(entrypoint.httpx, "AsyncClient", Client)
+    return seen
+
+
+def test_cors_proxy_forwards_lp_auth_cookie_to_first_party_mcp_only(monkeypatch):
+    seen = _mock_cors_proxy_upstream(monkeypatch)
+    client = TestClient(entrypoint.app)
+    headers = {
+        **AUTH,
+        config.INTERNAL_MCP_SESSION_HEADER: "sess-123",
+        "Origin": "https://chat.lost.plus",
+        "Referer": "https://chat.lost.plus/",
+    }
+
+    resp = client.post(
+        "/cors-proxy",
+        params={"url": "https://joongna.lost.plus/mcp"},
+        headers=headers,
+        content=b"{}",
+    )
+    assert resp.status_code == 200
+    assert seen["headers"].get("Cookie") == f"{config.AUTH_COOKIE_NAME}=sess-123"
+    assert config.INTERNAL_MCP_SESSION_HEADER not in {k.lower() for k in seen["headers"]}
+    assert "origin" not in {k.lower() for k in seen["headers"]}
+    assert "referer" not in {k.lower() for k in seen["headers"]}
+
+    # Explicit x-proxy-header-authorization takes precedence and does not also attach Cookie.
+    resp_authz = client.post(
+        "/cors-proxy",
+        params={"url": "https://joongna.lost.plus/mcp"},
+        headers={**headers, "x-proxy-header-authorization": "Bearer explicit-tok"},
+        content=b"{}",
+    )
+    assert resp_authz.status_code == 200
+    assert seen["headers"].get("authorization") == "Bearer explicit-tok"
+    assert "Cookie" not in seen["headers"]
+
+    # Passage, vault, auth, chat, non-/mcp paths, and third-party domains never get lp_auth.
+    for blocked_url in (
+        "https://passage.lost.plus/mcp",
+        "https://vault.lost.plus/mcp",
+        "https://auth.lost.plus/mcp",
+        "https://chat.lost.plus/mcp",
+        "https://joongna.lost.plus/api/write",
+        "https://mcp.exa.ai/mcp",
+    ):
+        r = client.post(
+            "/cors-proxy",
+            params={"url": blocked_url},
+            headers=headers,
+            content=b"{}",
+        )
+        assert r.status_code == 200
+        assert "Cookie" not in seen["headers"], f"Cookie leaked to {blocked_url}"
+        assert config.INTERNAL_MCP_SESSION_HEADER not in {k.lower() for k in seen["headers"]}

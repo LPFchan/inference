@@ -154,10 +154,22 @@ async def _forward_to_manager(
 ) -> StreamingResponse:
     """Proxy a request verbatim to the manager (chat, responses, admin, ...)."""
     client = get_proxy_client()
+    headers = _manager_headers(request.headers, identity)
+    if path == "cors-proxy":
+        session = request.cookies.get(config.AUTH_COOKIE_NAME, "")
+        target_url = request.query_params.get("url", "")
+        if (
+            session
+            and "authorization" not in request.headers
+            and "x-api-key" not in request.headers
+            and target_url
+            and config.is_first_party_mcp_target(urllib.parse.urlparse(target_url))
+        ):
+            headers[config.INTERNAL_MCP_SESSION_HEADER] = session
     req = client.build_request(
         request.method,
         f"{MANAGER_URL}/{path}",
-        headers=_manager_headers(request.headers, identity),
+        headers=headers,
         params=request.query_params,
         content=body,
     )

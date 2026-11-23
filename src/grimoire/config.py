@@ -46,6 +46,29 @@ AUTH_TOKEN_SERVICE = "chat-v1"
 AUTH_TIMEOUT_S = 5.0
 INTERNAL_AUTH_SUB_HEADER = "x-grimoire-auth-sub"
 INTERNAL_AUTH_ROLE_HEADER = "x-grimoire-auth-role"
+INTERNAL_MCP_SESSION_HEADER = "x-grimoire-mcp-session"
+
+_BLOCKED_FIRST_PARTY_MCP_HOSTS = frozenset({
+    "auth.lost.plus",
+    "passage.lost.plus",
+    "vault.lost.plus",
+    "chat.lost.plus",
+})
+
+
+def is_first_party_mcp_target(parsed_url) -> bool:
+    """Return True only for first-party https://<svc>.lost.plus/mcp endpoints safe for lp_auth forwarding."""
+    if getattr(parsed_url, "scheme", None) != "https":
+        return False
+    host = (getattr(parsed_url, "hostname", None) or "").lower().rstrip(".")
+    if not host or not host.endswith(".lost.plus"):
+        return False
+    if host in _BLOCKED_FIRST_PARTY_MCP_HOSTS:
+        return False
+    if host.endswith(".passage.lost.plus") or host.endswith(".vault.lost.plus"):
+        return False
+    path = (getattr(parsed_url, "path", None) or "").rstrip("/")
+    return path == "/mcp" or path.startswith("/mcp/")
 
 
 def _env_origins(name):
@@ -92,6 +115,7 @@ SENSITIVE_PROXY_HEADERS = {
     "x-api-key",
     INTERNAL_AUTH_SUB_HEADER,
     INTERNAL_AUTH_ROLE_HEADER,
+    INTERNAL_MCP_SESSION_HEADER,
 }
 
 # Process management
