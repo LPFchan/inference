@@ -1,6 +1,6 @@
 # Current Status
 
-**Snapshot:** 2026-11-23
+**Snapshot:** 2026-11-24
 **Posture:** The Grimoire gateway serves local llama.cpp models and admits remote vLLM models through Mangchi's residency agent. The local engine remains TheTom's turboquant fork with turbo4 KV. Mangchi model artifacts are managed separately from the gateway.
 **Focus:** Qwen3-ASR autoresearch. Mangchi's residency agent has no launch spec since Qwen3.8 Flash-Next retired (2026-11-18); Mangchi serves MiniMax-H3-Image.
 
@@ -385,6 +385,7 @@ Patch chain in `patches/atomic-llama-cpp/`, applied in order by `Dockerfile`:
 
 ## Recent Changes
 
+- 2026-11-24: **WebUI Download App modal polish & Chat.app v1.1.0 staged** — Bumped `webui` submodule to `LPFchan/llama-cpp-webui@118c26338` (refined `DialogDownloadApp.svelte` header alignment, uniform platform rows with spring-expanding post-click hint, and modernized wireframe), rebuilt `webui/build` live, and staged `Chat.app v1.1.0` installers (`Chat_1.1.0_aarch64.dmg`, `Chat_1.1.0_x64-setup.exe`, `Chat_1.1.0_x86_64.flatpak`, `SHA256SUMS.txt`, and `latest.json`) in `state/downloads/`.
 - 2026-11-23: **WebUI defers large MCP tool sets behind `tool_search`** — Bumped `webui` submodule to `LPFchan/llama-cpp-webui@6c3e556fb` (PR #1). When more than 10 MCP tools (or >12 KB of MCP schemas) are enabled, `chat.lost.plus` sends only direct/internal tools plus `tool_search` (listing connected MCP servers and counts) and unlocks matching schemas per conversation on demand (including subagents, Unicode/Korean search queries, history pre-unlock on reload, and deterministic server/tool sorting for KV-cache stability). Rebuilt `webui/build` and recreated `grimoire` (`maya-ik2` untouched).
 - 2026-11-23: **Inkling-2-Mini cross-session prefix caching & RAM session parking (`maya-ik2`)** — Added two build-time patches under [`docker/maya-ik2/patches/`](../docker/maya-ik2/patches/) on top of `e819852`:
   (1) `serve/server.py` sends `shared=`, `marks=`, and `tail=` restore points for Inkling-2-Mini (capturing tools + system prompt before `Thinking effort level:`, first `<|message_user|>`, and last turn opener);
