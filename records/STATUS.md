@@ -385,6 +385,7 @@ Patch chain in `patches/atomic-llama-cpp/`, applied in order by `Dockerfile`:
 
 ## Recent Changes
 
+- 2026-11-23: **WebUI defers large MCP tool sets behind `tool_search`** — Bumped `webui` submodule to `LPFchan/llama-cpp-webui@6c3e556fb` (PR #1). When more than 10 MCP tools (or >12 KB of MCP schemas) are enabled, `chat.lost.plus` sends only direct/internal tools plus `tool_search` (listing connected MCP servers and counts) and unlocks matching schemas per conversation on demand (including subagents, Unicode/Korean search queries, history pre-unlock on reload, and deterministic server/tool sorting for KV-cache stability). Rebuilt `webui/build` and recreated `grimoire` (`maya-ik2` untouched).
 - 2026-11-23: **Inkling-2-Mini cross-session prefix caching & RAM session parking (`maya-ik2`)** — Added two build-time patches under [`docker/maya-ik2/patches/`](../docker/maya-ik2/patches/) on top of `e819852`:
   (1) `serve/server.py` sends `shared=`, `marks=`, and `tail=` restore points for Inkling-2-Mini (capturing tools + system prompt before `Thinking effort level:`, first `<|message_user|>`, and last turn opener);
   (2) `src/ik2/ik2_main.cu` + `ik2_draft.{hpp,cu}` save mid-prefill snapshots at those marks, pin shared snapshots against turn eviction, save prompt-end logits + drafter `f_rnn` so exact-length resends/regenerates hit 100% cache instead of resetting to 0, and park conversations + shared prefixes in host RAM (`IK2_SLOT_KEEP=8`, `IK2_SLOT_RAM_GB=8` in [`ik2-mini.json`](../docker/maya-ik2/ik2-mini.json)).
