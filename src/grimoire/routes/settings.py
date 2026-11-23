@@ -1,5 +1,6 @@
 """Settings management routes — server-backed config storage."""
 
+import json
 import logging
 
 from fastapi import APIRouter, HTTPException, Request

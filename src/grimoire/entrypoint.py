@@ -88,6 +88,7 @@ from grimoire.routes.registry import router as registry_router
 from grimoire.routes.plugins import router as plugins_router
 from grimoire.routes.settings import router as settings_router
 from grimoire.routes.presets import router as presets_router
+from grimoire.routes.downloads import router as downloads_router
 from grimoire.proxy.sse import (
     _extract_assistant_text,
     _usage_from_object,
@@ -210,6 +211,7 @@ app.include_router(registry_router)
 app.include_router(plugins_router)
 app.include_router(settings_router)
 app.include_router(presets_router)
+app.include_router(downloads_router)
 
 
 @app.get("/health")
