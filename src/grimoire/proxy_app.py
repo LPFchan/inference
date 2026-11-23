@@ -309,7 +309,7 @@ async def _require_browser_session(request: Request) -> None:
     if "authorization" in request.headers or "x-api-key" in request.headers:
         raise HTTPException(
             status_code=401,
-            detail="Token management requires browser session authentication only",
+            detail="This endpoint requires browser session authentication only",
         )
     identity = await authenticate_public(request)
     _enforce_expected_identity(request, identity)
@@ -355,6 +355,11 @@ async def auth_me(request: Request):
         "manage_url": config.AUTH_ORIGIN,
         "logout_url": f"{config.AUTH_ORIGIN}/logout",
     }
+
+
+@app.get("/auth/services")
+async def auth_services(request: Request):
+    return await _auth_management(request, "GET", "/api/services")
 
 
 @app.api_route("/auth/tokens", methods=["GET", "POST"])
