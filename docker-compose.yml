@@ -24,8 +24,9 @@ services:
       - ${MODELS_JSON_PATH}:/etc/grimoire/models.json:ro
       # Dev override: bind-mount Python source so code changes apply immediately.
       - ${DEV_SRC_BIND}:/opt/grimoire-venv/lib/python3.11/site-packages/grimoire:ro
-      # Host-built webui — shadows the image's COPY --from=webui.
-      - ./webui/build:/opt/grimoire-webui:ro
+      # Unified Chat web SPA synced in place by scripts/sync-chat-web.sh
+      # (preserves directory inode across rebuilds; rollback: CHAT_WEB_DIR=./webui/build).
+      - ${CHAT_WEB_DIR:-./state/chat-web}:/opt/grimoire-webui:ro
       # FIXME: restore when atomic/llama-server binary is available
       #- /home/yeowool/inference/atomic/llama-server:/opt/grimoire-llama-cpp/bin/llama-server:ro
       - /home/yeowool/inference/atomic:/opt/atomic:ro
