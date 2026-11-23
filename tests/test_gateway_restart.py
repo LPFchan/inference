@@ -50,3 +50,66 @@ def test_restart_route_is_admin_only(monkeypatch):
     admin = client.post("/restart", headers={**headers, config.INTERNAL_AUTH_ROLE_HEADER: "administrator"})
     assert admin.status_code == 200 and exits == [True]
     assert entrypoint.app.state.restarting is True
+
+
+def test_lifespan_probes_remote_backends_on_boot(monkeypatch):
+    calls = []
+
+    async def _fake_refresh():
+        calls.append("refresh")
+        return {"Inkling-2-Small": "loaded"}
+
+    async def _fake_shutdown(keep_remote=False):
+        calls.append(("shutdown", keep_remote))
+
+    async def _noop_sampler():
+        await asyncio.sleep(60)
+
+    monkeypatch.setattr(entrypoint, "init_proxy_client", lambda: None)
+    monkeypatch.setattr(entrypoint, "close_proxy_client", lambda: asyncio.sleep(0))
+    monkeypatch.setattr(entrypoint, "telemetry_sampler", _noop_sampler)
+    monkeypatch.setattr(entrypoint.usage_store, "import_legacy_token_stats", lambda *a, **kw: 0)
+    monkeypatch.setattr(entrypoint.presets, "get_active_name", lambda: None)
+    monkeypatch.setattr(entrypoint.registry, "snapshot", lambda: {"models": {}})
+    monkeypatch.setattr(entrypoint.manager, "refresh_remote_statuses", _fake_refresh)
+    monkeypatch.setattr(entrypoint.manager, "shutdown", _fake_shutdown)
+    monkeypatch.setattr(entrypoint.app.state, "initial_model", None, raising=False)
+    monkeypatch.setattr(entrypoint.app.state, "restarting", False, raising=False)
+
+    async def _run():
+        async with entrypoint.lifespan(entrypoint.app):
+            assert calls == ["refresh"]
+
+    asyncio.run(_run())
+    assert calls == ["refresh", ("shutdown", False)]
+
+
+def test_lifespan_boot_survives_remote_probe_error(monkeypatch):
+    async def _failing_refresh():
+        raise RuntimeError("remote host unreachable")
+
+    async def _fake_shutdown(keep_remote=False):
+        return None
+
+    async def _noop_sampler():
+        await asyncio.sleep(60)
+
+    monkeypatch.setattr(entrypoint, "init_proxy_client", lambda: None)
+    monkeypatch.setattr(entrypoint, "close_proxy_client", lambda: asyncio.sleep(0))
+    monkeypatch.setattr(entrypoint, "telemetry_sampler", _noop_sampler)
+    monkeypatch.setattr(entrypoint.usage_store, "import_legacy_token_stats", lambda *a, **kw: 0)
+    monkeypatch.setattr(entrypoint.presets, "get_active_name", lambda: None)
+    monkeypatch.setattr(entrypoint.registry, "snapshot", lambda: {"models": {}})
+    monkeypatch.setattr(entrypoint.manager, "refresh_remote_statuses", _failing_refresh)
+    monkeypatch.setattr(entrypoint.manager, "shutdown", _fake_shutdown)
+    monkeypatch.setattr(entrypoint.app.state, "initial_model", None, raising=False)
+    monkeypatch.setattr(entrypoint.app.state, "restarting", False, raising=False)
+
+    entered = []
+
+    async def _run():
+        async with entrypoint.lifespan(entrypoint.app):
+            entered.append(True)
+
+    asyncio.run(_run())
+    assert entered == [True]

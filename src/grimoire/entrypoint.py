@@ -190,6 +190,13 @@ async def lifespan(_app):
                     except Exception as exc:
                         logger.error("Failed to start always-on model %s: %s", name, exc)
 
+    try:
+        refreshed = await manager.refresh_remote_statuses()
+        if refreshed:
+            logger.info("Probed remote backends on boot: %s", refreshed)
+    except Exception as exc:
+        logger.warning("Remote status probe on boot failed: %s", exc)
+
     sampler_task = asyncio.create_task(telemetry_sampler())
     try:
         yield
