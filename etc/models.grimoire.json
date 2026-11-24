@@ -924,28 +924,6 @@
         "backend-model-id": "deepseek-v4.1-flash"
       }
     },
-    "MiniMax-H3-Image": {
-      "backend": "vllm-remote",
-      "remote-url": "http://mangchi.tail.lost.plus:9710",
-      "backend-model-id": "MiniMax-H3-Image",
-      "capabilities": [
-        "completion",
-        "multimodal"
-      ],
-      "ctx-size": 524288,
-      "added": "2026-11-12T05:40:00+00:00"
-    },
-    "MiniMax-H3-Image-PE": {
-      "backend": "vllm-remote",
-      "remote-url": "http://mangchi.tail.lost.plus:9710",
-      "backend-model-id": "MiniMax-H3-Image-PE",
-      "capabilities": [
-        "completion",
-        "multimodal"
-      ],
-      "ctx-size": 524288,
-      "added": "2026-11-13T00:00:00+00:00"
-    },
     "GLM-5.3": {
       "backend": "vllm-remote",
       "remote-url": "https://opencode.ai/zen/go",
