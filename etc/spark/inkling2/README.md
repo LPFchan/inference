@@ -6,7 +6,7 @@ through kortexa's TensorFold fork (branch `kortexa-ai/inkling2-draft`, `e2614feb
 
 | File | What it is |
 | --- | --- |
-| `0001-inkling2-spark.patch` | Our 46 engine commits on `e2614feb` (`git am`): speed, the refusal edit per request, Inkling's reply messages (thinking, tool calls), NVFP4 KV caches, up to 4 streams at once, images, temperature sampling, exact-length turn reuse (`len - 1`) and in-place idle pool adoption. |
+| `0001-inkling2-spark.patch` | Our 47 engine commits on `e2614feb` (`git am`): speed, the refusal edit per request, Inkling's reply messages (thinking, tool calls), NVFP4 KV caches, up to 4 streams at once, unlimited images with per-image token caps and chunked encoding, temperature sampling, exact-length turn reuse (`len - 1`) and in-place idle pool adoption. |
 | `inkling2.jinja` | The chat template `serve-rank.sh` passes: kortexa's, without the forced text opener, so the model writes its own message headers. |
 | `serve-rank.sh` | One rank, natively (no Docker). Rank 0 on spark2 serves the API; rank 1 on spark1 reads spark2's models over NFS. |
 | `pair.sh` | Both ranks from spark2: ships the binary to spark1, starts rank 1 there, runs rank 0 in the foreground. |
@@ -86,19 +86,14 @@ so the stock model's kernels and outputs are unchanged.
   (`zig/src/server/inkling_reply.zig`), and only `<|content_model_end_sampling|>` ends a reply.
 - Thinking is on at effort high by default (`--reasoning-effort high`). A request sets `reasoning_effort` (`low`,
   `medium`, ...; `none` turns it off) or `chat_template_kwargs: {"enable_thinking": false}`.
-- Images (`VISION`, default 1): PNG, JPEG and WebP `image_url` parts, up to 16 a request and 16,384 tokens in all (one
-  token a 40x40 tile; a bigger image shrinks to fit). The engine's own defaults are 4 and 4,096, so `serve-rank.sh`
-  passes `--vision-max-images` (`VISION_IMAGES`, up to 64) and `--vision-image-tokens` (`VISION_IMAGE_TOKENS`, up to
-  262,144) instead. The count spans the whole conversation, not the last message: an agent that re-sends its
-  screenshots each turn is refused with HTTP 400 `a request may hold at most N images (--vision-max-images)` once its
-  history passes the count, in about 1 s and before any token. The tokens are shared, so each image shrinks to the
-  budget divided by the images present (about 1,024 tokens an image at 16, where the engine's 4,096 would leave 256).
-  The rows are bf16 [tokens, 4608] on both ranks, so the two ranks need the same numbers (`pair.sh` passes `VISION*`
-  through) and rank 1 holds 0.14 GiB for them instead of 0.04. Rank 0 runs the checkpoint's own image tower
-  (`dense/vision.safetensors`) and sends the rows to rank 1. Its rows match a torch run of SGLang's tower (as close to
-  float32 as torch's own bf16). A 300-token image adds about 0.1 s, a 4,070-token one about 2.5 s, and the other chat
-  pauses that long. Follow-up turns resume past the image; another image never resumes it. The tower and the rows take
-  1.40 GiB on rank 0 (0.83 at the engine's 4,096 tokens: the tower's scratch grows with the budget too), so the KV pool
-  is 395,776 positions against 436,224 before. The pool has been under the 524,288 context since well before this
-  raise, and the server says so at startup: a request longer than the pool is refused, so lowering
-  `VISION_IMAGE_TOKENS` is the knob that buys those positions back.
+- Images (`VISION`, default 1): PNG, JPEG and WebP `image_url` parts, with **no image-count limit** per session
+  (`VISION_IMAGES=0` by default) and up to 4,096 tokens **per image** (`VISION_IMAGE_TOKENS=4096`, one token a 40x40
+  tile = ~6.5 MP, native 1080p/1440p; larger images shrink to fit without degrading earlier images in the chat).
+  Uncached images are encoded lazily per prefill chunk into a reusable rows buffer (bf16 `[tokens, 4608]` on both
+  ranks, so `pair.sh` passes `VISION*` through to keep both ranks matched); cached history skips both pixel decoding
+  and the vision tower. Chat routes lift the 20 MB total image-bytes cap (keeping 10 MB per image) and allow 256 MiB
+  request bodies when `VISION_IMAGES=0`. Rank 0 runs the checkpoint's own image tower (`dense/vision.safetensors`) and
+  sends each chunk's rows to rank 1. Its rows match a torch run of SGLang's tower (as close to float32 as torch's own
+  bf16). A 300-token image adds about 0.1 s, a 4,070-token one about 2.5 s, and the other chat pauses that long.
+  Follow-up turns resume past the image; another image never resumes it. At 4,096 tokens the tower and rows take
+  0.83 GiB on rank 0 and 0.04 GiB on rank 1 (down from 1.40 / 0.14 GiB at 16,384).
