@@ -15,8 +15,12 @@
 #   PROMPT_ROWS (default 11264): prompt tokens a pass; a prompt up to that length streams the expert weights once
 #   (about 0.55 MB of scratch a row). NCCL_IB_HCA (default both RoCE twins of the cabled port: one carries ~100 Gb/s),
 #   NCCL_MAX_NCHANNELS (default 4: the gathers keep their speed and leave the SMs to the kernels).
-#   VISION (default 1): images in requests (up to 4, 4096 tokens in all); rank 0 runs the image tower from the
-#   checkpoint's dense/vision.safetensors (about 0.9 GiB, so the shared pool holds about 200k fewer positions).
+#   VISION (default 1): images in requests; rank 0 runs the image tower from the checkpoint's
+#   dense/vision.safetensors (about 0.9 GiB, so the shared pool holds about 200k fewer positions).
+#   VISION_IMAGES (default 16, up to 64) and VISION_IMAGE_TOKENS (default 16384, up to 262144): the images a request
+#   may hold and the visual tokens they share. The count spans the whole conversation, so an agent that re-sends its
+#   screenshots each turn is refused once its history passes it; the tokens are shared, so each image shrinks to the
+#   budget divided by the images present. Both ranks hold the rows (bf16 [tokens, 4608]), so set them the same.
 #   Thinking is on at effort high unless a request sends reasoning_effort (none turns it off) or enable_thinking false.
 set -euo pipefail
 rank=${1:?rank 0 or 1}; shift
@@ -42,7 +46,7 @@ if [[ ${EDIT:-1} == 1 ]]; then
 fi
 vision=()
 if [[ ${VISION:-1} == 1 ]]; then
-  vision=(--vision)
+  vision=(--vision --vision-max-images "${VISION_IMAGES:-16}" --vision-image-tokens "${VISION_IMAGE_TOKENS:-16384}")
   [[ $rank == 0 ]] && export TF_INKLING_VISION=$models/inkling2/exl3/dense/vision.safetensors
 fi
 export TF_INKLING_RANK=$rank TF_INKLING_WORLD=2 TF_INKLING_VERIFY_CHECK=${TF_INKLING_VERIFY_CHECK:-0} \
