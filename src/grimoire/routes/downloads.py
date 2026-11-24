@@ -6,15 +6,15 @@ import json
 import os
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi.responses import FileResponse, JSONResponse
 
 from grimoire.auth import require_api
 
 router = APIRouter()
 
 DOWNLOADS_DIR = Path(os.environ.get("GRIMOIRE_DOWNLOADS_DIR", "/var/lib/grimoire/downloads"))
-ALLOWED_EXTENSIONS = (".dmg", ".exe", ".flatpak", ".tar.gz", ".txt")
+ALLOWED_EXTENSIONS = (".dmg", ".exe", ".flatpak", ".tar.gz", ".AppImage", ".txt")
 
 
 def _safe_file(filename: str) -> Path:
@@ -43,6 +43,22 @@ async def downloads_latest(request: Request):
     if not isinstance(data, dict):
         return {"version": None, "macos": None, "windows": None, "linux": None}
     return data
+
+
+@router.get("/downloads/updater.json")
+async def downloads_updater(request: Request):
+    """Return the signed Tauri v2 updater manifest, or 204 when none is published."""
+    require_api(request)
+    manifest_path = DOWNLOADS_DIR / "updater.json"
+    if not manifest_path.is_file():
+        return Response(status_code=204)
+    try:
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return Response(status_code=204)
+    if not isinstance(data, dict):
+        return Response(status_code=204)
+    return JSONResponse(content=data, headers={"Cache-Control": "private, no-cache"})
 
 
 @router.get("/downloads/{filename}")

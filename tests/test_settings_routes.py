@@ -79,3 +79,13 @@ def test_downloads_manifest_and_file_serving(tmp_path, monkeypatch):
     file_req = Request({"type": "http", "method": "GET", "path": "/downloads/Chat_1.0.0_aarch64.dmg", "headers": []})
     response = asyncio.run(downloads_route.downloads_file(file_req, "Chat_1.0.0_aarch64.dmg"))
     assert response.path == tmp_path / "Chat_1.0.0_aarch64.dmg"
+
+    updater_req = Request({"type": "http", "method": "GET", "path": "/downloads/updater.json", "headers": []})
+    empty_resp = asyncio.run(downloads_route.downloads_updater(updater_req))
+    assert empty_resp.status_code == 204
+
+    updater_manifest = {"version": "1.2.0", "platforms": {"darwin-aarch64": {"url": "https://chat.lost.plus/downloads/Chat_1.2.0_aarch64.app.tar.gz", "signature": "sig"}}}
+    (tmp_path / "updater.json").write_text(json.dumps(updater_manifest), encoding="utf-8")
+    present_resp = asyncio.run(downloads_route.downloads_updater(updater_req))
+    assert present_resp.status_code == 200
+    assert json.loads(present_resp.body.decode("utf-8")) == updater_manifest
