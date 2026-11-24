@@ -2,7 +2,7 @@
 # One rank of kortexa's TensorFold Inkling 2 server, natively (their recipes/inkling2-spark/start.sh without Docker).
 # rank 0 on spark2 (API), rank 1 on spark1 (reads its pack from spark2 over NFS). Start rank 1 first.
 # Usage: serve-rank.sh 0|1 [extra serve flags]
-#   CONTEXT (default 524288), KV4 (default 1: the global layers' KV caches as NVFP4; 0: BF16, CONTEXT up to 131072),
+#   CONTEXT (default 524288), MAX_TOKENS (default 32768), KV4 (default 1: the global layers' KV caches as NVFP4; 0: BF16, CONTEXT up to 131072),
 #   SPLIT (default 1: half of every expert a rank), DRAFTS (default 1: bundled DSpark),
 #   FP4=off/attn/all (NVFP4 dense; default all), API_HOST/API_PORT (rank 0; default 127.0.0.1:8000),
 #   EDIT (default 1: OpenUncensored's refusal edit, per request: NAME takes it, NAME-Stock is the model as released),
@@ -54,7 +54,7 @@ export TF_INKLING_RANK=$rank TF_INKLING_WORLD=2 TF_INKLING_VERIFY_CHECK=${TF_INK
   TF_ROCE=${TF_ROCE:-1} TENSORFOLD_MEMORY_RESERVE_GIB=${RESERVE_GIB:-5} TF_INKLING_FP4=${FP4:-all} \
   TF_INKLING_KV4=${KV4:-1} TF_INKLING_STREAMS=${STREAMS:-2} \
   TF_INKLING_PROMPT_ROWS=${PROMPT_ROWS:-11264}
-exec "$bin" serve "$model" --backend cuda --device 0 --context "${CONTEXT:-524288}" \
+exec "$bin" serve "$model" --backend cuda --device 0 --context "${CONTEXT:-524288}" --max-tokens "${MAX_TOKENS:-32768}" \
   --parallel "${STREAMS:-2}" "${drafts[@]}" "${vision[@]}" "${template[@]}" --reasoning-effort high --temperature "${TEMPERATURE:-1}" --prompt-cache-gib 0 \
   --host "${API_HOST:-127.0.0.1}" --port "${API_PORT:-8000}" --name "$name" \
   --no-update-check "$@"
