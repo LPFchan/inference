@@ -1,7 +1,7 @@
-From ab85a9bf58392c5c08b6c055247d51880eb07aee Mon Sep 17 00:00:00 2001
+From 2089540e28b944209f8afe5f447d82714bd5acd3 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Tue, 17 Nov 2026 22:24:16 +0900
-Subject: [PATCH 01/45] Quantize Inkling's BF16 attention and head projections
+Subject: [PATCH 01/46] Quantize Inkling's BF16 attention and head projections
  to NVFP4 at load (TF_INKLING_FP4)
 
 TF_INKLING_FP4=attn keeps Q, K, V, R, gate and O as NVFP4 lane weights; =all adds the output head.
@@ -365,13 +365,13 @@ index 2045cb01..171bd7c8 100644
      .{ .name = "TF_INKLING_RANK", .scope = .cuda, .kind = .u32, .max = 1, .forms = "rank 0 or 1" },
      .{ .name = "TF_INKLING_WORLD", .scope = .cuda, .kind = .u32, .only = &.{ 1, 2 }, .forms = "one rank for operator checks or two for serving" },
 -- 
-2.56.1
+2.43.0
 
 
-From e893996207418a3e9be28bb35b1baa2e77cf1084 Mon Sep 17 00:00:00 2001
+From da287b0e50cb0212a05efdbaecb56848e704b3f7 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Tue, 17 Nov 2026 23:19:05 +0900
-Subject: [PATCH 02/45] Inkling decode: latency-bound mix and quant kernels
+Subject: [PATCH 02/46] Inkling decode: latency-bound mix and quant kernels
  issue all loads at once; NVFP4 drafter projections under FP4=all
 
 tf_ik_mix: one 576-thread CTA a row, each thread one 16-byte chunk of every source, one combined
@@ -802,13 +802,13 @@ index 8da5834f..cb578b05 100644
          own.f.verify_check = try environment.read(bool, "TF_INKLING_VERIFY_CHECK", false);
          try own.f.prepareVerify();
 -- 
-2.56.1
+2.43.0
 
 
-From 96948dfd43770dbe0bf6447a20a5e9d280704bfc Mon Sep 17 00:00:00 2001
+From 9ae5b8cff9a869ebb50c2f8503d71dbaa95501ca Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Tue, 17 Nov 2026 23:29:20 +0900
-Subject: [PATCH 03/45] Inkling verification: one attention launch and one
+Subject: [PATCH 03/46] Inkling verification: one attention launch and one
  small BF16 projection call for every verified row
 
 The decode attention kernel already masks each row's own causal window, so batching keeps each row's
@@ -854,13 +854,13 @@ index 7915e8fa..f4e4c249 100644
              try f.k.go(.attention_decode, stream, .{ .x = 1, .y = @intCast(heads), .z = 4 }, 128, .{attention});
              if (!f.decode_reported) {
 -- 
-2.56.1
+2.43.0
 
 
-From 3a6b5504d561d17f420582133ed40be48582795d Mon Sep 17 00:00:00 2001
+From a8b5b4fa9fc6c055faa8df28fc6d5ad0d39862e0 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 00:03:41 +0900
-Subject: [PATCH 04/45] Inkling: replay one CUDA graph per one-token step and
+Subject: [PATCH 04/46] Inkling: replay one CUDA graph per one-token step and
  verify window (TF_INKLING_GRAPHS, default on)
 
 Prep and attention read the step position from the device when a graph replays; draft mode's
@@ -1169,13 +1169,13 @@ index 171bd7c8..fe3f9ca5 100644
      .{ .name = "TF_INKLING_RANK", .scope = .cuda, .kind = .u32, .max = 1, .forms = "rank 0 or 1" },
      .{ .name = "TF_INKLING_WORLD", .scope = .cuda, .kind = .u32, .only = &.{ 1, 2 }, .forms = "one rank for operator checks or two for serving" },
 -- 
-2.56.1
+2.43.0
 
 
-From 377844b40b29a1f6383f57ff1f2f860506b6df50 Mon Sep 17 00:00:00 2001
+From 77a78555572c59fc91517ff36fc4fd1d92416b6e Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 00:32:24 +0900
-Subject: [PATCH 05/45] Inkling: split experts across the pair
+Subject: [PATCH 05/46] Inkling: split experts across the pair
  (TF_INKLING_EXPERTS=<full checkpoint>)
 
 Every rank runs half of every routed expert: w13's output tile columns (its gate/up pairs) and
@@ -1367,13 +1367,13 @@ index fe3f9ca5..2351961d 100644
      .{ .name = "TF_INKLING_VERIFY_CHECK", .scope = .cuda, .kind = .flag, .forms = "0 or 1" },
      .{ .name = "TF_INKLING_RANK", .scope = .cuda, .kind = .u32, .max = 1, .forms = "rank 0 or 1" },
 -- 
-2.56.1
+2.43.0
 
 
-From 789e179ab26119d5a6de7b898a10edc605b2c499 Mon Sep 17 00:00:00 2001
+From b529028ed5f3b577936c708d880199c4da73998f Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 01:00:07 +0900
-Subject: [PATCH 06/45] inkling2: Q, gate, R (and local K, V) as one NVFP4
+Subject: [PATCH 06/46] inkling2: Q, gate, R (and local K, V) as one NVFP4
  projection per layer
 
 ---
@@ -1572,13 +1572,13 @@ index cd581e8e..24d790ac 100644
  }
  
 -- 
-2.56.1
+2.43.0
 
 
-From a3c3d0a78b38b334b3f7742e7951ea85e6fbc57a Mon Sep 17 00:00:00 2001
+From 7512bc7b568489a189e47137a212ad8419eaff0b Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 01:28:35 +0900
-Subject: [PATCH 07/45] inkling2: decode attention split over 16 key-tile sets
+Subject: [PATCH 07/46] inkling2: decode attention split over 16 key-tile sets
  per head, merged in order; row-invariant, 5x faster at 8k
 
 ---
@@ -1850,13 +1850,13 @@ index bd866c21..61429166 100644
          s.mlp = try s.take(r * h * 2);
          s.mlp_input = try s.take(r * h * 2);
 -- 
-2.56.1
+2.43.0
 
 
-From ab0010657824d26cf3c308235d70494933fcbd00 Mon Sep 17 00:00:00 2001
+From dbba03be373b9152b7dcda957136420f93c71776 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 01:28:35 +0900
-Subject: [PATCH 08/45] inkling2: TF_INKLING_EXPERTS also takes a pack already
+Subject: [PATCH 08/46] inkling2: TF_INKLING_EXPERTS also takes a pack already
  cut to this rank's half
 
 ---
@@ -1900,13 +1900,13 @@ index 24d790ac..99b00b99 100644
      }
      return .{ .ptrs = try w.put(std.mem.sliceAsBytes(ptrs.items)), .bits = try w.put(std.mem.sliceAsBytes(bits.items)), .suh = try w.put(su.items), .svh = try w.put(sv.items), .k = kk, .n = nn };
 -- 
-2.56.1
+2.43.0
 
 
-From 043a53a41eca9204af6e89600af96d9eb50453e3 Mon Sep 17 00:00:00 2001
+From 70d2a5b3b990ff3c5041595b91d7ca82028b92a0 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 01:51:21 +0900
-Subject: [PATCH 09/45] inkling2: build the glue and drafter kernels
+Subject: [PATCH 09/46] inkling2: build the glue and drafter kernels
  arch-specific (sm_121a): native FP4/FP8 conversions
 
 ---
@@ -1931,13 +1931,13 @@ index 9b4f6c77..688b055f 100644
      .{ .name = "qwen4_gdn", .flags = glue },
      .{ .name = "qwen4_hc", .flags = glue },
 -- 
-2.56.1
+2.43.0
 
 
-From b71cf55b766fb07d42dc314522b0f3978cc6dbba Mon Sep 17 00:00:00 2001
+From 6e3a0afa7bb9a5b678bdbac9f70dbbf1a022e2b0 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 02:20:32 +0900
-Subject: [PATCH 10/45] inkling2: forward graph in pieces; warp-level route
+Subject: [PATCH 10/46] inkling2: forward graph in pieces; warp-level route
  top-8 and mix reductions; drafter rnn and fold as NVFP4
 
 ---
@@ -2250,13 +2250,13 @@ index 8ff38eff..08a3f9c4 100644
      try std.testing.expect(keepsBf16(.all, "model.llm.layers.5.attn.k_sconv.weight_proj"));
      try std.testing.expect(!keepsBf16(.all, "layers.2.mlp.gate_proj.weight"));
 -- 
-2.56.1
+2.43.0
 
 
-From 427a874ffca07c1770318912cc1a76cbfb0665e7 Mon Sep 17 00:00:00 2001
+From 91ec55e8f754e1a351687424639b1f1abf294902 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 02:32:26 +0900
-Subject: [PATCH 11/45] inkling2: keep() restores every conv history in one
+Subject: [PATCH 11/46] inkling2: keep() restores every conv history in one
  launch
 
 ---
@@ -2358,13 +2358,13 @@ index dcae77b3..52a87e1c 100644
  pub const Mix = extern struct {
      partial: u64,
 -- 
-2.56.1
+2.43.0
 
 
-From d910d2b7cf40eb1b0d327cd464f3ee38afdfb217 Mon Sep 17 00:00:00 2001
+From a698aba697f33706f61d8b3239ebbf5c76fbf1f3 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 04:36:01 +0900
-Subject: [PATCH 12/45] inkling2: verify drafts while their chained chance
+Subject: [PATCH 12/46] inkling2: verify drafts while their chained chance
  stays at least TF_INKLING_DRAFT_FLOOR (default 0.6), up to 5 deep
 
 The drafter reports each pick's probability (tf_ik_top1p: one 1024-thread block, float4 loads, online
@@ -2680,13 +2680,13 @@ index 2351961d..0872392e 100644
      .{ .name = "TF_INKLING_VERIFY_CHECK", .scope = .cuda, .kind = .flag, .forms = "0 or 1" },
      .{ .name = "TF_INKLING_RANK", .scope = .cuda, .kind = .u32, .max = 1, .forms = "rank 0 or 1" },
 -- 
-2.56.1
+2.43.0
 
 
-From b723bd4b0aaa55e93437decdc35f0e9e045f265d Mon Sep 17 00:00:00 2001
+From 13e03390428e09a5f3fa9a430058e9464c0c72e6 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 04:36:01 +0900
-Subject: [PATCH 13/45] environment tests: valid forms for TF_INKLING_FP4,
+Subject: [PATCH 13/46] environment tests: valid forms for TF_INKLING_FP4,
  EXPERTS, GRAPHS and DRAFT_FLOOR
 
 ---
@@ -2712,13 +2712,13 @@ index 046db04f..b150590f 100644
      .{ .name = "TF_INKLING_RANK", .raw = "1", .n = 1 },
      .{ .name = "TF_INKLING_WORLD", .raw = "1", .n = 1 },
 -- 
-2.56.1
+2.43.0
 
 
-From afec536d2fca51b7496bfe1638b53892f571c90b Mon Sep 17 00:00:00 2001
+From 87982543728f2ccf05f7eea962258a62744fb948 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 04:50:40 +0900
-Subject: [PATCH 14/45] inkling2: peer records carry up to 12 ids in the header
+Subject: [PATCH 14/46] inkling2: peer records carry up to 12 ids in the header
  (one broadcast each); keep rides with the next draft
 
 Rank 1 no longer drains its stream between the keep and the draft, so it queues ingest and drafting back to
@@ -2878,13 +2878,13 @@ index 12481774..d989ed85 100644
 +    try std.testing.expectEqual(@as(usize, 64), @sizeOf(Header));
  }
 -- 
-2.56.1
+2.43.0
 
 
-From e4ca0d94d29e48cd30505322736329ef395e43dd Mon Sep 17 00:00:00 2001
+From 8c253c59508570953dcd0e988e8d8b967ad2e77d Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 05:23:05 +0900
-Subject: [PATCH 15/45] server: TENSORFOLD_KEYS_MODEL, a model id whose
+Subject: [PATCH 15/46] server: TENSORFOLD_KEYS_MODEL, a model id whose
  requests carry keys to the engine for its per-request edit
 
 The same plumbing as our DeepSeek keys switch: the id is listed beside the served name, its requests set
@@ -3062,13 +3062,13 @@ index 820d6556..872b9c1b 100644
      background_ids: []const []const u8 = &.{},
      default_max_tokens: i64 = 4096,
 -- 
-2.56.1
+2.43.0
 
 
-From 2fe1103f1c0877e578abdfc1d6cda853c2af9594 Mon Sep 17 00:00:00 2001
+From 8bf718bccba5ef1be2ae0f1c505be747e72c6dae Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 05:23:05 +0900
-Subject: [PATCH 16/45] inkling2: TF_INKLING_EDIT, OpenUncensored's refusal
+Subject: [PATCH 16/46] inkling2: TF_INKLING_EDIT, OpenUncensored's refusal
  edit for requests that ask (TENSORFOLD_KEYS_MODEL)
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
@@ -3392,13 +3392,13 @@ index b150590f..d47c1bcc 100644
      .{ .name = "TF_INKLING_DRAFT_FLOOR", .raw = "0.6", .n = @bitCast(@as(f64, 0.6)) },
      .{ .name = "TF_INKLING_RANK", .raw = "0", .n = 0 },
 -- 
-2.56.1
+2.43.0
 
 
-From ba9c87428a457f48d95a949e4a360b9ccb36d1b8 Mon Sep 17 00:00:00 2001
+From c227a6e981a3e83af690be125d298271cd3b1811 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 05:35:06 +0900
-Subject: [PATCH 17/45] server: TENSORFOLD_GREEDY_FALLBACK=1 decodes a sampling
+Subject: [PATCH 17/46] server: TENSORFOLD_GREEDY_FALLBACK=1 decodes a sampling
  request greedily on a greedy-only engine instead of refusing it
 
 ---
@@ -3441,13 +3441,13 @@ index 872b9c1b..2dc2cf17 100644
              "this engine decodes greedily only and this server samples by default: send temperature 0, or serve with --temperature 0"
          else
 -- 
-2.56.1
+2.43.0
 
 
-From 22d3c966619c259ab9b3c18a8d6f751af79d95a6 Mon Sep 17 00:00:00 2001
+From ad813a4cd290f3914caa83091201da2da9f77fc7 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 05:57:25 +0900
-Subject: [PATCH 18/45] server: read Inkling 2's messages natively: text,
+Subject: [PATCH 18/46] server: read Inkling 2's messages natively: text,
  thinking as reasoning_content, JSON invokes as tool_calls; only end of
  sampling ends a turn; reasoning_effort switches thinking
 
@@ -3699,13 +3699,13 @@ index 2dc2cf17..0778579c 100644
          const minimax = text.tokenId(reply_text.mm_markers.close) != null;
          if (minimax) srv.markers = reply_text.mm_markers;
 -- 
-2.56.1
+2.43.0
 
 
-From 0709576ac8dfe65568a99bfc1f6eedaf659b515c Mon Sep 17 00:00:00 2001
+From db9adf30d1dbf5c4818d80d18ec35baa08d1bd97 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 07:55:06 +0900
-Subject: [PATCH 19/45] inkling2: prompt passes take tf_ik_prompt_dot (the
+Subject: [PATCH 19/46] inkling2: prompt passes take tf_ik_prompt_dot (the
  common EXL3 prompt path at any trellis width, 64 members a block, whole K)
  and TF_INKLING_PROMPT_ROWS (default 256)
 
@@ -4007,13 +4007,13 @@ index d47c1bcc..749ab179 100644
      .{ .name = "TF_INKLING_VERIFY_CHECK", .raw = "1", .n = 1 },
      .{ .name = "TF_INKLING_FP4", .raw = "off", .n = 0 },
 -- 
-2.56.1
+2.43.0
 
 
-From e6dc7e6ff2e56509e45ad218151ce708acf24428 Mon Sep 17 00:00:00 2001
+From 898ade9bdec059a011a7026a0332abbbd0d3761f Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 08:29:54 +0900
-Subject: [PATCH 20/45] inkling2: turn reuse: a prompt resumes from the
+Subject: [PATCH 20/46] inkling2: turn reuse: a prompt resumes from the
  furthest kept turn that starts it (the last prompt's end, or the server's
  system-prompt cuts); a kept turn copies each local ring's last 1024 rows,
  every conv history and the drafter's local rings, and reads the one live set
@@ -4405,13 +4405,13 @@ index 00000000..4f3c91c9
 +    try std.testing.expectEqual(@as(usize, 4 * 2 * 1024 * 1024), draftBytes(share));
 +}
 -- 
-2.56.1
+2.43.0
 
 
-From d7fef321311bcc40ffa4e069c9b99559e0227d5b Mon Sep 17 00:00:00 2001
+From 6f91a4dbca23a312953dbdbd37ce763f909b1bf9 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 08:46:22 +0900
-Subject: [PATCH 21/45] inkling2: each rank sums a row's eight expert outputs
+Subject: [PATCH 21/46] inkling2: each rank sums a row's eight expert outputs
  before the exchange (tf_ik_moe_sum), so the pair gathers one f32 row, not
  eight bf16 ones; no gathered buffer
 
@@ -4484,13 +4484,13 @@ index 2c37abc2..fa688af9 100644
          s.logits = try s.take(w.head.n * 4);
          s.top1 = try s.take(w.share.world * 16);
 -- 
-2.56.1
+2.43.0
 
 
-From f8c778f1cbdb6eeeb037112d0e0768a0290f90ad Mon Sep 17 00:00:00 2001
+From 685d2620f1234bbd398cb8f0acc40e8ec6dae4fd Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 09:11:07 +0900
-Subject: [PATCH 22/45] inkling2: prompt passes attend with
+Subject: [PATCH 22/46] inkling2: prompt passes attend with
  tf_ik_attention_flash (64 query rows a block, cp.async key and value tiles,
  ldmatrix fragments, online softmax in registers, P in BF16); tf_ik_attention
  and its SIMT exception path removed
@@ -4861,13 +4861,13 @@ index ea53c710..ce0c156c 100644
  pub const Mix = extern struct {
      partial: u64,
 -- 
-2.56.1
+2.43.0
 
 
-From 7a84815fe7b7f7cb20040b5abbaa29f679ebd70d Mon Sep 17 00:00:00 2001
+From 6676422156165796513ee7e74ad9e8ea2f89fa3e Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 10:23:20 +0900
-Subject: [PATCH 23/45] inkling2: tf_ik_relative takes rows * heads on grid x
+Subject: [PATCH 23/46] inkling2: tf_ik_relative takes rows * heads on grid x
  (y stays under 65535 for passes of 2731 rows and more)
 
 ---
@@ -4902,13 +4902,13 @@ index 323fe8f1..e0ba47fe 100644
          if (f.verifying and rows > 1) {
              // one launch for every verified row: masked keys add exact zeros, so each row keeps its one-row bits
 -- 
-2.56.1
+2.43.0
 
 
-From 0c84ddf3f319639a7700e1c8b55fa17f4f1633b7 Mon Sep 17 00:00:00 2001
+From 7e83942251ff6a1e90498feed30759fc42693db2 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 10:23:24 +0900
-Subject: [PATCH 24/45] inkling2: tf_ik_prompt_dot takes 128 members by 128
+Subject: [PATCH 24/46] inkling2: tf_ik_prompt_dot takes 128 members by 128
  columns, one Hadamard block, and unrotates it in its epilogue (BF16 out, no
  fp32 z or tf_ik_unrotate pass); split ranks skip the slot zero fills; gu,
  hidden and quant_down sized to the rank's intermediate
@@ -5189,13 +5189,13 @@ index fa688af9..8a914651 100644
          s.parts = try s.take(w.share.world * r * h * 4);
          s.logits = try s.take(w.head.n * 4);
 -- 
-2.56.1
+2.43.0
 
 
-From 705ceaf6f05b60e342ecfe68d552da5195f239e6 Mon Sep 17 00:00:00 2001
+From 5b43bea0d2c8dde09a18236c68acdfa6b840e7f1 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 11:03:10 +0900
-Subject: [PATCH 25/45] inkling2: tf_ik_down_input makes the down projection's
+Subject: [PATCH 25/46] inkling2: tf_ik_down_input makes the down projection's
  rotated input in one CTA a pair (tf_ik_swiglu, tf_ik_quant and tf_ik_rotate's
  arithmetic in order, the rounded row in shared memory); no hidden or
  quant_down buffers; TF_INKLING_PROMPT_ROWS up to 8192
@@ -5442,13 +5442,13 @@ index 2fd9c43b..b219c477 100644
      .{ .name = "TF_INKLING_RANK", .scope = .cuda, .kind = .u32, .max = 1, .forms = "rank 0 or 1" },
      .{ .name = "TF_INKLING_WORLD", .scope = .cuda, .kind = .u32, .only = &.{ 1, 2 }, .forms = "one rank for operator checks or two for serving" },
 -- 
-2.56.1
+2.43.0
 
 
-From 111b5231028f0fb7ab911cbf6f4edfd979012b0a Mon Sep 17 00:00:00 2001
+From 3d43776ed21626bbdec122d5aef3b8fbe770621b Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 12:03:07 +0900
-Subject: [PATCH 26/45] inkling2: tf_ik_relative computes 8 distances a thread
+Subject: [PATCH 26/46] inkling2: tf_ik_relative computes 8 distances a thread
  with vector loads and one 16-byte store (same sums in the same order);
  TF_INKLING_PROMPT_ROWS up to 16384 (about 0.55 MB a row), so a prompt of that
  length takes one pass and streams the expert weights once
@@ -5524,13 +5524,13 @@ index b219c477..d5102bf3 100644
      .{ .name = "TF_INKLING_RANK", .scope = .cuda, .kind = .u32, .max = 1, .forms = "rank 0 or 1" },
      .{ .name = "TF_INKLING_WORLD", .scope = .cuda, .kind = .u32, .only = &.{ 1, 2 }, .forms = "one rank for operator checks or two for serving" },
 -- 
-2.56.1
+2.43.0
 
 
-From b1770ee99ce9051111b8080038b1391813dc64e0 Mon Sep 17 00:00:00 2001
+From 607b88b99c64fa4ca0aaadc8c20670f533274636 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 16:05:19 +0900
-Subject: [PATCH 27/45] inkling2: tf_ik_attention_flash keeps its output
+Subject: [PATCH 27/46] inkling2: tf_ik_attention_flash keeps its output
  accumulators in registers (the epilogue's row loop unrolled; o was a 272-byte
  stack array), stages each tile's relative bias rows in shared memory with its
  keys, and skips the per-score mask on tiles 1024 or more behind a warp's rows
@@ -5636,13 +5636,13 @@ index 9b83ea7e..d35f49ba 100644
          const int row = wr + g + 8 * h;
          if (row >= a.rows) continue;
 -- 
-2.56.1
+2.43.0
 
 
-From c909e9e2c5f914897156b0470cc00f5f1dc2e3b1 Mon Sep 17 00:00:00 2001
+From b18dd4d6b16d704149a82adca2b229a2e9d8abf0 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 21:17:32 +0900
-Subject: [PATCH 28/45] inkling2: tf_ik_prompt_dot stages 64 of k a chunk in
+Subject: [PATCH 28/46] inkling2: tf_ik_prompt_dot stages 64 of k a chunk in
  two stages, one barrier a chunk (same mma chain over k, bits unchanged)
 
 ---
@@ -5745,13 +5745,13 @@ index 8b8d7c8b..bdf6a14b 100644
      __syncthreads();
      const uint32_t* T = reinterpret_cast<const uint32_t*>(a.tp0[e]);
 -- 
-2.56.1
+2.43.0
 
 
-From c54ebeb4a71ee986829928ff415bbe88e1b9a2a0 Mon Sep 17 00:00:00 2001
+From b743e67f2c6efb76df461c5c25db599f079c3dd4 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 21:17:32 +0900
-Subject: [PATCH 29/45] prompt16: prompt_lean's blocks claim tiles from a
+Subject: [PATCH 29/46] prompt16: prompt_lean's blocks claim tiles from a
  counter as they go, so one an exchange's kernels hold off a multiprocessor
  takes fewer (the last block resets it; each tile's bits unchanged)
 
@@ -5832,13 +5832,13 @@ index b5ffc643..8918452b 100644
          const int m0 = at.x, n0 = at.y;
          float acc[T::MT][T::NT][4];
 -- 
-2.56.1
+2.43.0
 
 
-From 41c01d9cece5688eac89ea01fe7e426a2b08313f Mon Sep 17 00:00:00 2001
+From 7baab2485db5b03d874c6b035548845664bd719a Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 21:17:32 +0900
-Subject: [PATCH 30/45] inkling2: a two-rank exchange sends each rank the f32
+Subject: [PATCH 30/46] inkling2: a two-rank exchange sends each rank the f32
  rows it sums (tf_ik_pair_sum adds them in rank order) and gathers BF16 sums,
  75% of the bytes; prompt passes of 512 rows and more take three row chunks (a
  sixth, two thirds, a sixth) whose exchanges run on a side stream while the
@@ -6244,13 +6244,13 @@ index 6ea32d7a..9ea2a720 100644
          s.attn_heads = try s.take(r * heads * 128 * 2);
          s.attn_parts = try s.take(16 * heads * 16 * 132 * 4);
 -- 
-2.56.1
+2.43.0
 
 
-From 9f7501194d2cfc43c082d1a362b427e8891ae78a Mon Sep 17 00:00:00 2001
+From f578dba46ca0e398945f4da2f90f6b0c8d310638 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 21:17:32 +0900
-Subject: [PATCH 31/45] inkling2: every pass embeds by tf_ik_embed_shard, the
+Subject: [PATCH 31/46] inkling2: every pass embeds by tf_ik_embed_shard, the
  gather and tf_ik_embed_pick (a row a host copy before: a 10.9k prompt started
  about 45 ms late; the same bytes)
 
@@ -6306,13 +6306,13 @@ index 0d66b439..4a0bfbbb 100644
  
      pub fn prepareVerify(f: *Forward) !void {
 -- 
-2.56.1
+2.43.0
 
 
-From aa662f9b308ac36bb143a96bab31ba8275d328da Mon Sep 17 00:00:00 2001
+From 337c52035e9cee0fefd5bbc3dceb06d2941252b0 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 21:17:32 +0900
-Subject: [PATCH 32/45] inkling2: tf_ik_up_input rounds a prompt row once and
+Subject: [PATCH 32/46] inkling2: tf_ik_up_input rounds a prompt row once and
  rotates its eight slots in one CTA (tf_ik_quant then tf_ik_rotate's
  arithmetic in order; passes under 64 rows keep the two kernels, bits
  unchanged)
@@ -6413,13 +6413,13 @@ index ac4aa21f..91e96fc4 100644
  pub const Mix = extern struct {
      partial: u64,
 -- 
-2.56.1
+2.43.0
 
 
-From 9d0af1f86ba8afc0e5e92ca27caefef22dd53dd4 Mon Sep 17 00:00:00 2001
+From 0452a4bc82c3b57d0e761b5207e9d3ca56012171 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 22:27:34 +0900
-Subject: [PATCH 33/45] inkling2: the experts' gate and up outputs take
+Subject: [PATCH 33/46] inkling2: the experts' gate and up outputs take
  relative's memory and the down projections' input streams' (attention is done
  with both), the down outputs s.rotated's once the up projections have read
  it: 1.16 GiB less a rank at 11264 prompt rows (the same bits)
@@ -6534,13 +6534,13 @@ index 9ea2a720..8d18dfee 100644
          s.logits = try s.take(w.head.n * 4);
          s.top1 = try s.take(w.share.world * 16);
 -- 
-2.56.1
+2.43.0
 
 
-From 6525b55fd1e1c42729e8d9746517e599c8d17bba Mon Sep 17 00:00:00 2001
+From 8a390cdd648df2f3f3178fe80b76f4f99830a29f Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 22:27:34 +0900
-Subject: [PATCH 34/45] inkling2: a local layer's own ring holds 1024 + 256
+Subject: [PATCH 34/46] inkling2: a local layer's own ring holds 1024 + 256
  positions; a longer pass runs on one shared ring of the pass's size, the
  window before it copied in at its first chunk and the window at its end back
  after its last: 0.82 GiB less a rank at 11264 prompt rows (the same bits)
@@ -6663,13 +6663,13 @@ index 8d18dfee..20fd00e9 100644
          s.ids = try s.take(r * 4);
          s.partial = try s.take(r * h * 2);
 -- 
-2.56.1
+2.43.0
 
 
-From 134656cc61f203cfd1a88b840e5143a55d6dffd5 Mon Sep 17 00:00:00 2001
+From e3cd7722e8500d58efb7a2c2eb92ee5242c6449a Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 22:27:34 +0900
-Subject: [PATCH 35/45] inkling2: the drafter sums its global layer's tap mix
+Subject: [PATCH 35/46] inkling2: the drafter sums its global layer's tap mix
  in f32 tap by tap (tf_ik_draft_gather, then tf_ik_draft_mix_sum:
  tf_ik_draft_mix's arithmetic in its order) and keeps of each tap only the
  last rows a local ring holds, which are all a local layer ingests: 0.49 GiB
@@ -6856,13 +6856,13 @@ index f29a83cb..819b244b 100644
          }
          if (!final) return;
 -- 
-2.56.1
+2.43.0
 
 
-From 22e4ab61f9747122d552a82a9b1a19b0a24f2735 Mon Sep 17 00:00:00 2001
+From 4dbc6f0a0b39d71279962bcfba9894247fe9edf6 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 23:46:17 +0900
-Subject: [PATCH 36/45] inkling2: the verify audit compares the final hidden
+Subject: [PATCH 36/46] inkling2: the verify audit compares the final hidden
  row with tap 7's kept tail (d.taps holds each tap's last d.tail rows from
  d.tail_first since 134656cc)
 
@@ -6884,13 +6884,13 @@ index dcb39d26..65e9ca50 100644
          for (f.s.cache, 0..) |cache, layer| {
              const offset = ((f.verify_start + r) % cache.capacity) * a.width * 2;
 -- 
-2.56.1
+2.43.0
 
 
-From be67c79cdd99baa3e547eec3d6a45b94be78cc81 Mon Sep 17 00:00:00 2001
+From 5e92b52ccaad950e34f0068f3d9e3bb915f04613 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 23:46:23 +0900
-Subject: [PATCH 37/45] inkling2: TF_INKLING_KV4=1 keeps the global layers' and
+Subject: [PATCH 37/46] inkling2: TF_INKLING_KV4=1 keeps the global layers' and
  the drafter's global layer's KV as NVFP4 rows (inkling2_kv4.cuh: E2M1 codes,
  an E4M3 scale per 16 values, 72 bytes a position and head against 256):
  tf_ik_prep and the drafter's prep and tf_ik_draft_store4 write them,
@@ -7782,13 +7782,13 @@ index 749ab179..5f8b8307 100644
      .{ .name = "TF_INKLING_FP4", .raw = "all", .n = 2 },
      .{ .name = "TF_INKLING_EXPERTS", .raw = "/models/inkling2/exl3", .n = 0 },
 -- 
-2.56.1
+2.43.0
 
 
-From 4ce73ea298b8eb200c0c199386502ae167541fdf Mon Sep 17 00:00:00 2001
+From 71bdbf6f9d2e99339247cad643617cddf139a19d Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Thu, 19 Nov 2026 00:15:26 +0900
-Subject: [PATCH 38/45] inkling2: tf_ik_draft_attention widens an FP4 ring 32
+Subject: [PATCH 38/46] inkling2: tf_ik_draft_attention widens an FP4 ring 32
  keys at a time into shared rows its eight warps share (each warp decoded
  every value itself): 45 -> 6 ms at 115k positions, under the BF16 ring's 9.7;
  each key's arithmetic as before, so FP4 matches its BF16 twin and the BF16
@@ -7858,13 +7858,13 @@ index d1604c0d..6959f558 100644
      const size_t out = (((size_t)row * hq + head) * 32 + split) * 130;
      if (!lane) { parts[out] = maximum; parts[out + 1] = denominator; }
 -- 
-2.56.1
+2.43.0
 
 
-From f8b1c27f24ab5bc0f2cd26d191b52c13980df8bf Mon Sep 17 00:00:00 2001
+From 0d273c53f8a8a2bcae91acfaaa4d3f1127530c7c Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Thu, 19 Nov 2026 00:23:36 +0900
-Subject: [PATCH 39/45] inkling2: one cache's attention launch is
+Subject: [PATCH 39/46] inkling2: one cache's attention launch is
  Forward.runAttention (split kernels for verify and decode rows, flash for
  prompt rows), the same launches
 
@@ -7922,13 +7922,13 @@ index f550bad8..375eac89 100644
          if (a.fp4 != 0) {
              try f.k.go(.attention_part4, f.stream, .{ .x = @intCast(heads), .y = 16 }, 128, .{ a, f.s.attn_parts });
 -- 
-2.56.1
+2.43.0
 
 
-From ab041a22bdb64717c48f018ff2c7bc5c5c1d2687 Mon Sep 17 00:00:00 2001
+From 785c36a929d525c07faa2631e6b09f5019e94d84 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Thu, 19 Nov 2026 03:14:33 +0900
-Subject: [PATCH 40/45] inkling2: FP4 decode and verify attention is
+Subject: [PATCH 40/46] inkling2: FP4 decode and verify attention is
  tf_ik_attention_part4_{1,2,3} (a CTA a key head and one of kern.key_splits=24
  splits, its six query heads' rows packed into 16-row tiles, codes fetched 16
  bytes at a time) and tf_ik_attention_merge4; tf_ik_attention_flash4 serves
@@ -8590,13 +8590,13 @@ index b6e2f43b..8c979428 100644
          s.mlp = try s.take(r * h * 2);
          s.mlp_input = try s.take(r * h * 2);
 -- 
-2.56.1
+2.43.0
 
 
-From a00020e14c2c4fd26d406d8770a2267d2a7ca908 Mon Sep 17 00:00:00 2001
+From 8e6435eb8e0bf31853af1c145f977be243412f03 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Thu, 19 Nov 2026 03:14:51 +0900
-Subject: [PATCH 41/45] inkling2: TF_INKLING_STREAMS (1 to 4, default 4) serves
+Subject: [PATCH 41/46] inkling2: TF_INKLING_STREAMS (1 to 4, default 4) serves
  that many requests at once: each on a slot of its own (local rings, drafter
  state), the global caches' regions in one shared pool (pool.zig: first fit,
  idle kept turns evicted oldest first, then compaction; rank 0 places, both
@@ -10559,13 +10559,13 @@ index 5f8b8307..b9b462a2 100644
      .{ .name = "TF_INKLING_KV4", .raw = "1", .n = 1 },
      .{ .name = "TF_INKLING_FP4", .raw = "off", .n = 0 },
 -- 
-2.56.1
+2.43.0
 
 
-From 9f0d0ba5d1a4df835d8e441852457fd1d42451ee Mon Sep 17 00:00:00 2001
+From 9fe6ab0b78dfd7a80c96c06f90a2b950a7e07388 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Thu, 19 Nov 2026 09:54:36 +0900
-Subject: [PATCH 42/45] cuda: vision_kernel<64, 8> (vit.Attention's 64-wide
+Subject: [PATCH 42/46] cuda: vision_kernel<64, 8> (vit.Attention's 64-wide
  heads, for Inkling 2's image tower: 16 heads of 64)
 
 ---
@@ -10604,13 +10604,13 @@ index 4f765f5f..7ade49f7 100644
      .{ .dim = 80, .warps = 8 },
      .{ .dim = 128, .warps = 8 },
 -- 
-2.56.1
+2.43.0
 
 
-From e6aa780c68fafeb99904458fef9e784bd0a8d8ab Mon Sep 17 00:00:00 2001
+From 49859f6839d4615dff0bec9d03a60c3786e59ea6 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Thu, 19 Nov 2026 09:54:36 +0900
-Subject: [PATCH 43/45] inkling2: the image tower (vision.zig,
+Subject: [PATCH 43/46] inkling2: the image tower (vision.zig,
  inkling2_vision.cu) as SGLang's inkling2_vision.py: 20-pixel patches, the 32
  x 32 position grid (clamp-to-edge bilinear), the class row, 23 pre-LN layers
  of 16 heads of 64 with 2D rotary (vision_kernel<64>), layer scales, the 2 x 2
@@ -11103,13 +11103,13 @@ index 00000000..d374a852
 +    try std.testing.expectEqual(@as(u16, 0xbf81), bf16(-1.0078125));
 +}
 -- 
-2.56.1
+2.43.0
 
 
-From 3f37f046a3bc0bc254baad072fc3e4492afa7aaf Mon Sep 17 00:00:00 2001
+From 64307343f7ad22fc82ef465d7aac8b4047a5730c Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Thu, 19 Nov 2026 09:54:36 +0900
-Subject: [PATCH 44/45] inkling2: images in requests under --vision: the server
+Subject: [PATCH 44/46] inkling2: images in requests under --vision: the server
  cuts each image into the tower's patches (SGLang's processor: orientation,
  alpha over the checkerboard, bicubic only past the budget), rank 0's tower
  encodes a request's images before the prompt pass that reaches them and
@@ -11814,13 +11814,13 @@ index b9b462a2..6e87484e 100644
      .{ .name = "TF_INKLING_DRAFT_FLOOR", .raw = "0.6", .n = @bitCast(@as(f64, 0.6)) },
      .{ .name = "TF_INKLING_RANK", .raw = "0", .n = 0 },
 -- 
-2.56.1
+2.43.0
 
 
-From ed1305cfb1338695ac2f3283537938d993a14236 Mon Sep 17 00:00:00 2001
+From cc29a019f371e09957095c1cb941fb91a93a9950 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Thu, 19 Nov 2026 18:44:36 +0900
-Subject: [PATCH 45/45] inkling2: temperature sampling: tf_ik_top1 takes each
+Subject: [PATCH 45/46] inkling2: temperature sampling: tf_ik_top1 takes each
  slot's draw (seed and 1 / T, uploaded at begin and sent to the peer in the
  begin record) and picks the argmax of logits / T plus Gumbel noise keyed like
  lanes/sampling.zig's keyBits(seed, position, token), so the vocabulary split
@@ -12079,5 +12079,193 @@ index 95aa2836..e1a1aeeb 100644
      try std.testing.expect(familyInfo(struct {}, .{ .greedy_only = true }).greedy_only);
      try std.testing.expect(!familyInfo(struct {}, .{}).greedy_only);
 -- 
-2.56.1
+2.43.0
+
+
+From ea9e0be69a089b6dd91d32018a73ccf8202e7a6c Mon Sep 17 00:00:00 2001
+From: LPFchan <me@lost.plus>
+Date: Wed, 25 Nov 2026 01:56:38 +0900
+Subject: [PATCH 46/46] inkling2: keep turn at len-1 for exact-length resends
+ and adopt idle pool regions in place
+
+turns.marks saves slot 0 at len - 1 (when len > 1 and len - 1 > at) so exact-length retries and regenerates resume 1 token short of the prompt end instead of falling back to the system-prompt cut.
+
+pool.Map.place evicts blocking idle neighbors or slides an idle source down in a separate move before growing in place when copying alongside the source would exceed pool memory.
+---
+ zig/src/families/inkling2/pool.zig  | 111 ++++++++++++++++++++++++++++
+ zig/src/families/inkling2/turns.zig |  22 ++++--
+ 2 files changed, 125 insertions(+), 8 deletions(-)
+
+diff --git a/zig/src/families/inkling2/pool.zig b/zig/src/families/inkling2/pool.zig
+index 74436327..77168d96 100644
+--- a/zig/src/families/inkling2/pool.zig
++++ b/zig/src/families/inkling2/pool.zig
+@@ -113,6 +113,76 @@ pub const Map = struct {
+                 m.held[i].used = m.clock;
+                 return .{ .id = f.id, .adopted = true };
+             }
++            if (!m.fits(capacity, source)) {
++                // Copying alongside `source` would exceed pool memory; adopt `source` in place by evicting
++                // blocking idle regions (and sliding down first in a separate move if needed).
++                var next_active_start: usize = m.tokens;
++                for (m.held[i + 1 .. m.n]) |h| if (h.lane != none) {
++                    next_active_start = h.region.start;
++                    break;
++                };
++                if (r.start + capacity <= next_active_start) {
++                    var dropped: u32 = 0;
++                    const j = i + 1;
++                    while (j < m.n and m.held[j].region.start < r.start + capacity) {
++                        std.debug.assert(m.held[j].lane == none);
++                        dropped |= m.held[j].refs;
++                        m.remove(j);
++                    }
++                    const grown: Region = .{ .start = r.start, .capacity = capacity };
++                    out.add(.{ .src = r, .dst = grown, .count = f.at, .lane = lane });
++                    m.held[i].region = grown;
++                    m.held[i].lane = lane;
++                    m.held[i].used = m.clock;
++                    return .{ .id = f.id, .dropped = dropped, .adopted = true };
++                }
++                var active_tokens: usize = 0;
++                var active_after = false;
++                for (m.held[0..m.n], 0..) |h, idx| if (h.lane != none) {
++                    active_tokens += h.region.capacity;
++                    if (idx > i) active_after = true;
++                };
++                if (!active_after and active_tokens + capacity <= m.tokens) {
++                    var dropped: u32 = 0;
++                    var k: usize = 0;
++                    while (k < m.n) {
++                        if (m.held[k].lane == none and m.held[k].id != f.id) {
++                            dropped |= m.held[k].refs;
++                            m.remove(k);
++                        } else {
++                            k += 1;
++                        }
++                    }
++                    var at: usize = 0;
++                    var src_idx: usize = 0;
++                    for (m.held[0..m.n], 0..) |*h, idx| {
++                        if (h.id == f.id) {
++                            src_idx = idx;
++                            if (h.region.start != at) {
++                                const slid: Region = .{ .start = at, .capacity = h.region.capacity };
++                                out.add(.{ .src = h.region, .dst = slid, .count = f.at, .lane = none });
++                                h.region = slid;
++                            }
++                            const grown: Region = .{ .start = at, .capacity = capacity };
++                            out.add(.{ .src = h.region, .dst = grown, .count = f.at, .lane = lane });
++                            h.region = grown;
++                            h.lane = lane;
++                            h.used = m.clock;
++                            at += capacity;
++                        } else {
++                            if (h.region.start != at) {
++                                const moved: Region = .{ .start = at, .capacity = h.region.capacity };
++                                out.add(.{ .src = h.region, .dst = moved, .count = h.region.capacity, .lane = h.lane });
++                                h.region = moved;
++                            }
++                            at += h.region.capacity;
++                        }
++                    }
++                    std.debug.assert(m.held[src_idx].id == f.id);
++                    return .{ .id = f.id, .dropped = dropped, .adopted = true };
++                }
++                return error.LaneMemory;
++            }
+         };
+         if (!m.fits(capacity, source)) return error.LaneMemory;
+         var placed: Placed = .{ .id = 0 };
+@@ -285,3 +355,44 @@ test "an FP4 move copies each head's codes and scales from one capacity's layout
+     try std.testing.expectEqual(Piece{ .src = 4 * 256 * 64 + 2 * 256 * 8, .dst = 512 * 288 + 4 * 512 * 64 + 2 * 512 * 8, .len = 800 }, p[6]);
+     try std.testing.expectEqual(@as(usize, 1), pieces(mv, 4 * 256, 4, false, &buf).len);
+ }
++
++test "an idle source that cannot be copied alongside itself evicts idle blockers behind it and grows in place" {
++    var m: Map = .{ .tokens = 10 * unit };
++    var moves: Moves = .{};
++    const a = try m.place(0, 6 * unit, null, &moves);
++    const b = try m.place(1, 2 * unit, null, &moves);
++    m.keep(0, a.id);
++    m.keep(1, b.id);
++    m.release(0);
++    m.release(1);
++    moves = .{};
++    // 6 + 8 > 10 so copy cannot fit, but evicting idle b frees [6, 10) for a to grow to 8 in place
++    const grown = try m.place(0, 8 * unit, .{ .id = a.id, .at = 5 * unit }, &moves);
++    try std.testing.expect(grown.adopted and grown.id == a.id);
++    try std.testing.expectEqual(@as(u32, 1 << 1), grown.dropped);
++    try std.testing.expect(m.region(b.id) == null);
++    try std.testing.expectEqual(Region{ .start = 0, .capacity = 8 * unit }, m.region(a.id).?);
++    try std.testing.expectEqual(@as(usize, 1), moves.n);
++    try std.testing.expectEqual(Move{ .src = .{ .start = 0, .capacity = 6 * unit }, .dst = .{ .start = 0, .capacity = 8 * unit }, .count = 5 * unit, .lane = 0 }, moves.list[0]);
++}
++
++test "an idle source behind an idle prefix slides down before growing in two safe moves" {
++    var m: Map = .{ .tokens = 10 * unit };
++    var moves: Moves = .{};
++    const a = try m.place(0, 2 * unit, null, &moves);
++    const b = try m.place(1, 6 * unit, null, &moves);
++    m.keep(0, a.id);
++    m.keep(1, b.id);
++    m.release(0);
++    m.release(1);
++    moves = .{};
++    // b sits at [2, 8); growing to 9 needs sliding to [0, 6) first, then growing to [0, 9)
++    const grown = try m.place(0, 9 * unit, .{ .id = b.id, .at = 5 * unit }, &moves);
++    try std.testing.expect(grown.adopted and grown.id == b.id);
++    try std.testing.expectEqual(@as(u32, 1 << 0), grown.dropped);
++    try std.testing.expect(m.region(a.id) == null);
++    try std.testing.expectEqual(Region{ .start = 0, .capacity = 9 * unit }, m.region(b.id).?);
++    try std.testing.expectEqual(@as(usize, 2), moves.n);
++    try std.testing.expectEqual(Move{ .src = .{ .start = 2 * unit, .capacity = 6 * unit }, .dst = .{ .start = 0, .capacity = 6 * unit }, .count = 5 * unit, .lane = none }, moves.list[0]);
++    try std.testing.expectEqual(Move{ .src = .{ .start = 0, .capacity = 6 * unit }, .dst = .{ .start = 0, .capacity = 9 * unit }, .count = 5 * unit, .lane = 0 }, moves.list[1]);
++}
+diff --git a/zig/src/families/inkling2/turns.zig b/zig/src/families/inkling2/turns.zig
+index 00815e3e..0d16f356 100644
+--- a/zig/src/families/inkling2/turns.zig
++++ b/zig/src/families/inkling2/turns.zig
+@@ -53,13 +53,16 @@ pub fn drop(kept: []Kept, region: u32, at: usize) void {
+     };
+ }
+ 
+-/// The positions a pass from `at` keeps, by slot (0: none): the prompt's end, then the server's cuts (ascending).
++/// The positions a pass from `at` keeps, by slot (0: none): one short of the prompt's end (so an exact-length resend
++/// or regenerate can still resume here and run the last token), then the server's cuts (ascending).
+ pub fn marks(len: usize, cuts: []const u32, at: usize) [slots]usize {
+     var out: [slots]usize = @splat(0);
+-    out[0] = len;
++    const last = if (len > 1 and len - 1 > at) len - 1 else 0;
++    out[0] = last;
++    const cap = if (last > 0) last else len;
+     for (cuts, 0..) |c, j| {
+         const slot = cuts.len - j;
+-        if (slot < slots and c > at and c < len) out[slot] = c;
++        if (slot < slots and c > at and c < cap) out[slot] = c;
+     }
+     return out;
+ }
+@@ -118,11 +121,14 @@ test "a stream's end of prompt takes the oldest end entry, the cuts their own" {
+     try std.testing.expectEqual(@as(usize, 2), entryFor(kept[0..4], 1, 2));
+ }
+ 
+-test "a pass keeps its end in slot 0 and the server's cuts past its start, the latest first" {
+-    try std.testing.expectEqual([slots]usize{ 9000, 7000, 6488, 4952 }, marks(9000, &.{ 4952, 6488, 7000 }, 0));
+-    try std.testing.expectEqual([slots]usize{ 9000, 7000, 0, 0 }, marks(9000, &.{ 4952, 6488, 7000 }, 6488));
+-    try std.testing.expectEqual([slots]usize{ 9000, 7000, 6488, 0 }, marks(9000, &.{ 6488, 7000 }, 0));
+-    try std.testing.expectEqual([slots]usize{ 40, 0, 0, 0 }, marks(40, &.{}, 0));
++test "a pass keeps one before its end in slot 0 and the server's cuts past its start, the latest first" {
++    try std.testing.expectEqual([slots]usize{ 8999, 7000, 6488, 4952 }, marks(9000, &.{ 4952, 6488, 7000 }, 0));
++    try std.testing.expectEqual([slots]usize{ 8999, 7000, 0, 0 }, marks(9000, &.{ 4952, 6488, 7000 }, 6488));
++    try std.testing.expectEqual([slots]usize{ 8999, 7000, 6488, 0 }, marks(9000, &.{ 6488, 7000 }, 0));
++    try std.testing.expectEqual([slots]usize{ 39, 0, 0, 0 }, marks(40, &.{}, 0));
++    // exact-length resend resuming at len - 1 does not re-save slot 0
++    try std.testing.expectEqual([slots]usize{ 0, 0, 0, 0 }, marks(9000, &.{ 4952, 6488, 7000 }, 8999));
++    try std.testing.expectEqual([slots]usize{ 0, 0, 0, 0 }, marks(1, &.{}, 0));
+ }
+ 
+ test "a kept turn holds the local rings' window and every history" {
+-- 
+2.43.0
 
