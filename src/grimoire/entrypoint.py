@@ -20,6 +20,7 @@ import urllib.parse
 import uuid
 from datetime import datetime, timezone
 
+import anyio
 import httpx
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
@@ -493,7 +494,8 @@ async def chat_responses(request: Request):
                 yield chunk
         finally:
             served.inflight -= 1
-            await upstream.aclose()
+            with anyio.CancelScope(shield=True):
+                await upstream.aclose()
 
     response_headers = _backend_response_headers(upstream.headers)
     return StreamingResponse(body_iter(), status_code=upstream.status_code, headers=response_headers)
@@ -566,7 +568,8 @@ async def proxy_v1(request: Request, path: str):
             async for chunk in upstream.aiter_raw():
                 yield chunk
         finally:
-            await upstream.aclose()
+            with anyio.CancelScope(shield=True):
+                await upstream.aclose()
 
     response_headers = _backend_response_headers(upstream.headers)
     return StreamingResponse(body_iter(), status_code=upstream.status_code, headers=response_headers)
