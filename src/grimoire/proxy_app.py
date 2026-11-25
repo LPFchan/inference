@@ -24,7 +24,7 @@ import anyio
 import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, RedirectResponse, Response, StreamingResponse
 
 from grimoire import config
 from grimoire.auth import AuthIdentity, authenticate_public
@@ -294,6 +294,69 @@ async def skill_reference(name: str):
     if name not in SKILL_REFERENCES:
         raise HTTPException(status_code=404, detail="Not found")
     return Response(SKILL_REFERENCES[name], media_type="text/markdown; charset=utf-8")
+
+
+# Public PWA manifest and app icons. Browsers (especially iOS Safari / SpringBoard
+# WebClip) fetch these without session cookies when installing to the home screen.
+_PUBLIC_PWA_ROOT_FILES: dict[str, tuple[str, str, str]] = {
+    "manifest.webmanifest": ("manifest.webmanifest", "application/manifest+json", "no-cache"),
+    "apple-touch-icon.png": ("apple-touch-icon.png", "image/png", "public, max-age=3600"),
+    "apple-touch-icon-precomposed.png": ("apple-touch-icon.png", "image/png", "public, max-age=3600"),
+    "favicon.png": ("favicon.png", "image/png", "public, max-age=3600"),
+}
+
+_PUBLIC_ICON_MEDIA_TYPES: dict[str, str] = {
+    ".png": "image/png",
+    ".svg": "image/svg+xml",
+    ".ico": "image/x-icon",
+    ".webp": "image/webp",
+}
+
+
+def _serve_public_webui_file(rel_path: str, media_type: str, cache_control: str) -> FileResponse:
+    root = Path(config.WEBUI_DIR).resolve()
+    target = (root / rel_path).resolve()
+    try:
+        target.relative_to(root)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Not found")
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail="Not found")
+    return FileResponse(target, media_type=media_type, headers={"Cache-Control": cache_control})
+
+
+@app.api_route("/manifest.webmanifest", methods=["GET", "HEAD"])
+async def public_manifest():
+    filename, media_type, cache_control = _PUBLIC_PWA_ROOT_FILES["manifest.webmanifest"]
+    return _serve_public_webui_file(filename, media_type, cache_control)
+
+
+@app.api_route("/apple-touch-icon.png", methods=["GET", "HEAD"])
+async def public_apple_touch_icon():
+    filename, media_type, cache_control = _PUBLIC_PWA_ROOT_FILES["apple-touch-icon.png"]
+    return _serve_public_webui_file(filename, media_type, cache_control)
+
+
+@app.api_route("/apple-touch-icon-precomposed.png", methods=["GET", "HEAD"])
+async def public_apple_touch_icon_precomposed():
+    filename, media_type, cache_control = _PUBLIC_PWA_ROOT_FILES["apple-touch-icon-precomposed.png"]
+    return _serve_public_webui_file(filename, media_type, cache_control)
+
+
+@app.api_route("/favicon.png", methods=["GET", "HEAD"])
+async def public_favicon():
+    filename, media_type, cache_control = _PUBLIC_PWA_ROOT_FILES["favicon.png"]
+    return _serve_public_webui_file(filename, media_type, cache_control)
+
+
+@app.api_route("/icons/{name}", methods=["GET", "HEAD"])
+async def public_pwa_icon(name: str):
+    if "/" in name or "\\" in name or name in {"", ".", ".."}:
+        raise HTTPException(status_code=404, detail="Not found")
+    media_type = _PUBLIC_ICON_MEDIA_TYPES.get(Path(name).suffix.lower())
+    if not media_type:
+        raise HTTPException(status_code=404, detail="Not found")
+    return _serve_public_webui_file(f"icons/{name}", media_type, "public, max-age=3600")
 
 
 def _return_to(request: Request) -> str:

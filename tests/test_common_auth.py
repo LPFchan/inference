@@ -186,3 +186,35 @@ def test_stateless_proxy_keeps_the_managers_eviction_refusal():
         asyncio.run(go())
     assert exc.value.status_code == 409
     assert "only an administrator" in exc.value.detail
+
+
+def test_public_pwa_manifest_and_icons_bypass_auth(monkeypatch, tmp_path):
+    from fastapi.testclient import TestClient
+
+    (tmp_path / "manifest.webmanifest").write_text('{"name":"Chat","short_name":"Chat"}', encoding="utf-8")
+    (tmp_path / "apple-touch-icon.png").write_bytes(b"\x89PNG\r\n\x1a\napple")
+    (tmp_path / "favicon.png").write_bytes(b"\x89PNG\r\n\x1a\nfav")
+    (tmp_path / "index.html").write_text("<html>secret</html>", encoding="utf-8")
+    icons = tmp_path / "icons"
+    icons.mkdir()
+    (icons / "icon-192.png").write_bytes(b"\x89PNG\r\n\x1a\n192")
+
+    monkeypatch.setattr(config, "WEBUI_DIR", str(tmp_path))
+
+    with TestClient(proxy_app.app) as client:
+        for path, expected_ct in [
+            ("/manifest.webmanifest", "application/manifest+json"),
+            ("/apple-touch-icon.png", "image/png"),
+            ("/apple-touch-icon-precomposed.png", "image/png"),
+            ("/favicon.png", "image/png"),
+            ("/icons/icon-192.png", "image/png"),
+        ]:
+            resp = client.get(path)
+            assert resp.status_code == 200, path
+            assert expected_ct in resp.headers["content-type"]
+            head = client.head(path)
+            assert head.status_code == 200, path
+
+        assert client.get("/icons/not-there.png").status_code == 404
+        assert client.get("/icons/secret.html").status_code == 404
+        assert client.get("/index.html", follow_redirects=False).status_code == 401
