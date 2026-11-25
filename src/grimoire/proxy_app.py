@@ -17,6 +17,7 @@ import copy
 import json
 import logging
 import os
+import re
 import urllib.parse
 from pathlib import Path
 
@@ -300,10 +301,13 @@ async def skill_reference(name: str):
 # WebClip) fetch these without session cookies when installing to the home screen.
 _PUBLIC_PWA_ROOT_FILES: dict[str, tuple[str, str, str]] = {
     "manifest.webmanifest": ("manifest.webmanifest", "application/manifest+json", "no-cache"),
-    "apple-touch-icon.png": ("apple-touch-icon.png", "image/png", "public, max-age=3600"),
-    "apple-touch-icon-precomposed.png": ("apple-touch-icon.png", "image/png", "public, max-age=3600"),
     "favicon.png": ("favicon.png", "image/png", "public, max-age=3600"),
+    "favicon.ico": ("favicon.ico", "image/x-icon", "public, max-age=3600"),
 }
+
+_APPLE_TOUCH_ICON_RE = re.compile(
+    r"^apple-touch-icon(?:-\d+x\d+)?(?:-precomposed)?\.png$"
+)
 
 _PUBLIC_ICON_MEDIA_TYPES: dict[str, str] = {
     ".png": "image/png",
@@ -331,21 +335,15 @@ async def public_manifest():
     return _serve_public_webui_file(filename, media_type, cache_control)
 
 
-@app.api_route("/apple-touch-icon.png", methods=["GET", "HEAD"])
-async def public_apple_touch_icon():
-    filename, media_type, cache_control = _PUBLIC_PWA_ROOT_FILES["apple-touch-icon.png"]
-    return _serve_public_webui_file(filename, media_type, cache_control)
-
-
-@app.api_route("/apple-touch-icon-precomposed.png", methods=["GET", "HEAD"])
-async def public_apple_touch_icon_precomposed():
-    filename, media_type, cache_control = _PUBLIC_PWA_ROOT_FILES["apple-touch-icon-precomposed.png"]
-    return _serve_public_webui_file(filename, media_type, cache_control)
-
-
 @app.api_route("/favicon.png", methods=["GET", "HEAD"])
 async def public_favicon():
     filename, media_type, cache_control = _PUBLIC_PWA_ROOT_FILES["favicon.png"]
+    return _serve_public_webui_file(filename, media_type, cache_control)
+
+
+@app.api_route("/favicon.ico", methods=["GET", "HEAD"])
+async def public_favicon_ico():
+    filename, media_type, cache_control = _PUBLIC_PWA_ROOT_FILES["favicon.ico"]
     return _serve_public_webui_file(filename, media_type, cache_control)
 
 
@@ -485,6 +483,8 @@ async def auth_token_delete(request: Request, token_id: str):
 async def proxy_rest(request: Request, path: str):
     if path == "internal" or path.startswith("internal/"):
         raise HTTPException(status_code=404, detail="Not found")
+    if request.method in {"GET", "HEAD"} and _APPLE_TOUCH_ICON_RE.match(path):
+        return _serve_public_webui_file("apple-touch-icon.png", "image/png", "public, max-age=3600")
     identity = await _browser_identity(request)
     if isinstance(identity, Response):
         return identity

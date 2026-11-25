@@ -194,10 +194,12 @@ def test_public_pwa_manifest_and_icons_bypass_auth(monkeypatch, tmp_path):
     (tmp_path / "manifest.webmanifest").write_text('{"name":"Chat","short_name":"Chat"}', encoding="utf-8")
     (tmp_path / "apple-touch-icon.png").write_bytes(b"\x89PNG\r\n\x1a\napple")
     (tmp_path / "favicon.png").write_bytes(b"\x89PNG\r\n\x1a\nfav")
+    (tmp_path / "favicon.ico").write_bytes(b"\x00\x00\x01\x00ico")
     (tmp_path / "index.html").write_text("<html>secret</html>", encoding="utf-8")
     icons = tmp_path / "icons"
     icons.mkdir()
     (icons / "icon-192.png").write_bytes(b"\x89PNG\r\n\x1a\n192")
+    (icons / "apple-touch-icon.png").write_bytes(b"\x89PNG\r\n\x1a\napple512")
 
     monkeypatch.setattr(config, "WEBUI_DIR", str(tmp_path))
 
@@ -206,8 +208,12 @@ def test_public_pwa_manifest_and_icons_bypass_auth(monkeypatch, tmp_path):
             ("/manifest.webmanifest", "application/manifest+json"),
             ("/apple-touch-icon.png", "image/png"),
             ("/apple-touch-icon-precomposed.png", "image/png"),
+            ("/apple-touch-icon-240x240.png", "image/png"),
+            ("/apple-touch-icon-240x240-precomposed.png", "image/png"),
             ("/favicon.png", "image/png"),
+            ("/favicon.ico", "image/x-icon"),
             ("/icons/icon-192.png", "image/png"),
+            ("/icons/apple-touch-icon.png", "image/png"),
         ]:
             resp = client.get(path)
             assert resp.status_code == 200, path
@@ -218,3 +224,4 @@ def test_public_pwa_manifest_and_icons_bypass_auth(monkeypatch, tmp_path):
         assert client.get("/icons/not-there.png").status_code == 404
         assert client.get("/icons/secret.html").status_code == 404
         assert client.get("/index.html", follow_redirects=False).status_code == 401
+        assert client.get("/login", follow_redirects=False).status_code == 307
