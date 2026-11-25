@@ -20,6 +20,7 @@ import os
 import urllib.parse
 from pathlib import Path
 
+import anyio
 import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -145,8 +146,13 @@ async def _with_sse_keepalive(chunks, ping, interval=SSE_KEEPALIVE_SECONDS):
     finally:
         if pending is not None:
             pending.cancel()
-            with contextlib.suppress(BaseException):
-                await pending
+            # Shield awaiting the cancelled reader: when Starlette cancels
+            # StreamingResponse on client disconnect, an unshielded await
+            # exits immediately before httpcore finishes closing the upstream
+            # socket, leaving the manager and backend request running.
+            with anyio.CancelScope(shield=True):
+                with contextlib.suppress(BaseException):
+                    await pending
 
 
 async def _forward_to_manager(
@@ -185,10 +191,11 @@ async def _forward_to_manager(
             async for chunk in chunks:
                 yield chunk
         finally:
-            try:
-                await chunks.aclose()
-            finally:
-                await upstream.aclose()
+            with anyio.CancelScope(shield=True):
+                try:
+                    await chunks.aclose()
+                finally:
+                    await upstream.aclose()
 
     return StreamingResponse(body_iter(), status_code=upstream.status_code,
                              headers=_backend_response_headers(upstream.headers))
@@ -246,7 +253,8 @@ async def proxy_v1(request: Request, path: str):
             async for chunk in upstream.aiter_raw():
                 yield chunk
         finally:
-            await upstream.aclose()
+            with anyio.CancelScope(shield=True):
+                await upstream.aclose()
 
     return StreamingResponse(body_iter(), status_code=upstream.status_code,
                              headers=_backend_response_headers(upstream.headers))

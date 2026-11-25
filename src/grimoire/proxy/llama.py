@@ -7,6 +7,7 @@ import json
 import logging
 import re
 
+import anyio
 from fastapi.responses import StreamingResponse
 
 from grimoire import config
@@ -221,7 +222,8 @@ async def _release_when_done(body, active):
             yield chunk
     finally:
         active.inflight -= 1
-        await body.aclose()
+        with anyio.CancelScope(shield=True):
+            await body.aclose()
 
 
 async def _forward_chat(
@@ -352,7 +354,8 @@ async def _forward_chat(
                     yield chunk
         finally:
             try:
-                await upstream.aclose()
+                with anyio.CancelScope(shield=True):
+                    await upstream.aclose()
             finally:
                 if slot_guard is not None:
                     slot_guard.release()
