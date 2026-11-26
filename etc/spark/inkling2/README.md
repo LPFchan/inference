@@ -52,9 +52,9 @@ so the stock model's kernels and outputs are unchanged.
 
 - Decode, greedy, 524,288-token window: prose 38-44 tok/s, code 63-69, 8k context 37, 32k 67, 115k 53, 250k 34, 481k 27.
   About 0.2 s to the first token on short prompts. The uncensored name runs 36-39 on prose.
-- Prompt reading: about 2000 tok/s at 10.9k tokens (1975-2020 from one restart to the next), 1900 at 43k. A pass
-  takes up to 11,264 tokens (`PROMPT_ROWS`, about 0.4 MB of scratch a token), so a prompt that fits streams the expert
-  weights once. A pass of 512 tokens or more runs in three row chunks: while one chunk's sums cross to the other Spark,
+- Prompt reading: about 2000 tok/s at 10.9k tokens with `PROMPT_ROWS=11264` (1900 at 43k). Prod runs
+  `PROMPT_ROWS=4096` (about 0.36 MiB of scratch a row) to free ~2.5 GiB per Spark for the shared KV pool while still
+  fitting warm follow-ups and 4,096-token images in one pass. A pass of 512 tokens or more runs in three row chunks: while one chunk's sums cross to the other Spark,
   the GPU already works on the next chunk. The exchange runs over both RoCE twins of the cable's port (one carries only
   ~100 Gb/s) with 4 NCCL channels.
 - Long context: the 8 global layers and the drafter's global layer keep their KV caches as NVFP4 (`KV4=1`, the
@@ -66,9 +66,10 @@ so the stock model's kernels and outputs are unchanged.
 - Memory: the engine takes about 108 GiB of each Spark with the shared pool, so about 6 GB stays free after the load. The expert matmuls
   reuse two buffers attention is done with, each of the 40 sliding-window layers keeps 1,280 positions (a longer pass
   borrows one shared ring and copies the window in and back out), and the drafter keeps only the tap rows it reads.
-- Streams: prod serves 2 requests at once (`STREAMS`, default 2, up to 4). Their long-history caches share one pool
-  that takes the memory left after the load past a 5 GiB reserve (`RESERVE_GIB`), about 700k positions, so one request
-  can still use the whole 524,288-token window. Streams verify their drafts in one shared pass, and each reply stays
+- Streams: prod serves 3 requests at once (`STREAMS`, default 3, up to 4). Their long-history caches share one pool
+  that takes the memory left after the load past a 5 GiB reserve (`RESERVE_GIB`), about 984k positions (4.75 GiB) with
+  `PROMPT_ROWS=4096`, so one request can use the whole 524,288-token window and three long sessions stay cached
+  side-by-side. Streams verify their drafts in one shared pass, and each reply stays
   the same as when it runs alone. All streams together: 44 tok/s with one, 50 with two, 56 with four (4 streams cap a
   request near 384k). Most of a step reads the experts' weights, and each chat's tokens need other experts, so more
   streams add little. A long prompt still reads one stream at a time, so it stalls the other while it reads.

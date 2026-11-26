@@ -6,14 +6,14 @@
 #   SPLIT (default 1: half of every expert a rank), DRAFTS (default 1: bundled DSpark),
 #   FP4=off/attn/all (NVFP4 dense; default all), API_HOST/API_PORT (rank 0; default 127.0.0.1:8000),
 #   EDIT (default 1: OpenUncensored's refusal edit, per request: NAME takes it, NAME-Stock is the model as released),
-#   STREAMS (default 2): requests at once, up to 4; their long-history caches share one pool, so the longest request
-#   shrinks with more (about 553k positions in all at 2, 384k at 4; 1: one request on a whole-context cache).
+#   STREAMS (default 3): requests at once, up to 4; their long-history caches share one pool, so the longest request
+#   shrinks with more (about 984k positions in all at 3 with PROMPT_ROWS=4096; 1: one request on a whole-context cache).
 #   BIN (rank 0's binary; default the main checkout's build; restart-pair.sh ships the same one to rank 1).
 #   NAME (default Inkling-2-Small). TEMPERATURE (default 1, as the model was trained; 0: greedy) for requests that send
 #   none; a request's seed repeats its text. top_k, top_p and min_p are not applied.
 #   TEMPLATE (default templates/inkling2.jinja: the model writes its own headers, so it thinks and calls tools).
-#   PROMPT_ROWS (default 11264): prompt tokens a pass; a prompt up to that length streams the expert weights once
-#   (about 0.55 MB of scratch a row). NCCL_IB_HCA (default both RoCE twins of the cabled port: one carries ~100 Gb/s),
+#   PROMPT_ROWS (default 4096): prompt tokens a pass (about 0.36 MiB of scratch a row); kept at 4096 to free ~2.5 GiB
+#   per Spark for the shared KV pool. NCCL_IB_HCA (default both RoCE twins of the cabled port: one carries ~100 Gb/s),
 #   NCCL_MAX_NCHANNELS (default 4: the gathers keep their speed and leave the SMs to the kernels).
 #   VISION (default 1): images in requests; rank 0 runs the image tower from the checkpoint's
 #   dense/vision.safetensors (about 0.83 GiB at 4,096 tokens).
@@ -56,9 +56,9 @@ export TF_INKLING_RANK=$rank TF_INKLING_WORLD=2 TF_INKLING_VERIFY_CHECK=${TF_INK
   NCCL_RUNTIME_CONNECT=0 NCCL_CUMEM_ENABLE=0 NCCL_CUMEM_HOST_ENABLE=0 \
   LD_LIBRARY_PATH=$HOME/inkling-2-small/lib:/usr/local/cuda/lib64 \
   TF_ROCE=${TF_ROCE:-1} TENSORFOLD_MEMORY_RESERVE_GIB=${RESERVE_GIB:-5} TF_INKLING_FP4=${FP4:-all} \
-  TF_INKLING_KV4=${KV4:-1} TF_INKLING_STREAMS=${STREAMS:-2} \
-  TF_INKLING_PROMPT_ROWS=${PROMPT_ROWS:-11264}
+  TF_INKLING_KV4=${KV4:-1} TF_INKLING_STREAMS=${STREAMS:-3} \
+  TF_INKLING_PROMPT_ROWS=${PROMPT_ROWS:-4096}
 exec "$bin" serve "$model" --backend cuda --device 0 --context "${CONTEXT:-524288}" --max-tokens "${MAX_TOKENS:-32768}" \
-  --parallel "${STREAMS:-2}" "${drafts[@]}" "${vision[@]}" "${template[@]}" --reasoning-effort high --temperature "${TEMPERATURE:-1}" --prompt-cache-gib 0 \
+  --parallel "${STREAMS:-3}" "${drafts[@]}" "${vision[@]}" "${template[@]}" --reasoning-effort high --temperature "${TEMPERATURE:-1}" --prompt-cache-gib 0 \
   --host "${API_HOST:-127.0.0.1}" --port "${API_PORT:-8000}" --name "$name" \
   --no-update-check "$@"
