@@ -19,6 +19,7 @@ import time
 import urllib.parse
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 
 import anyio
 import httpx
@@ -575,6 +576,23 @@ async def proxy_v1(request: Request, path: str):
     return StreamingResponse(body_iter(), status_code=upstream.status_code, headers=response_headers)
 
 
+class _WebUIStaticFiles(StaticFiles):
+    """Serve the built SPA with revalidated HTML and immutable hashed assets."""
+
+    def file_response(self, full_path, stat_result, scope, status_code=200):
+        response = super().file_response(full_path, stat_result, scope, status_code=status_code)
+        if response.status_code in (200, 304) and self.directory is not None:
+            try:
+                rel = Path(full_path).resolve().relative_to(Path(self.directory).resolve()).as_posix()
+            except ValueError:
+                rel = ""
+            if rel.endswith(".html"):
+                response.headers["Cache-Control"] = "no-cache"
+            elif rel.startswith(("assets/", "_app/immutable/")):
+                response.headers["Cache-Control"] = "private, max-age=31536000, immutable"
+        return response
+
+
 def _mount_webui():
     """Mount the built llama.cpp webui as the root chat surface, if available."""
     if not os.path.isdir(WEBUI_DIR):
@@ -585,7 +603,7 @@ def _mount_webui():
         )
         return
 
-    app.mount("/", StaticFiles(directory=WEBUI_DIR, html=True), name="webui")
+    app.mount("/", _WebUIStaticFiles(directory=WEBUI_DIR, html=True), name="webui")
     logger.info("Serving llama.cpp webui from %s", WEBUI_DIR)
 
 
