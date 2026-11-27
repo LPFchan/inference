@@ -6,7 +6,7 @@ through kortexa's TensorFold fork (branch `kortexa-ai/inkling2-draft`, `e2614feb
 
 | File | What it is |
 | --- | --- |
-| `0001-inkling2-spark.patch` | Our 47 engine commits on `e2614feb` (`git am`): speed, the refusal edit per request, Inkling's reply messages (thinking, tool calls), NVFP4 KV caches, up to 4 streams at once, unlimited images with per-image token caps and chunked encoding, temperature sampling, exact-length turn reuse (`len - 1`) and in-place idle pool adoption. |
+| `0001-inkling2-spark.patch` | Our 49 engine commits on `e2614feb` (`git am`): speed (incl. spill-free `tf_ik_mix`, GQA-grouped `tf_ik_draft_attention`, vectorized 1024-thread `tf_ik_top1`, single-download `verify()`, and CUDA graphs for `draft.propose` and multi-stream `verifyBatch`), the refusal edit per request, Inkling's reply messages (thinking, tool calls), NVFP4 KV caches, up to 4 streams at once, unlimited images with per-image token caps and chunked encoding, temperature sampling, exact-length turn reuse (`len - 1`) and in-place idle pool adoption. |
 | `inkling2.jinja` | The chat template `serve-rank.sh` passes: kortexa's, without the forced text opener, so the model writes its own message headers. |
 | `serve-rank.sh` | One rank, natively (no Docker). Rank 0 on spark2 serves the API; rank 1 on spark1 reads spark2's models over NFS. |
 | `pair.sh` | Both ranks from spark2: ships the binary to spark1, starts rank 1 there, runs rank 0 in the foreground. |

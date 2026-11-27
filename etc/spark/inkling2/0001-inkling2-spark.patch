@@ -1,7 +1,7 @@
-From d6f83d62bef431d37be863700b414534ff937e33 Mon Sep 17 00:00:00 2001
+From 778f8b2e4c01b0fcc28ae5943a44920d6f3a1024 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Tue, 17 Nov 2026 22:24:16 +0900
-Subject: [PATCH 01/47] Quantize Inkling's BF16 attention and head projections
+Subject: [PATCH 01/49] Quantize Inkling's BF16 attention and head projections
  to NVFP4 at load (TF_INKLING_FP4)
 
 TF_INKLING_FP4=attn keeps Q, K, V, R, gate and O as NVFP4 lane weights; =all adds the output head.
@@ -368,10 +368,10 @@ index 2045cb01..171bd7c8 100644
 2.56.1
 
 
-From fd20acd7ed525da5989ae8e7de036b0b147af054 Mon Sep 17 00:00:00 2001
+From da09957efa4052ffd0d1e9517698d2eff5d603b5 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Tue, 17 Nov 2026 23:19:05 +0900
-Subject: [PATCH 02/47] Inkling decode: latency-bound mix and quant kernels
+Subject: [PATCH 02/49] Inkling decode: latency-bound mix and quant kernels
  issue all loads at once; NVFP4 drafter projections under FP4=all
 
 tf_ik_mix: one 576-thread CTA a row, each thread one 16-byte chunk of every source, one combined
@@ -805,10 +805,10 @@ index 8da5834f..cb578b05 100644
 2.56.1
 
 
-From 79c1729f51ab24b3398d37f8594c61e0fef61b7d Mon Sep 17 00:00:00 2001
+From 9ed399e6fc2690f7df30013214076414f9b68e06 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Tue, 17 Nov 2026 23:29:20 +0900
-Subject: [PATCH 03/47] Inkling verification: one attention launch and one
+Subject: [PATCH 03/49] Inkling verification: one attention launch and one
  small BF16 projection call for every verified row
 
 The decode attention kernel already masks each row's own causal window, so batching keeps each row's
@@ -857,10 +857,10 @@ index 7915e8fa..f4e4c249 100644
 2.56.1
 
 
-From 9e6fdba1849f0aeb44fdb69639442ca69b45e2bc Mon Sep 17 00:00:00 2001
+From 3c87bfdb4d5ebccce371d2f0e84617824c4dbbfb Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 00:03:41 +0900
-Subject: [PATCH 04/47] Inkling: replay one CUDA graph per one-token step and
+Subject: [PATCH 04/49] Inkling: replay one CUDA graph per one-token step and
  verify window (TF_INKLING_GRAPHS, default on)
 
 Prep and attention read the step position from the device when a graph replays; draft mode's
@@ -1172,10 +1172,10 @@ index 171bd7c8..fe3f9ca5 100644
 2.56.1
 
 
-From 6e78ebd6448ef25c0409961fd1b85d9c13306c2a Mon Sep 17 00:00:00 2001
+From cea5a424f7f52cf7ee690a176dbb44c24ba97541 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 00:32:24 +0900
-Subject: [PATCH 05/47] Inkling: split experts across the pair
+Subject: [PATCH 05/49] Inkling: split experts across the pair
  (TF_INKLING_EXPERTS=<full checkpoint>)
 
 Every rank runs half of every routed expert: w13's output tile columns (its gate/up pairs) and
@@ -1370,10 +1370,10 @@ index fe3f9ca5..2351961d 100644
 2.56.1
 
 
-From 9bfbe7548113e135e54ebe1e622047f2bf1dc935 Mon Sep 17 00:00:00 2001
+From 1bb50604f1680d9028eecde977ae92e7318c4edd Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 01:00:07 +0900
-Subject: [PATCH 06/47] inkling2: Q, gate, R (and local K, V) as one NVFP4
+Subject: [PATCH 06/49] inkling2: Q, gate, R (and local K, V) as one NVFP4
  projection per layer
 
 ---
@@ -1575,10 +1575,10 @@ index cd581e8e..24d790ac 100644
 2.56.1
 
 
-From fd74d70524c27b12afbc516f1c40880726f30553 Mon Sep 17 00:00:00 2001
+From f700e313d777b2afc5eac421704b2eeb7e609bba Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 01:28:35 +0900
-Subject: [PATCH 07/47] inkling2: decode attention split over 16 key-tile sets
+Subject: [PATCH 07/49] inkling2: decode attention split over 16 key-tile sets
  per head, merged in order; row-invariant, 5x faster at 8k
 
 ---
@@ -1853,10 +1853,10 @@ index bd866c21..61429166 100644
 2.56.1
 
 
-From de47a1b6aab352e32659ebeee6fd7e8c9b1c5e1d Mon Sep 17 00:00:00 2001
+From b618695e1b028f7c6987982a261c42e588b6764e Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 01:28:35 +0900
-Subject: [PATCH 08/47] inkling2: TF_INKLING_EXPERTS also takes a pack already
+Subject: [PATCH 08/49] inkling2: TF_INKLING_EXPERTS also takes a pack already
  cut to this rank's half
 
 ---
@@ -1903,10 +1903,10 @@ index 24d790ac..99b00b99 100644
 2.56.1
 
 
-From 3cdeb74269313a6b066e3854eb189d5a49e7190a Mon Sep 17 00:00:00 2001
+From 03f81520c0c088f05a3d0aa855c78cd9b8463d40 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 01:51:21 +0900
-Subject: [PATCH 09/47] inkling2: build the glue and drafter kernels
+Subject: [PATCH 09/49] inkling2: build the glue and drafter kernels
  arch-specific (sm_121a): native FP4/FP8 conversions
 
 ---
@@ -1934,10 +1934,10 @@ index 9b4f6c77..688b055f 100644
 2.56.1
 
 
-From 3eafe2ff3bf824e37d3b67df21a5c6214e56f23e Mon Sep 17 00:00:00 2001
+From 0cdd2a442bb55005294d6f07f374f6374079a532 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 02:20:32 +0900
-Subject: [PATCH 10/47] inkling2: forward graph in pieces; warp-level route
+Subject: [PATCH 10/49] inkling2: forward graph in pieces; warp-level route
  top-8 and mix reductions; drafter rnn and fold as NVFP4
 
 ---
@@ -2253,10 +2253,10 @@ index 8ff38eff..08a3f9c4 100644
 2.56.1
 
 
-From e6d759ce56950c26978dee4906be45a590fe620b Mon Sep 17 00:00:00 2001
+From 4c1a48aa1225562ed547589154bb2d0b42953d4f Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 02:32:26 +0900
-Subject: [PATCH 11/47] inkling2: keep() restores every conv history in one
+Subject: [PATCH 11/49] inkling2: keep() restores every conv history in one
  launch
 
 ---
@@ -2361,10 +2361,10 @@ index dcae77b3..52a87e1c 100644
 2.56.1
 
 
-From ee88fdf00a08954831dd42432f3fbad5e0d45008 Mon Sep 17 00:00:00 2001
+From ef77e201bde95e73a6376d1e3a7d02fb50e68157 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 04:36:01 +0900
-Subject: [PATCH 12/47] inkling2: verify drafts while their chained chance
+Subject: [PATCH 12/49] inkling2: verify drafts while their chained chance
  stays at least TF_INKLING_DRAFT_FLOOR (default 0.6), up to 5 deep
 
 The drafter reports each pick's probability (tf_ik_top1p: one 1024-thread block, float4 loads, online
@@ -2683,10 +2683,10 @@ index 2351961d..0872392e 100644
 2.56.1
 
 
-From eb13fe13a7d867a9137c48266f7dc60287853c29 Mon Sep 17 00:00:00 2001
+From 4ca597abdefe39580fbcc02a0d6a0dc0bbd6ae3b Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 04:36:01 +0900
-Subject: [PATCH 13/47] environment tests: valid forms for TF_INKLING_FP4,
+Subject: [PATCH 13/49] environment tests: valid forms for TF_INKLING_FP4,
  EXPERTS, GRAPHS and DRAFT_FLOOR
 
 ---
@@ -2715,10 +2715,10 @@ index 046db04f..b150590f 100644
 2.56.1
 
 
-From 165cd29234a6f78bac01bbbbcfefbf04c638515a Mon Sep 17 00:00:00 2001
+From 8a5de9037710bfc97dfca8c665ffedb127d5d787 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 04:50:40 +0900
-Subject: [PATCH 14/47] inkling2: peer records carry up to 12 ids in the header
+Subject: [PATCH 14/49] inkling2: peer records carry up to 12 ids in the header
  (one broadcast each); keep rides with the next draft
 
 Rank 1 no longer drains its stream between the keep and the draft, so it queues ingest and drafting back to
@@ -2881,10 +2881,10 @@ index 12481774..d989ed85 100644
 2.56.1
 
 
-From b82e257c534714324c3cfd5580ab65aac8b3551e Mon Sep 17 00:00:00 2001
+From 9a72525413c56483be13945e8f2ebab0408e046b Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 05:23:05 +0900
-Subject: [PATCH 15/47] server: TENSORFOLD_KEYS_MODEL, a model id whose
+Subject: [PATCH 15/49] server: TENSORFOLD_KEYS_MODEL, a model id whose
  requests carry keys to the engine for its per-request edit
 
 The same plumbing as our DeepSeek keys switch: the id is listed beside the served name, its requests set
@@ -3065,10 +3065,10 @@ index 820d6556..872b9c1b 100644
 2.56.1
 
 
-From 5e78983ae6cdd3a423f552aa9813dcfce22722ce Mon Sep 17 00:00:00 2001
+From acdf1f45a38980240281c9144ec25165b2fd28a8 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 05:23:05 +0900
-Subject: [PATCH 16/47] inkling2: TF_INKLING_EDIT, OpenUncensored's refusal
+Subject: [PATCH 16/49] inkling2: TF_INKLING_EDIT, OpenUncensored's refusal
  edit for requests that ask (TENSORFOLD_KEYS_MODEL)
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
@@ -3395,10 +3395,10 @@ index b150590f..d47c1bcc 100644
 2.56.1
 
 
-From 215c54f24ebb88ff2c654747854e39fbac017cb6 Mon Sep 17 00:00:00 2001
+From 978ad3ff9b505ea26fc55ac8adf4ad8952e4559d Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 05:35:06 +0900
-Subject: [PATCH 17/47] server: TENSORFOLD_GREEDY_FALLBACK=1 decodes a sampling
+Subject: [PATCH 17/49] server: TENSORFOLD_GREEDY_FALLBACK=1 decodes a sampling
  request greedily on a greedy-only engine instead of refusing it
 
 ---
@@ -3444,10 +3444,10 @@ index 872b9c1b..2dc2cf17 100644
 2.56.1
 
 
-From 0775cd5a9c1dd08f32a1df17a8567b4abdf4ff9a Mon Sep 17 00:00:00 2001
+From 2f2fbfc7b7140c9d2938c8d6cc7726bca2e63c84 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 05:57:25 +0900
-Subject: [PATCH 18/47] server: read Inkling 2's messages natively: text,
+Subject: [PATCH 18/49] server: read Inkling 2's messages natively: text,
  thinking as reasoning_content, JSON invokes as tool_calls; only end of
  sampling ends a turn; reasoning_effort switches thinking
 
@@ -3702,10 +3702,10 @@ index 2dc2cf17..0778579c 100644
 2.56.1
 
 
-From 9b41a6cf933a0ecff7bdcea25f84505d76bba2fb Mon Sep 17 00:00:00 2001
+From c642139515ca5cd1820e97b853549486a7466f82 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 07:55:06 +0900
-Subject: [PATCH 19/47] inkling2: prompt passes take tf_ik_prompt_dot (the
+Subject: [PATCH 19/49] inkling2: prompt passes take tf_ik_prompt_dot (the
  common EXL3 prompt path at any trellis width, 64 members a block, whole K)
  and TF_INKLING_PROMPT_ROWS (default 256)
 
@@ -4010,10 +4010,10 @@ index d47c1bcc..749ab179 100644
 2.56.1
 
 
-From a88758fc8cff22a4367a9f4cabffeb7ebc2f7ee0 Mon Sep 17 00:00:00 2001
+From 0fdcce154d0cae97d9be98b224556fd224d85caa Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 08:29:54 +0900
-Subject: [PATCH 20/47] inkling2: turn reuse: a prompt resumes from the
+Subject: [PATCH 20/49] inkling2: turn reuse: a prompt resumes from the
  furthest kept turn that starts it (the last prompt's end, or the server's
  system-prompt cuts); a kept turn copies each local ring's last 1024 rows,
  every conv history and the drafter's local rings, and reads the one live set
@@ -4408,10 +4408,10 @@ index 00000000..4f3c91c9
 2.56.1
 
 
-From 660140ea87cb64b6689cc9aad88b8d6ab4fecd0c Mon Sep 17 00:00:00 2001
+From a02957964df902c0607595cb59fb31c631ee7417 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 08:46:22 +0900
-Subject: [PATCH 21/47] inkling2: each rank sums a row's eight expert outputs
+Subject: [PATCH 21/49] inkling2: each rank sums a row's eight expert outputs
  before the exchange (tf_ik_moe_sum), so the pair gathers one f32 row, not
  eight bf16 ones; no gathered buffer
 
@@ -4487,10 +4487,10 @@ index 2c37abc2..fa688af9 100644
 2.56.1
 
 
-From 8369b3933086d8a97dc1ae2627592aed2025f6f6 Mon Sep 17 00:00:00 2001
+From ceda6cf866789bc69c2758437e417798e05821cd Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 09:11:07 +0900
-Subject: [PATCH 22/47] inkling2: prompt passes attend with
+Subject: [PATCH 22/49] inkling2: prompt passes attend with
  tf_ik_attention_flash (64 query rows a block, cp.async key and value tiles,
  ldmatrix fragments, online softmax in registers, P in BF16); tf_ik_attention
  and its SIMT exception path removed
@@ -4864,10 +4864,10 @@ index ea53c710..ce0c156c 100644
 2.56.1
 
 
-From 1c2a14f16418c7351be5770212e79510aeb09536 Mon Sep 17 00:00:00 2001
+From 0a8b3227dffc3a2c2f586cc808daf156e2ad4a42 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 10:23:20 +0900
-Subject: [PATCH 23/47] inkling2: tf_ik_relative takes rows * heads on grid x
+Subject: [PATCH 23/49] inkling2: tf_ik_relative takes rows * heads on grid x
  (y stays under 65535 for passes of 2731 rows and more)
 
 ---
@@ -4905,10 +4905,10 @@ index 323fe8f1..e0ba47fe 100644
 2.56.1
 
 
-From 40b6e4e610a0dd497d25916e7bbbbeb62b9b82f8 Mon Sep 17 00:00:00 2001
+From 68b390a52f29b1b66818943b41f5f61be4f72484 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 10:23:24 +0900
-Subject: [PATCH 24/47] inkling2: tf_ik_prompt_dot takes 128 members by 128
+Subject: [PATCH 24/49] inkling2: tf_ik_prompt_dot takes 128 members by 128
  columns, one Hadamard block, and unrotates it in its epilogue (BF16 out, no
  fp32 z or tf_ik_unrotate pass); split ranks skip the slot zero fills; gu,
  hidden and quant_down sized to the rank's intermediate
@@ -5192,10 +5192,10 @@ index fa688af9..8a914651 100644
 2.56.1
 
 
-From 1f8b89faeeb04a70b56a10d4a60eb7b9edfa1e9d Mon Sep 17 00:00:00 2001
+From 55df95d2143850be9317c9465bf743ab8f5182ab Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 11:03:10 +0900
-Subject: [PATCH 25/47] inkling2: tf_ik_down_input makes the down projection's
+Subject: [PATCH 25/49] inkling2: tf_ik_down_input makes the down projection's
  rotated input in one CTA a pair (tf_ik_swiglu, tf_ik_quant and tf_ik_rotate's
  arithmetic in order, the rounded row in shared memory); no hidden or
  quant_down buffers; TF_INKLING_PROMPT_ROWS up to 8192
@@ -5445,10 +5445,10 @@ index 2fd9c43b..b219c477 100644
 2.56.1
 
 
-From 90309be7681b20f8b1b0274ccc7774ccf1517ec9 Mon Sep 17 00:00:00 2001
+From a5c9d7a939f43b8c54bd039c074a0911540195d4 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 12:03:07 +0900
-Subject: [PATCH 26/47] inkling2: tf_ik_relative computes 8 distances a thread
+Subject: [PATCH 26/49] inkling2: tf_ik_relative computes 8 distances a thread
  with vector loads and one 16-byte store (same sums in the same order);
  TF_INKLING_PROMPT_ROWS up to 16384 (about 0.55 MB a row), so a prompt of that
  length takes one pass and streams the expert weights once
@@ -5527,10 +5527,10 @@ index b219c477..d5102bf3 100644
 2.56.1
 
 
-From f6e4f77e62b342820fb54f7cfb9a20e7eb7e9a9a Mon Sep 17 00:00:00 2001
+From 8ef529e26fe48054adb75a53f378c2c59bca9ce9 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 16:05:19 +0900
-Subject: [PATCH 27/47] inkling2: tf_ik_attention_flash keeps its output
+Subject: [PATCH 27/49] inkling2: tf_ik_attention_flash keeps its output
  accumulators in registers (the epilogue's row loop unrolled; o was a 272-byte
  stack array), stages each tile's relative bias rows in shared memory with its
  keys, and skips the per-score mask on tiles 1024 or more behind a warp's rows
@@ -5639,10 +5639,10 @@ index 9b83ea7e..d35f49ba 100644
 2.56.1
 
 
-From c4896754cd5aa7123907bcc2090e1c9d8187f584 Mon Sep 17 00:00:00 2001
+From 125e7d3819e3c11c8db678cb85454e5f27c18347 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 21:17:32 +0900
-Subject: [PATCH 28/47] inkling2: tf_ik_prompt_dot stages 64 of k a chunk in
+Subject: [PATCH 28/49] inkling2: tf_ik_prompt_dot stages 64 of k a chunk in
  two stages, one barrier a chunk (same mma chain over k, bits unchanged)
 
 ---
@@ -5748,10 +5748,10 @@ index 8b8d7c8b..bdf6a14b 100644
 2.56.1
 
 
-From 2fd6acbd9a89536d3957e929d3738b9db140f5d3 Mon Sep 17 00:00:00 2001
+From 5f1cbfd5ed41fae7da0041fd11f17d1314b9d5bb Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 21:17:32 +0900
-Subject: [PATCH 29/47] prompt16: prompt_lean's blocks claim tiles from a
+Subject: [PATCH 29/49] prompt16: prompt_lean's blocks claim tiles from a
  counter as they go, so one an exchange's kernels hold off a multiprocessor
  takes fewer (the last block resets it; each tile's bits unchanged)
 
@@ -5835,10 +5835,10 @@ index b5ffc643..8918452b 100644
 2.56.1
 
 
-From a912263fdb73dda2ef65908342dcb992d0c5cb4f Mon Sep 17 00:00:00 2001
+From c6948efc61cfb9708bcb56f66ca3c0073231c465 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 21:17:32 +0900
-Subject: [PATCH 30/47] inkling2: a two-rank exchange sends each rank the f32
+Subject: [PATCH 30/49] inkling2: a two-rank exchange sends each rank the f32
  rows it sums (tf_ik_pair_sum adds them in rank order) and gathers BF16 sums,
  75% of the bytes; prompt passes of 512 rows and more take three row chunks (a
  sixth, two thirds, a sixth) whose exchanges run on a side stream while the
@@ -6247,10 +6247,10 @@ index 6ea32d7a..9ea2a720 100644
 2.56.1
 
 
-From 37adbfedab2b805bd74d0edd64af9d08cf3979b7 Mon Sep 17 00:00:00 2001
+From 686bff38cc14ae04c61a9cd287c9777e41e3e304 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 21:17:32 +0900
-Subject: [PATCH 31/47] inkling2: every pass embeds by tf_ik_embed_shard, the
+Subject: [PATCH 31/49] inkling2: every pass embeds by tf_ik_embed_shard, the
  gather and tf_ik_embed_pick (a row a host copy before: a 10.9k prompt started
  about 45 ms late; the same bytes)
 
@@ -6309,10 +6309,10 @@ index 0d66b439..4a0bfbbb 100644
 2.56.1
 
 
-From 14a7f0bc5fb83dbc48b8e16a2597fcba26b23a82 Mon Sep 17 00:00:00 2001
+From d1c5fce39c0bfce6b6732e29ec1f8c905d396c7e Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 21:17:32 +0900
-Subject: [PATCH 32/47] inkling2: tf_ik_up_input rounds a prompt row once and
+Subject: [PATCH 32/49] inkling2: tf_ik_up_input rounds a prompt row once and
  rotates its eight slots in one CTA (tf_ik_quant then tf_ik_rotate's
  arithmetic in order; passes under 64 rows keep the two kernels, bits
  unchanged)
@@ -6416,10 +6416,10 @@ index ac4aa21f..91e96fc4 100644
 2.56.1
 
 
-From 318abbc4aad1c8a21d428f2015ed2cb18e04d75d Mon Sep 17 00:00:00 2001
+From cf4c1bac7d94460564d6a4f3996c3f044b0c0022 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 22:27:34 +0900
-Subject: [PATCH 33/47] inkling2: the experts' gate and up outputs take
+Subject: [PATCH 33/49] inkling2: the experts' gate and up outputs take
  relative's memory and the down projections' input streams' (attention is done
  with both), the down outputs s.rotated's once the up projections have read
  it: 1.16 GiB less a rank at 11264 prompt rows (the same bits)
@@ -6537,10 +6537,10 @@ index 9ea2a720..8d18dfee 100644
 2.56.1
 
 
-From 36cab4424ab2e009a0f4cfde334125f7bc855303 Mon Sep 17 00:00:00 2001
+From 6f45731c2d7297dc9bc0d9aa8f95a44865b0c012 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 22:27:34 +0900
-Subject: [PATCH 34/47] inkling2: a local layer's own ring holds 1024 + 256
+Subject: [PATCH 34/49] inkling2: a local layer's own ring holds 1024 + 256
  positions; a longer pass runs on one shared ring of the pass's size, the
  window before it copied in at its first chunk and the window at its end back
  after its last: 0.82 GiB less a rank at 11264 prompt rows (the same bits)
@@ -6666,10 +6666,10 @@ index 8d18dfee..20fd00e9 100644
 2.56.1
 
 
-From 43688297a2573bd44b3825f8193a7a4218d048ad Mon Sep 17 00:00:00 2001
+From dd6ed0f82961c70e9b95773c0ce06db0b80fe0dd Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 22:27:34 +0900
-Subject: [PATCH 35/47] inkling2: the drafter sums its global layer's tap mix
+Subject: [PATCH 35/49] inkling2: the drafter sums its global layer's tap mix
  in f32 tap by tap (tf_ik_draft_gather, then tf_ik_draft_mix_sum:
  tf_ik_draft_mix's arithmetic in its order) and keeps of each tap only the
  last rows a local ring holds, which are all a local layer ingests: 0.49 GiB
@@ -6859,10 +6859,10 @@ index f29a83cb..819b244b 100644
 2.56.1
 
 
-From d7fd7aa9e7ef818d8322ad4114379e21c2ff110c Mon Sep 17 00:00:00 2001
+From 4b51c705a6bb725e8bb5cc1952975167e7fb7024 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 23:46:17 +0900
-Subject: [PATCH 36/47] inkling2: the verify audit compares the final hidden
+Subject: [PATCH 36/49] inkling2: the verify audit compares the final hidden
  row with tap 7's kept tail (d.taps holds each tap's last d.tail rows from
  d.tail_first since 134656cc)
 
@@ -6887,10 +6887,10 @@ index dcb39d26..65e9ca50 100644
 2.56.1
 
 
-From ac97ef41d896efe6c14af09cb05b54d24d9953bd Mon Sep 17 00:00:00 2001
+From 669b286351a643140b6c1bd88688c021c73ff4fb Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 18 Nov 2026 23:46:23 +0900
-Subject: [PATCH 37/47] inkling2: TF_INKLING_KV4=1 keeps the global layers' and
+Subject: [PATCH 37/49] inkling2: TF_INKLING_KV4=1 keeps the global layers' and
  the drafter's global layer's KV as NVFP4 rows (inkling2_kv4.cuh: E2M1 codes,
  an E4M3 scale per 16 values, 72 bytes a position and head against 256):
  tf_ik_prep and the drafter's prep and tf_ik_draft_store4 write them,
@@ -7785,10 +7785,10 @@ index 749ab179..5f8b8307 100644
 2.56.1
 
 
-From 559671e18d882b8d32e5b879e49ded14a0bcd46c Mon Sep 17 00:00:00 2001
+From 616d6b46bd9b95d3c619f2fd9c8c62366f4cb8e5 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Thu, 19 Nov 2026 00:15:26 +0900
-Subject: [PATCH 38/47] inkling2: tf_ik_draft_attention widens an FP4 ring 32
+Subject: [PATCH 38/49] inkling2: tf_ik_draft_attention widens an FP4 ring 32
  keys at a time into shared rows its eight warps share (each warp decoded
  every value itself): 45 -> 6 ms at 115k positions, under the BF16 ring's 9.7;
  each key's arithmetic as before, so FP4 matches its BF16 twin and the BF16
@@ -7861,10 +7861,10 @@ index d1604c0d..6959f558 100644
 2.56.1
 
 
-From 1c389eb78035ece8d087eda1a75288792f46e062 Mon Sep 17 00:00:00 2001
+From 3a4be4745ebdfd2417a06db908e2ce3e01f7bbfe Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Thu, 19 Nov 2026 00:23:36 +0900
-Subject: [PATCH 39/47] inkling2: one cache's attention launch is
+Subject: [PATCH 39/49] inkling2: one cache's attention launch is
  Forward.runAttention (split kernels for verify and decode rows, flash for
  prompt rows), the same launches
 
@@ -7925,10 +7925,10 @@ index f550bad8..375eac89 100644
 2.56.1
 
 
-From f1991b7e0dd2298067291492f15bf3a97280eb46 Mon Sep 17 00:00:00 2001
+From 0fdc182bbd325e703496970cd1688f6ce868cbee Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Thu, 19 Nov 2026 03:14:33 +0900
-Subject: [PATCH 40/47] inkling2: FP4 decode and verify attention is
+Subject: [PATCH 40/49] inkling2: FP4 decode and verify attention is
  tf_ik_attention_part4_{1,2,3} (a CTA a key head and one of kern.key_splits=24
  splits, its six query heads' rows packed into 16-row tiles, codes fetched 16
  bytes at a time) and tf_ik_attention_merge4; tf_ik_attention_flash4 serves
@@ -8593,10 +8593,10 @@ index b6e2f43b..8c979428 100644
 2.56.1
 
 
-From 8a3c589019672f8a0c41407fb3a55800bde56a09 Mon Sep 17 00:00:00 2001
+From dd177f1a63c221e29c573f70be637e7732d95a07 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Thu, 19 Nov 2026 03:14:51 +0900
-Subject: [PATCH 41/47] inkling2: TF_INKLING_STREAMS (1 to 4, default 4) serves
+Subject: [PATCH 41/49] inkling2: TF_INKLING_STREAMS (1 to 4, default 4) serves
  that many requests at once: each on a slot of its own (local rings, drafter
  state), the global caches' regions in one shared pool (pool.zig: first fit,
  idle kept turns evicted oldest first, then compaction; rank 0 places, both
@@ -10562,10 +10562,10 @@ index 5f8b8307..b9b462a2 100644
 2.56.1
 
 
-From 682c7a211a55355a82913385057baae2a232c2c8 Mon Sep 17 00:00:00 2001
+From 25f87df031864fe618a5e5c9814c172a8e4ad214 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Thu, 19 Nov 2026 09:54:36 +0900
-Subject: [PATCH 42/47] cuda: vision_kernel<64, 8> (vit.Attention's 64-wide
+Subject: [PATCH 42/49] cuda: vision_kernel<64, 8> (vit.Attention's 64-wide
  heads, for Inkling 2's image tower: 16 heads of 64)
 
 ---
@@ -10607,10 +10607,10 @@ index 4f765f5f..7ade49f7 100644
 2.56.1
 
 
-From 432692fb4f05d4a1b426434b9753b9d2ec188260 Mon Sep 17 00:00:00 2001
+From 9676db22c49b4f559fc6fa5e5d7810b8e2e130c2 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Thu, 19 Nov 2026 09:54:36 +0900
-Subject: [PATCH 43/47] inkling2: the image tower (vision.zig,
+Subject: [PATCH 43/49] inkling2: the image tower (vision.zig,
  inkling2_vision.cu) as SGLang's inkling2_vision.py: 20-pixel patches, the 32
  x 32 position grid (clamp-to-edge bilinear), the class row, 23 pre-LN layers
  of 16 heads of 64 with 2D rotary (vision_kernel<64>), layer scales, the 2 x 2
@@ -11106,10 +11106,10 @@ index 00000000..d374a852
 2.56.1
 
 
-From ab09556189cdc57bfabd26b433db858397664981 Mon Sep 17 00:00:00 2001
+From b8fef41ec77ed1cc1a6001a4ee40226f135a6da7 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Thu, 19 Nov 2026 09:54:36 +0900
-Subject: [PATCH 44/47] inkling2: images in requests under --vision: the server
+Subject: [PATCH 44/49] inkling2: images in requests under --vision: the server
  cuts each image into the tower's patches (SGLang's processor: orientation,
  alpha over the checkerboard, bicubic only past the budget), rank 0's tower
  encodes a request's images before the prompt pass that reaches them and
@@ -11817,10 +11817,10 @@ index b9b462a2..6e87484e 100644
 2.56.1
 
 
-From 82bec24bd8e989a63d1ff72de898e700c0671ac4 Mon Sep 17 00:00:00 2001
+From c298fefe6a34f23127228beb236bc280dcff6506 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Thu, 19 Nov 2026 18:44:36 +0900
-Subject: [PATCH 45/47] inkling2: temperature sampling: tf_ik_top1 takes each
+Subject: [PATCH 45/49] inkling2: temperature sampling: tf_ik_top1 takes each
  slot's draw (seed and 1 / T, uploaded at begin and sent to the peer in the
  begin record) and picks the argmax of logits / T plus Gumbel noise keyed like
  lanes/sampling.zig's keyBits(seed, position, token), so the vocabulary split
@@ -12082,10 +12082,10 @@ index 95aa2836..e1a1aeeb 100644
 2.56.1
 
 
-From d46edd8ddb87b9b2d18be972ea779e5b0052efe3 Mon Sep 17 00:00:00 2001
+From 1250090e000be2368f2961eacac9746d3857aea6 Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 25 Nov 2026 01:56:38 +0900
-Subject: [PATCH 46/47] inkling2: keep turn at len-1 for exact-length resends
+Subject: [PATCH 46/49] inkling2: keep turn at len-1 for exact-length resends
  and adopt idle pool regions in place
 
 turns.marks saves slot 0 at len - 1 (when len > 1 and len - 1 > at) so exact-length retries and regenerates resume 1 token short of the prompt end instead of falling back to the system-prompt cut.
@@ -12270,10 +12270,10 @@ index 00815e3e..0d16f356 100644
 2.56.1
 
 
-From 45d420bbdfa073b67c50f12dc226ecda46b0c2dd Mon Sep 17 00:00:00 2001
+From 7dfd8b74d293f153be5e3161f33e10a458b4a6bb Mon Sep 17 00:00:00 2001
 From: LPFchan <me@lost.plus>
 Date: Wed, 25 Nov 2026 06:43:55 +0900
-Subject: [PATCH 47/47] inkling2: unlimited images per request
+Subject: [PATCH 47/49] inkling2: unlimited images per request
  (--vision-max-images 0) with per-image token cap and lazy chunked encoding
 
 Allow --vision-max-images 0 (unlimited) where --vision-image-tokens bounds each image individually instead of dividing a shared pool across all images in the conversation. Inkling 2 prepares image metadata lazily (with a 256-entry metadata cache so cached history skips PNG/JPEG/WebP decoding), plans image batches per prefill chunk into its reusable rows buffer (avoiding straddle re-encodes and sending dynamic span records to rank 1), lifts the 20 MB total image-bytes cap on chat routes (keeping 10 MB per image), and raises the HTTP request body cap to 256 MiB when unlimited images are enabled.
@@ -12887,6 +12887,957 @@ index 71ebc744..1dd250c6 100644
          .ok => |b| b,
          .refused => |m| return refuse(conn, a, m, 400, null),
      };
+-- 
+2.56.1
+
+
+From 3fa66e1565cfd63f6e64ec393670ac70531d2afa Mon Sep 17 00:00:00 2001
+From: LPFchan <me@lost.plus>
+Date: Sat, 28 Nov 2026 00:23:57 +0900
+Subject: [PATCH 48/49] inkling2: eliminate tf_ik_mix register spills,
+ GQA-group draft attention, trim dead draft head rows
+
+---
+ zig/kernels/cuda/inkling2_draft.cu     |  73 ++++++++++----
+ zig/kernels/cuda/inkling2_residual.cuh | 126 +++++++++++++++++--------
+ zig/src/families/inkling2/draft.zig    |   6 +-
+ 3 files changed, 142 insertions(+), 63 deletions(-)
+
+diff --git a/zig/kernels/cuda/inkling2_draft.cu b/zig/kernels/cuda/inkling2_draft.cu
+index 6959f558..7ab53635 100644
+--- a/zig/kernels/cuda/inkling2_draft.cu
++++ b/zig/kernels/cuda/inkling2_draft.cu
+@@ -103,29 +103,59 @@ extern "C" __global__ void tf_ik_draft_store(const bf16* x, bf16* cache, int wid
+     if (i < rows * width) cache[(size_t)((pos + i / width) % capacity) * width + i % width] = x[i];
+ }
+ 
+-// One warp owns a query and a head; fixed key partitions keep global history work distributed. An FP4 ring
+-// (inkling2_kv4.cuh) is widened 32 keys at a time into shared rows the eight warps share; each key's arithmetic is
+-// the BF16 ring's, in its order.
++// One CTA per (keyhead, split): 8 warps own the 8 draft rows across all `gqa = hq / hk` query heads sharing
++// `keyhead`, so each FP4 or BF16 KV tile is read and unpacked once instead of 6x redundantly.
+ extern "C" __global__ void tf_ik_draft_attention(const bf16* q, const bf16* k, const bf16* v,
+                                                 float* parts, int pos, int hq, int hk, int capacity, int local, int fp4) {
+     __shared__ __align__(16) bf16 ks[32][128], vs[32][128];
+     const int row = threadIdx.x / 32, lane = threadIdx.x % 32;
+-    const int head = blockIdx.x, split = blockIdx.y, keyhead = head / (hq / hk);
++    const int keyhead = blockIdx.x, split = blockIdx.y;
++    const int gqa = hq / hk, head0 = keyhead * gqa;
++    if (gqa > 6) __trap();
+     const int first = local ? max(0, pos - 1024) : 0, end = pos + 8;
+     const int chunk = (end - first + 31) / 32;
+     const int low = min(end, first + split * chunk), high = min(end, low + chunk);
+-    float query[4], value[4] = {0.f, 0.f, 0.f, 0.f};
+-    for (int d = 0; d < 4; ++d) query[d] = f(q[((size_t)row * hq + head) * 128 + lane + d * 32]);
+-    float maximum = -INFINITY, denominator = 0.f;
+-    auto step = [&](const bf16* kr, const bf16* vr) { // one key's 128 values, this lane's at lane + 32 d
+-        float dot = 0.f;
+-        for (int d = 0; d < 4; ++d) dot += query[d] * f(kr[d * 32]);
+-        for (int delta = 16; delta; delta >>= 1) dot += __shfl_xor_sync(0xffffffffu, dot, delta);
+-        dot *= 0.08838834764831845f;
+-        const float next = fmaxf(maximum, dot), scale = expf(maximum - next), p = expf(dot - next);
+-        denominator = denominator * scale + p;
+-        for (int d = 0; d < 4; ++d) value[d] = value[d] * scale + p * f(vr[d * 32]);
+-        maximum = next;
++    float query[6][4], value[6][4];
++    float maximum[6], denominator[6];
++#pragma unroll
++    for (int g = 0; g < 6; ++g) {
++        maximum[g] = -INFINITY;
++        denominator[g] = 0.f;
++#pragma unroll
++        for (int d = 0; d < 4; ++d) {
++            query[g][d] = g < gqa ? f(q[((size_t)row * hq + head0 + g) * 128 + lane + d * 32]) : 0.f;
++            value[g][d] = 0.f;
++        }
++    }
++    auto step = [&](const bf16* kr, const bf16* vr) { // one key's 128 values, shared across all gqa heads
++        float kv[4], vv[4];
++#pragma unroll
++        for (int d = 0; d < 4; ++d) {
++            kv[d] = f(kr[d * 32]);
++            vv[d] = f(vr[d * 32]);
++        }
++#pragma unroll
++        for (int g = 0; g < 6; ++g) {
++            if (g >= gqa) break;
++            float dot = 0.f;
++#pragma unroll
++            for (int d = 0; d < 4; ++d) dot += query[g][d] * kv[d];
++#pragma unroll
++            for (int delta = 16; delta; delta >>= 1) dot += __shfl_xor_sync(0xffffffffu, dot, delta);
++            dot *= 0.08838834764831845f;
++            float scale, p;
++            if (dot > maximum[g]) {
++                scale = expf(maximum[g] - dot);
++                p = 1.f;
++                maximum[g] = dot;
++            } else {
++                scale = 1.f;
++                p = (dot == maximum[g]) ? 1.f : expf(dot - maximum[g]);
++            }
++            denominator[g] = denominator[g] * scale + p;
++#pragma unroll
++            for (int d = 0; d < 4; ++d) value[g][d] = value[g][d] * scale + p * vv[d];
++        }
+     };
+     if (fp4) {
+         const unsigned char *k4 = reinterpret_cast<const unsigned char*>(k), *v4 = reinterpret_cast<const unsigned char*>(v);
+@@ -147,9 +177,14 @@ extern "C" __global__ void tf_ik_draft_attention(const bf16* q, const bf16* k, c
+         const size_t base = ((size_t)(key % capacity) * hk + keyhead) * 128 + lane;
+         step(k + base, v + base);
+     }
+-    const size_t out = (((size_t)row * hq + head) * 32 + split) * 130;
+-    if (!lane) { parts[out] = maximum; parts[out + 1] = denominator; }
+-    for (int d = 0; d < 4; ++d) parts[out + 2 + lane + d * 32] = value[d];
++#pragma unroll
++    for (int g = 0; g < 6; ++g) {
++        if (g >= gqa) break;
++        const size_t out = (((size_t)row * hq + head0 + g) * 32 + split) * 130;
++        if (!lane) { parts[out] = maximum[g]; parts[out + 1] = denominator[g]; }
++#pragma unroll
++        for (int d = 0; d < 4; ++d) parts[out + 2 + lane + d * 32] = value[g][d];
++    }
+ }
+ 
+ extern "C" __global__ void tf_ik_draft_merge(const float* parts, bf16* out, int hq) {
+diff --git a/zig/kernels/cuda/inkling2_residual.cuh b/zig/kernels/cuda/inkling2_residual.cuh
+index fbe768b1..47a6faa8 100644
+--- a/zig/kernels/cuda/inkling2_residual.cuh
++++ b/zig/kernels/cuda/inkling2_residual.cuh
+@@ -23,34 +23,28 @@ __device__ inline float ik_source(const InklingMix a, int row, int s, int c) {
+ #define IK_MIX_BLOCKS 9
+ #define IK_MIX_THREADS 576 // 4608 / 8: each thread owns one 16-byte column chunk of every source
+ 
+-__device__ inline void ik_load8(const bf16* p, float* o) {
+-    const uint4 u = *reinterpret_cast<const uint4*>(p);
++__device__ __forceinline__ void ik_unpack8(const uint4 u, float* o) {
+     const bf16* h = reinterpret_cast<const bf16*>(&u);
+ #pragma unroll
+     for (int j = 0; j < 8; ++j) o[j] = f(h[j]);
+ }
+ 
+-// One CTA a (row, query). Every source's loads issue together, then one reduction carries all norms and dots.
++// One CTA a (row, query). Sources stay packed as bf16 uint4s in registers to avoid local-memory spills,
++// while all reductions and partial+attention arithmetic remain bit-identical FP32.
+ extern "C" __global__ void __launch_bounds__(IK_MIX_THREADS) tf_ik_mix(InklingMix a) {
+     const int row = blockIdx.x, q = blockIdx.y, t = threadIdx.x, c0 = t * 8;
+     const int lane = t & 31, warp = t >> 5, bc = a.blocks_count;
+-    __shared__ float red[IK_MIX_THREADS / 32][2 * (IK_MIX_BLOCKS + 2)];
+-    __shared__ float inv[IK_MIX_BLOCKS + 2], prob[IK_MIX_BLOCKS + 2];
++    constexpr int NS = IK_MIX_BLOCKS + 2;
++    __shared__ float red[IK_MIX_THREADS / 32][2 * NS];
++    __shared__ float inv[NS], prob[NS];
+     if (a.width != IK_MIX_THREADS * 8 || blockDim.x != IK_MIX_THREADS || bc > IK_MIX_BLOCKS) __trap();
+-    float v[IK_MIX_BLOCKS + 2][8];
++    uint4 vb[IK_MIX_BLOCKS];
+ #pragma unroll
+     for (int s = 0; s < IK_MIX_BLOCKS; ++s)
+-        if (s < bc) ik_load8(a.blocks + (size_t)s * a.block_stride + (size_t)row * a.width + c0, v[s]);
+-    float attn[8] = {}, norm[8];
+-    ik_load8(a.norm + q * a.width + c0, norm); // issued with the sources, used last
+-    ik_load8(a.partial + (size_t)row * a.width + c0, v[IK_MIX_BLOCKS]);
+-    if (a.mode) ik_load8(a.attention + (size_t)row * a.width + c0, attn);
+-#pragma unroll
+-    for (int j = 0; j < 8; ++j) {
+-        if (a.mode == 2) v[IK_MIX_BLOCKS][j] += attn[j];
+-        v[IK_MIX_BLOCKS + 1][j] = attn[j];
+-    }
+-    // source s lives at v[s] for stored blocks, v[9] for the partial, v[10] for mode 1's attention
++        if (s < bc) vb[s] = *reinterpret_cast<const uint4*>(a.blocks + (size_t)s * a.block_stride + (size_t)row * a.width + c0);
++    const uint4 norm_u = *reinterpret_cast<const uint4*>(a.norm + q * a.width + c0);
++    const uint4 vp_u = *reinterpret_cast<const uint4*>(a.partial + (size_t)row * a.width + c0);
++    const uint4 va_u = a.mode ? *reinterpret_cast<const uint4*>(a.attention + (size_t)row * a.width + c0) : make_uint4(0, 0, 0, 0);
+     const float qs = rsqrtf((float)a.width);
+     float query[8];
+     {
+@@ -60,28 +54,54 @@ extern "C" __global__ void __launch_bounds__(IK_MIX_THREADS) tf_ik_mix(InklingMi
+ #pragma unroll
+         for (int j = 0; j < 8; ++j) query[j] = qq[j] * qs;
+     }
+-    // every source's square and dot, reduced across the warp together (independent shuffles overlap)
+-    constexpr int NS = IK_MIX_BLOCKS + 2;
+-    float part[2 * NS];
+-#pragma unroll
+-    for (int s = 0; s < NS; ++s) {
+-        const bool live = s < bc || s == IK_MIX_BLOCKS || (s == IK_MIX_BLOCKS + 1 && a.mode == 1);
++    // Reduce each live source's square and dot across the warp directly into shared memory (no 22-reg part[] array).
++    auto reduce_src = [&](int s, const float* vals) {
+         float square = 0.f, dot = 0.f;
+ #pragma unroll
+         for (int j = 0; j < 8; ++j) {
+-            square += v[s][j] * v[s][j];
+-            dot += v[s][j] * query[j];
++            square += vals[j] * vals[j];
++            dot += vals[j] * query[j];
+         }
+-        part[2 * s] = live ? square : 0.f;
+-        part[2 * s + 1] = live ? dot : 0.f;
+-    }
+ #pragma unroll
+-    for (int off = 16; off; off >>= 1)
++        for (int off = 16; off; off >>= 1) {
++            square += __shfl_xor_sync(0xffffffffu, square, off);
++            dot += __shfl_xor_sync(0xffffffffu, dot, off);
++        }
++        if (!lane) {
++            red[warp][2 * s] = square;
++            red[warp][2 * s + 1] = dot;
++        }
++    };
+ #pragma unroll
+-        for (int i = 0; i < 2 * NS; ++i) part[i] += __shfl_xor_sync(0xffffffffu, part[i], off);
+-    if (!lane)
++    for (int s = 0; s < IK_MIX_BLOCKS; ++s) {
++        if (s < bc) {
++            float tmp[8];
++            ik_unpack8(vb[s], tmp);
++            reduce_src(s, tmp);
++        } else if (!lane) {
++            red[warp][2 * s] = 0.f;
++            red[warp][2 * s + 1] = 0.f;
++        }
++    }
++    {
++        float vp[8];
++        ik_unpack8(vp_u, vp);
++        if (a.mode == 2) {
++            float va[8];
++            ik_unpack8(va_u, va);
+ #pragma unroll
+-        for (int i = 0; i < 2 * NS; ++i) red[warp][i] = part[i];
++            for (int j = 0; j < 8; ++j) vp[j] += va[j];
++        }
++        reduce_src(IK_MIX_BLOCKS, vp);
++    }
++    if (a.mode == 1) {
++        float va[8];
++        ik_unpack8(va_u, va);
++        reduce_src(IK_MIX_BLOCKS + 1, va);
++    } else if (!lane) {
++        red[warp][2 * (IK_MIX_BLOCKS + 1)] = 0.f;
++        red[warp][2 * (IK_MIX_BLOCKS + 1) + 1] = 0.f;
++    }
+     __syncthreads();
+     if (warp == 0) {
+         // lane i adds quantity i (source i / 2's square or dot) over the warps; even lanes then own a source
+@@ -105,19 +125,43 @@ extern "C" __global__ void __launch_bounds__(IK_MIX_THREADS) tf_ik_mix(InklingMi
+         if (!(lane & 1) && lane < 2 * NS) { inv[s] = iv; prob[s] = live ? e / z : 0.f; }
+     }
+     __syncthreads();
+-    float out[8], square = 0.f;
++    float out[8] = {};
++#pragma unroll
++    for (int s = 0; s < IK_MIX_BLOCKS; ++s) {
++        if (s < bc) {
++            float tmp[8];
++            ik_unpack8(vb[s], tmp);
++            const float ps = prob[s], ivs = inv[s];
++#pragma unroll
++            for (int j = 0; j < 8; ++j) out[j] += ps * (tmp[j] * ivs);
++        }
++    }
++    {
++        float vp[8];
++        ik_unpack8(vp_u, vp);
++        if (a.mode == 2) {
++            float va[8];
++            ik_unpack8(va_u, va);
++#pragma unroll
++            for (int j = 0; j < 8; ++j) vp[j] += va[j];
++        }
++        const float ps = prob[IK_MIX_BLOCKS], ivs = inv[IK_MIX_BLOCKS];
+ #pragma unroll
+-    for (int j = 0; j < 8; ++j) {
+-        float x = 0.f;
++        for (int j = 0; j < 8; ++j) out[j] += ps * (vp[j] * ivs);
++    }
++    if (a.mode == 1) {
++        float va[8];
++        ik_unpack8(va_u, va);
++        const float ps = prob[IK_MIX_BLOCKS + 1], ivs = inv[IK_MIX_BLOCKS + 1];
+ #pragma unroll
+-        for (int s = 0; s < IK_MIX_BLOCKS; ++s)
+-            if (s < bc) x += prob[s] * (v[s][j] * inv[s]);
+-        x += prob[IK_MIX_BLOCKS] * (v[IK_MIX_BLOCKS][j] * inv[IK_MIX_BLOCKS]);
+-        if (a.mode == 1) x += prob[IK_MIX_BLOCKS + 1] * (v[IK_MIX_BLOCKS + 1][j] * inv[IK_MIX_BLOCKS + 1]);
+-        out[j] = x;
+-        square += x * x;
++        for (int j = 0; j < 8; ++j) out[j] += ps * (va[j] * ivs);
+     }
++    float square = 0.f;
++#pragma unroll
++    for (int j = 0; j < 8; ++j) square += out[j] * out[j];
+     const float scale = rsqrtf(sum(square) / a.width + 1e-6f);
++    float norm[8];
++    ik_unpack8(norm_u, norm);
+     uint4 packed;
+     bf16* o = reinterpret_cast<bf16*>(&packed);
+ #pragma unroll
+diff --git a/zig/src/families/inkling2/draft.zig b/zig/src/families/inkling2/draft.zig
+index 613d3b40..5757c4ba 100644
+--- a/zig/src/families/inkling2/draft.zig
++++ b/zig/src/families/inkling2/draft.zig
+@@ -293,7 +293,7 @@ pub const Draft = struct {
+             try d.go(f, .prep, .{ .x = 24, .y = 8 }, 128, .{ d.q, l.qnorm, d.q, @as(u64, 0), @as(i32, 24), int(f.s.pos), int(l.capacity), @as(i32, 0) });
+             try d.go(f, .prep, .{ .x = 4, .y = 8 }, 128, .{ d.k, l.knorm, d.k, l.cache_k, @as(i32, 4), int(f.s.pos), int(l.capacity), @as(i32, @intFromBool(l.fp4)) });
+             try d.store(f, l, f.s.pos, 8);
+-            try d.go(f, .attention, .{ .x = 24, .y = 32 }, 256, .{ d.q, l.cache_k, l.cache_v, d.partials, int(f.s.pos), @as(i32, 24), @as(i32, 4), int(l.capacity), @as(i32, @intFromBool(dc.local(i))), @as(i32, @intFromBool(l.fp4)) });
++            try d.go(f, .attention, .{ .x = 4, .y = 32 }, 256, .{ d.q, l.cache_k, l.cache_v, d.partials, int(f.s.pos), @as(i32, 24), @as(i32, 4), int(l.capacity), @as(i32, @intFromBool(dc.local(i))), @as(i32, @intFromBool(l.fp4)) });
+             try d.go(f, .merge, .{ .x = 24, .y = 8 }, 128, .{ d.partials, d.attention, @as(i32, 24) });
+             try d.reduce(f, l.o, d.attention);
+             try d.go(f, .norm, .{ .x = 8 }, 256, .{ d.x, l.post_norm, d.normed, @as(i32, 4608) });
+@@ -302,8 +302,8 @@ pub const Draft = struct {
+             try d.go(f, .swiglu, .{ .x = 288 }, 256, .{ d.gate, d.up, d.hidden, @as(i32, 8 * 9216) });
+             try d.reduce(f, l.down, d.hidden);
+         }
+-        try d.go(f, .norm, .{ .x = 8 }, 256, .{ d.x, d.norm, d.normed, @as(i32, 4608) });
+-        try f.product(f.w.head, d.normed, d.base_logits, 8, .bf16);
++        try d.go(f, .norm, .{ .x = @intCast(depth) }, 256, .{ d.x + 4608 * 2, d.norm, d.normed + 4608 * 2, @as(i32, 4608) });
++        try f.product(f.w.head, d.normed + 4608 * 2, d.base_logits + d.fold.n * 2, depth, .bf16);
+         try f.zero(d.rnn_input, 256 * 2);
+         var previous = anchor;
+         var chain: f64 = 1;
+-- 
+2.56.1
+
+
+From befb773b60add008d57890af72a6f63c7e1febb3 Mon Sep 17 00:00:00 2001
+From: LPFchan <me@lost.plus>
+Date: Sat, 28 Nov 2026 00:54:56 +0900
+Subject: [PATCH 49/49] inkling2: capture CUDA graphs for draft.propose and
+ multi-stream verifyBatch, vectorize tf_ik_top1, batch verify picks
+
+---
+ zig/kernels/cuda/inkling2_draft.cu    |  50 ++++++++++-
+ zig/kernels/cuda/inkling2_rows.cuh    |  57 +++++++-----
+ zig/src/families/inkling2/draft.zig   | 124 ++++++++++++++++++--------
+ zig/src/families/inkling2/forward.zig | 119 ++++++++++++++++++++----
+ zig/src/families/inkling2/native.zig  |   2 +
+ zig/src/platform/environment.zig      |   2 +
+ 6 files changed, 278 insertions(+), 76 deletions(-)
+
+diff --git a/zig/kernels/cuda/inkling2_draft.cu b/zig/kernels/cuda/inkling2_draft.cu
+index 7ab53635..30db830f 100644
+--- a/zig/kernels/cuda/inkling2_draft.cu
++++ b/zig/kernels/cuda/inkling2_draft.cu
+@@ -74,7 +74,8 @@ extern "C" __global__ void tf_ik_draft_mix_sum(const float* sums, const bf16* no
+ }
+ 
+ extern "C" __global__ void tf_ik_draft_prep(const bf16* x, const bf16* norm, bf16* out, bf16* cache,
+-                                          int heads, int pos, int capacity, int fp4) {
++                                          int heads, int pos, int capacity, int fp4, const int* posp) {
++    if (posp) pos = *posp;
+     const int row = blockIdx.y, head = blockIdx.x, c = threadIdx.x;
+     const size_t at = ((size_t)row * heads + head) * 128;
+     const float value = f(x[at + c]);
+@@ -93,12 +94,14 @@ extern "C" __global__ void tf_ik_draft_prep(const bf16* x, const bf16* norm, bf1
+ }
+ 
+ // tf_ik_draft_store into an FP4 ring: one (head, row) a CTA of 128 threads
+-extern "C" __global__ void tf_ik_draft_store4(const bf16* x, unsigned char* cache, int heads, int pos, int capacity) {
++extern "C" __global__ void tf_ik_draft_store4(const bf16* x, unsigned char* cache, int heads, int pos, int capacity, const int* posp) {
++    if (posp) pos = *posp;
+     const int row = blockIdx.y, head = blockIdx.x, c = threadIdx.x;
+     ik_kv4::put(cache, capacity, heads, head, (pos + row) % capacity, c, f(x[((size_t)row * heads + head) * 128 + c]));
+ }
+ 
+-extern "C" __global__ void tf_ik_draft_store(const bf16* x, bf16* cache, int width, int pos, int capacity, int rows) {
++extern "C" __global__ void tf_ik_draft_store(const bf16* x, bf16* cache, int width, int pos, int capacity, int rows, const int* posp) {
++    if (posp) pos = *posp;
+     const int i = blockIdx.x * blockDim.x + threadIdx.x;
+     if (i < rows * width) cache[(size_t)((pos + i / width) % capacity) * width + i % width] = x[i];
+ }
+@@ -106,7 +109,8 @@ extern "C" __global__ void tf_ik_draft_store(const bf16* x, bf16* cache, int wid
+ // One CTA per (keyhead, split): 8 warps own the 8 draft rows across all `gqa = hq / hk` query heads sharing
+ // `keyhead`, so each FP4 or BF16 KV tile is read and unpacked once instead of 6x redundantly.
+ extern "C" __global__ void tf_ik_draft_attention(const bf16* q, const bf16* k, const bf16* v,
+-                                                float* parts, int pos, int hq, int hk, int capacity, int local, int fp4) {
++                                                float* parts, int pos, int hq, int hk, int capacity, int local, int fp4, const int* posp) {
++    if (posp) pos = *posp;
+     __shared__ __align__(16) bf16 ks[32][128], vs[32][128];
+     const int row = threadIdx.x / 32, lane = threadIdx.x % 32;
+     const int keyhead = blockIdx.x, split = blockIdx.y;
+@@ -230,3 +234,41 @@ extern "C" __global__ void tf_ik_draft_logits(const bf16* base, const float* cor
+         out[i] = 30.f * tanhf(logit / 30.f);
+     }
+ }
++
++struct DraftPick { float value; unsigned token, nonfinite, pad; };
++
++// Assemble d.rnn_input [256 state | 256 markov_embed[prev_tok] | 4608 normed[step+1] | 4608 f_rnn] on GPU so
++// draft.propose captures all depth RNN steps in one CUDA graph with zero mid-loop host syncs.
++extern "C" __global__ void tf_ik_draft_step_input(const int* ids, const DraftPick* prev_picks, int world, int step,
++                                                  const bf16* markov_embed, const bf16* normed_row, const bf16* f_rnn,
++                                                  bf16* rnn_input) {
++    __shared__ unsigned prev_tok;
++    if (threadIdx.x == 0) {
++        if (step == 0) {
++            prev_tok = (unsigned)ids[0];
++        } else {
++            float best_v = -INFINITY;
++            unsigned best_t = 0xffffffffu;
++            for (int w = 0; w < world; ++w) {
++                const DraftPick p = prev_picks[w];
++                if (p.value > best_v || (p.value == best_v && p.token < best_t)) {
++                    best_v = p.value;
++                    best_t = p.token;
++                }
++            }
++            prev_tok = best_t < 201024u ? best_t : 0u;
++        }
++    }
++    __syncthreads();
++    const int t = threadIdx.x;
++    if (step == 0) rnn_input[t] = b(0.f);
++    rnn_input[256 + t] = markov_embed[(size_t)prev_tok * 256 + t];
++    uint4* dst_n = reinterpret_cast<uint4*>(rnn_input + 512);
++    const uint4* src_n = reinterpret_cast<const uint4*>(normed_row);
++    uint4* dst_f = reinterpret_cast<uint4*>(rnn_input + 512 + 4608);
++    const uint4* src_f = reinterpret_cast<const uint4*>(f_rnn);
++    for (int i = t; i < 4608 / 8; i += 256) {
++        dst_n[i] = src_n[i];
++        dst_f[i] = src_f[i];
++    }
++}
+diff --git a/zig/kernels/cuda/inkling2_rows.cuh b/zig/kernels/cuda/inkling2_rows.cuh
+index 1d1c62a8..c2ec7d62 100644
+--- a/zig/kernels/cuda/inkling2_rows.cuh
++++ b/zig/kernels/cuda/inkling2_rows.cuh
+@@ -82,13 +82,29 @@ __device__ __forceinline__ float ik_gumbel(unsigned long long base, unsigned id)
+ // The largest of a rank's `count` logits (token first + i) with its index; with a draw, of x / T plus each token's
+ // Gumbel noise at the drawn token's position (pos, or *posp under a captured graph, plus ahead): the argmax over every
+ // rank is then a sample at temperature T, the same on each rank and with or without drafts.
+-extern "C" __global__ void tf_ik_top1(const float* x, InklingPick* out, int count, int first, const IkDraw* draw, int pos,
+-                                      const int* posp, int ahead) {
+-    __shared__ float values[256];
+-    __shared__ int ids[256], bad[256];
++// One 1024-thread block with float4 loads and warp-shuffle reduction.
++struct IkPickState { float value; int id, bad; };
++__device__ __forceinline__ void ik_pick_add(IkPickState& s, float v, int i, float inv_t, unsigned long long base, int first) {
++    if (!isfinite(v)) { s.bad = 1; return; }
++    if (inv_t > 0.f) v = v * inv_t + ik_gumbel(base, (unsigned)(i + first));
++    if (v > s.value || (v == s.value && i < s.id)) { s.value = v; s.id = i; }
++}
++__device__ __forceinline__ IkPickState ik_pick_join(IkPickState a, IkPickState b) {
++    const bool take = b.value > a.value || (b.value == a.value && b.id < a.id);
++    return { take ? b.value : a.value, take ? b.id : a.id, a.bad | b.bad };
++}
++__device__ __forceinline__ IkPickState ik_pick_shuffle(IkPickState s, int o) {
++    IkPickState u;
++    u.value = __shfl_xor_sync(0xffffffffu, s.value, o);
++    u.id = __shfl_xor_sync(0xffffffffu, s.id, o);
++    u.bad = __shfl_xor_sync(0xffffffffu, s.bad, o);
++    return ik_pick_join(s, u);
++}
++extern "C" __global__ void __launch_bounds__(1024) tf_ik_top1(const float* x, InklingPick* out, int count, int first, const IkDraw* draw, int pos,
++                                                              const int* posp, int ahead) {
++    __shared__ IkPickState part[32];
+     const int t = threadIdx.x;
+-    float value = -INFINITY;
+-    int id = 0x7fffffff, nonfinite = 0;
++    IkPickState best = {-INFINITY, 0x7fffffff, 0};
+     const float inv_t = draw ? draw->inv_t : 0.f;
+     unsigned long long base = 0;
+     if (inv_t > 0.f) {
+@@ -96,23 +112,24 @@ extern "C" __global__ void tf_ik_top1(const float* x, InklingPick* out, int coun
+         const unsigned long long at = (unsigned long long)((long long)(posp ? *posp : pos) + ahead);
+         base = ik_mix(ik_mix(seed + 0x9E3779B97F4A7C15ull) ^ (at * 0xD1B54A32D192ED03ull));
+     }
+-    for (int i = t; i < count; i += 256) {
+-        float v = x[i];
+-        nonfinite |= !isfinite(v);
+-        if (inv_t > 0.f) v = v * inv_t + ik_gumbel(base, (unsigned)(i + first));
+-        if (v > value || (v == value && i < id)) { value = v; id = i; }
++    const int quads = count / 4;
++    const float4* x4 = reinterpret_cast<const float4*>(x);
++    for (int q = t; q < quads; q += 1024) {
++        const float4 v = x4[q];
++        ik_pick_add(best, v.x, 4 * q, inv_t, base, first);
++        ik_pick_add(best, v.y, 4 * q + 1, inv_t, base, first);
++        ik_pick_add(best, v.z, 4 * q + 2, inv_t, base, first);
++        ik_pick_add(best, v.w, 4 * q + 3, inv_t, base, first);
+     }
+-    values[t] = value; ids[t] = id; bad[t] = nonfinite;
++    for (int i = 4 * quads + t; i < count; i += 1024) ik_pick_add(best, x[i], i, inv_t, base, first);
++    for (int o = 16; o; o >>= 1) best = ik_pick_shuffle(best, o);
++    if ((t & 31) == 0) part[t >> 5] = best;
+     __syncthreads();
+-    for (int s = 128; s; s >>= 1) {
+-        if (t < s) {
+-            const float a = values[t], b = values[t + s];
+-            if (b > a || (b == a && ids[t + s] < ids[t])) { values[t] = b; ids[t] = ids[t + s]; }
+-            bad[t] |= bad[t + s];
+-        }
+-        __syncthreads();
++    if (t < 32) {
++        best = part[t];
++        for (int o = 16; o; o >>= 1) best = ik_pick_shuffle(best, o);
++        if (!t) *out = {best.value, (unsigned)(best.id + first), (unsigned)best.bad, 0};
+     }
+-    if (!t) *out = {values[0], (unsigned)(ids[0] + first), (unsigned)bad[0], 0};
+ }
+ 
+ // tf_ik_top1 plus the softmax mass beside the maximum: pad carries sum(exp(x - max)) as float bits, so the host
+diff --git a/zig/src/families/inkling2/draft.zig b/zig/src/families/inkling2/draft.zig
+index 5757c4ba..669c1529 100644
+--- a/zig/src/families/inkling2/draft.zig
++++ b/zig/src/families/inkling2/draft.zig
+@@ -4,10 +4,12 @@ const cuda = @import("cuda");
+ const cfg = @import("config.zig");
+ const dc = @import("draft_config.zig");
+ const wt = @import("weights.zig");
++const st = @import("state.zig");
++const kern = @import("kernels.zig");
+ const Forward = @import("forward.zig").Forward;
+-const int = @import("kernels.zig").int;
+-const ceil = @import("kernels.zig").ceil;
+-const Op = enum { mix, mix_sum, gather, norm, prep, store, store4, attention, merge, add, swiglu, gates, logits };
++const int = kern.int;
++const ceil = kern.ceil;
++const Op = enum { mix, mix_sum, gather, norm, prep, store, store4, attention, merge, add, swiglu, gates, logits, step_input };
+ const Layer = struct {
+     context_norm: u64,
+     input_norm: u64,
+@@ -82,6 +84,9 @@ pub const Draft = struct {
+     correction: u64 = 0,
+     logits: u64 = 0,
+     top1: u64 = 0,
++    step_picks: u64 = 0,
++    graphs_on: bool = true,
++    graphs: [st.max_streams][8]?cuda.graph.Exec = @splat(@splat(null)), // [lane][depth]
+     snapshots: u64 = 0,
+     snapshot_stride: usize = 0,
+     verify_logits: u64 = 0,
+@@ -175,6 +180,7 @@ pub const Draft = struct {
+         d.correction = try d.take(d.fold.n * 4);
+         d.logits = try d.take(d.fold.n * 4);
+         d.top1 = try d.take(32);
++        d.step_picks = try d.take(7 * 32);
+         d.snapshot_stride = cfg.layers * 3 * (2 * 512 + 2 * 4608);
+         const batch = @import("forward.zig").batch_rows; // a shared verify pass's rows
+         d.verify_logits = try d.take(batch * d.fold.n * 4);
+@@ -185,7 +191,16 @@ pub const Draft = struct {
+         return d;
+     }
+ 
++    pub fn dropGraphs(d: *Draft, lane: usize) void {
++        if (lane >= d.graphs.len) return;
++        for (&d.graphs[lane]) |*g| if (g.*) |*e| {
++            e.deinit();
++            g.* = null;
++        };
++    }
++
+     pub fn deinit(d: *Draft) void {
++        for (0..d.graphs.len) |lane| d.dropGraphs(lane);
+         d.module.unload();
+         d.owner.deinit();
+         d.owner.gpa.free(d.slots);
+@@ -228,10 +243,10 @@ pub const Draft = struct {
+         inline for (values) |v| args.add(v);
+         try cuda.launch.launch(d.ops.get(op), .{ .grid = grid, .block = .{ .x = threads } }, f.stream, &args);
+     }
+-    /// d.v's first `rows` rows into l's value ring at `pos`.
+-    fn store(d: *Draft, f: *Forward, l: Layer, pos: usize, rows: usize) !void {
+-        if (l.fp4) return d.go(f, .store4, .{ .x = 4, .y = @intCast(rows) }, 128, .{ d.v, l.cache_v, @as(i32, 4), int(pos), int(l.capacity) });
+-        try d.go(f, .store, .{ .x = ceil(rows * 512, 256) }, 256, .{ d.v, l.cache_v, @as(i32, 512), int(pos), int(l.capacity), int(rows) });
++    /// d.v's first `rows` rows into l's value ring at `pos` (or `*posp` when captured).
++    fn store(d: *Draft, f: *Forward, l: Layer, pos: usize, rows: usize, posp: u64) !void {
++        if (l.fp4) return d.go(f, .store4, .{ .x = 4, .y = @intCast(rows) }, 128, .{ d.v, l.cache_v, @as(i32, 4), int(pos), int(l.capacity), posp });
++        try d.go(f, .store, .{ .x = ceil(rows * 512, 256) }, 256, .{ d.v, l.cache_v, @as(i32, 512), int(pos), int(l.capacity), int(rows), posp });
+     }
+     /// A target pass of `rows` rows begins: where its taps' kept rows start.
+     pub fn pass(d: *Draft, rows: usize) void {
+@@ -263,8 +278,8 @@ pub const Draft = struct {
+             } else try d.go(f, .mix_sum, .{ .x = @intCast(rows) }, 256, .{ d.sums + o * 4608 * 4, l.context_norm, d.context_x });
+             try f.product(l.kc, d.context_x, d.k, rows, .bf16);
+             try f.product(l.vc, d.context_x, d.v, rows, .bf16);
+-            try d.go(f, .prep, .{ .x = 4, .y = @intCast(rows) }, 128, .{ d.k, l.ctxnorm, d.k, l.cache_k, @as(i32, 4), int(pos + first), int(l.capacity), @as(i32, @intFromBool(l.fp4)) });
+-            try d.store(f, l, pos + first, rows);
++            try d.go(f, .prep, .{ .x = 4, .y = @intCast(rows) }, 128, .{ d.k, l.ctxnorm, d.k, l.cache_k, @as(i32, 4), int(pos + first), int(l.capacity), @as(i32, @intFromBool(l.fp4)), @as(u64, 0) });
++            try d.store(f, l, pos + first, rows, 0);
+         }
+         try d.go(f, .mix, .{ .x = 1 }, 256, .{ d.taps + (o + count - 1 - d.tail_first) * 4608 * 2, d.alpha + 5 * 16, d.markov_norm, d.f_rnn, int(d.tail * 4608) });
+         d.pos = pos + count;
+@@ -277,12 +292,8 @@ pub const Draft = struct {
+         try f.k.go(.rank_sum, f.stream, .{ .x = ceil(8 * 4608, 256) }, 256, .{ d.parts, d.residual, @as(i32, 8 * 4608), @as(i32, 2) });
+         try d.go(f, .add, .{ .x = ceil(8 * 4608, 256) }, 256, .{ d.x, d.residual, @as(i32, 8 * 4608) });
+     }
+-    /// `chances[i]`: the drafter's probability for out[i] (the head's softmax over the whole vocabulary).
+-    pub fn propose(d: *Draft, f: *Forward, anchor: u32, depth: usize, out: []u32, chances: []f64) !void {
+-        try f.settleDraft();
+-        if (d.pos != f.s.pos) return error.InklingDraftPosition;
+-        if (anchor >= cfg.vocabulary or depth > 7 or out.len < depth or chances.len < depth) return error.InklingDraftRows;
+-        if (depth == 0) return;
++    fn proposeBody(d: *Draft, f: *Forward, anchor: u32, depth: usize) !void {
++        const posp = f.posp();
+         try f.embedding(&.{anchor}, d.x);
+         for (1..8) |r| try f.copy(d.x + r * 4608 * 2, d.mask, 4608 * 2);
+         for (d.layers, 0..) |l, i| {
+@@ -290,10 +301,10 @@ pub const Draft = struct {
+             try f.product(l.q, d.normed, d.q, 8, .bf16);
+             try f.product(l.k, d.normed, d.k, 8, .bf16);
+             try f.product(l.v, d.normed, d.v, 8, .bf16);
+-            try d.go(f, .prep, .{ .x = 24, .y = 8 }, 128, .{ d.q, l.qnorm, d.q, @as(u64, 0), @as(i32, 24), int(f.s.pos), int(l.capacity), @as(i32, 0) });
+-            try d.go(f, .prep, .{ .x = 4, .y = 8 }, 128, .{ d.k, l.knorm, d.k, l.cache_k, @as(i32, 4), int(f.s.pos), int(l.capacity), @as(i32, @intFromBool(l.fp4)) });
+-            try d.store(f, l, f.s.pos, 8);
+-            try d.go(f, .attention, .{ .x = 4, .y = 32 }, 256, .{ d.q, l.cache_k, l.cache_v, d.partials, int(f.s.pos), @as(i32, 24), @as(i32, 4), int(l.capacity), @as(i32, @intFromBool(dc.local(i))), @as(i32, @intFromBool(l.fp4)) });
++            try d.go(f, .prep, .{ .x = 24, .y = 8 }, 128, .{ d.q, l.qnorm, d.q, @as(u64, 0), @as(i32, 24), int(f.s.pos), int(l.capacity), @as(i32, 0), posp });
++            try d.go(f, .prep, .{ .x = 4, .y = 8 }, 128, .{ d.k, l.knorm, d.k, l.cache_k, @as(i32, 4), int(f.s.pos), int(l.capacity), @as(i32, @intFromBool(l.fp4)), posp });
++            try d.store(f, l, f.s.pos, 8, posp);
++            try d.go(f, .attention, .{ .x = 4, .y = 32 }, 256, .{ d.q, l.cache_k, l.cache_v, d.partials, int(f.s.pos), @as(i32, 24), @as(i32, 4), int(l.capacity), @as(i32, @intFromBool(dc.local(i))), @as(i32, @intFromBool(l.fp4)), posp });
+             try d.go(f, .merge, .{ .x = 24, .y = 8 }, 128, .{ d.partials, d.attention, @as(i32, 24) });
+             try d.reduce(f, l.o, d.attention);
+             try d.go(f, .norm, .{ .x = 8 }, 256, .{ d.x, l.post_norm, d.normed, @as(i32, 4608) });
+@@ -304,8 +315,53 @@ pub const Draft = struct {
+         }
+         try d.go(f, .norm, .{ .x = @intCast(depth) }, 256, .{ d.x + 4608 * 2, d.norm, d.normed + 4608 * 2, @as(i32, 4608) });
+         try f.product(f.w.head, d.normed + 4608 * 2, d.base_logits + d.fold.n * 2, depth, .bf16);
+-        try f.zero(d.rnn_input, 256 * 2);
+-        var previous = anchor;
++        const first = f.w.share.rank * d.fold.n;
++        const world = f.w.share.world;
++        for (0..depth) |step| {
++            const prev_ptr = if (step == 0) @as(u64, 0) else d.step_picks + (step - 1) * 32;
++            try d.go(f, .step_input, .{ .x = 1 }, 256, .{ f.s.ids, prev_ptr, int(world), int(step), d.markov_embed, d.normed + (step + 1) * 4608 * 2, d.f_rnn, d.rnn_input });
++            try f.product(d.rnn, d.rnn_input, d.projection, 1, .f32);
++            try d.go(f, .gates, .{ .x = 1 }, 256, .{ d.projection, d.rnn_bias, d.rnn_input, d.latent });
++            try f.product(d.fold, d.latent, d.correction, 1, .f32);
++            try d.go(f, .logits, .{ .x = ceil(d.fold.n, 256) }, 256, .{ d.base_logits + (step + 1) * d.fold.n * 2, d.correction, d.fold_bias, d.logits, int(d.fold.n) });
++            const step_ptr = d.step_picks + step * 32;
++            try f.k.go(.top1p, f.stream, .{ .x = 1 }, 1024, .{ d.logits, step_ptr + f.w.share.rank * 16, int(@min(d.fold.n, cfg.vocabulary - first)), int(first) });
++            try f.gather(step_ptr + f.w.share.rank * 16, step_ptr, 16);
++        }
++    }
++
++    /// `chances[i]`: the drafter's probability for out[i] (the head's softmax over the whole vocabulary).
++    pub fn propose(d: *Draft, f: *Forward, anchor: u32, depth: usize, out: []u32, chances: []f64) !void {
++        try f.settleDraft();
++        if (d.pos != f.s.pos) return error.InklingDraftPosition;
++        if (anchor >= cfg.vocabulary or depth > 7 or out.len < depth or chances.len < depth) return error.InklingDraftRows;
++        if (depth == 0) return;
++        if (f.graphs_on and d.graphs_on) {
++            if (f.pos_dev == null) f.pos_dev = try cuda.DeviceBuffer.alloc(f.d, 256);
++            try cuda.copy_source.enqueue(f.d, f.s.ids, std.mem.asBytes(&anchor), f.stream);
++            const p32: i32 = @intCast(f.s.pos);
++            try cuda.copy_source.enqueue(f.d, f.pos_dev.?.ptr, std.mem.asBytes(&p32), f.stream);
++            const slot = &d.graphs[d.lane][depth];
++            if (slot.* == null) {
++                f.graphing = true;
++                defer f.graphing = false;
++                try cuda.graph.beginCapture(f.stream, .thread_local);
++                const captured = d.proposeBody(f, anchor, depth);
++                var g = try cuda.graph.endCapture(f.stream);
++                defer g.deinit();
++                try captured;
++                slot.* = try g.instantiate();
++                std.log.info("inkling draft graph: lane {d}, depth {d}", .{ d.lane, depth });
++            }
++            try slot.*.?.launchOn(f.stream);
++        } else {
++            try d.proposeBody(f, anchor, depth);
++        }
++        try f.stream.synchronize();
++        if (f.exchange) |e| if (e.group) |g| try g.check();
++        var all_picks: [7][2]kern.Pick = undefined;
++        try cuda.memory.download(f.d, d.step_picks, std.mem.sliceAsBytes(all_picks[0..depth]));
++        const world = f.w.share.world;
+         var chain: f64 = 1;
+         for (0..depth) |step| {
+             if (chain < d.floor) {
+@@ -313,21 +369,17 @@ pub const Draft = struct {
+                 chances[step] = 0;
+                 continue;
+             }
+-            try f.copy(d.rnn_input + 256 * 2, d.markov_embed + @as(usize, previous) * 256 * 2, 256 * 2);
+-            try f.copy(d.rnn_input + 512 * 2, d.normed + (step + 1) * 4608 * 2, 4608 * 2);
+-            try f.copy(d.rnn_input + (512 + 4608) * 2, d.f_rnn, 4608 * 2);
+-            try f.product(d.rnn, d.rnn_input, d.projection, 1, .f32);
+-            try d.go(f, .gates, .{ .x = 1 }, 256, .{ d.projection, d.rnn_bias, d.rnn_input, d.latent });
+-            try f.product(d.fold, d.latent, d.correction, 1, .f32);
+-            try d.go(f, .logits, .{ .x = ceil(d.fold.n, 256) }, 256, .{ d.base_logits + (step + 1) * d.fold.n * 2, d.correction, d.fold_bias, d.logits, int(d.fold.n) });
+-            const first = f.w.share.rank * d.fold.n;
+-            try f.k.go(.top1p, f.stream, .{ .x = 1 }, 1024, .{ d.logits, d.top1 + f.w.share.rank * 16, int(@min(d.fold.n, cfg.vocabulary - first)), int(first) });
+-            try f.gather(d.top1 + f.w.share.rank * 16, d.top1, 16);
+-            const pick = try f.pickChance(d.top1);
+-            previous = pick.token;
+-            out[step] = previous;
+-            chances[step] = pick.chance;
+-            chain *= pick.chance;
++            var best: kern.Pick = .{ .value = -std.math.inf(f32), .token = std.math.maxInt(u32), .nonfinite = 0, .pad = 0 };
++            for (all_picks[step][0..world]) |p| {
++                if (p.nonfinite != 0) return error.NonFiniteLogits;
++                if (p.value > best.value or (p.value == best.value and p.token < best.token)) best = p;
++            }
++            var total: f64 = 0;
++            for (all_picks[step][0..world]) |p| total += @as(f64, @as(f32, @bitCast(p.pad))) * @exp(@as(f64, p.value) - @as(f64, best.value));
++            const chance = if (total > 0) 1.0 / total else 0;
++            out[step] = best.token;
++            chances[step] = chance;
++            chain *= chance;
+         }
+     }
+ };
+diff --git a/zig/src/families/inkling2/forward.zig b/zig/src/families/inkling2/forward.zig
+index 3bacce7e..48387a0d 100644
+--- a/zig/src/families/inkling2/forward.zig
++++ b/zig/src/families/inkling2/forward.zig
+@@ -50,9 +50,12 @@ pub const Forward = struct {
+     verify_check: bool = false,
+     audit: ?@import("verify_audit.zig").Audit = null,
+     graphs_on: bool = false, // TF_INKLING_GRAPHS: one-token and verify steps replay a captured graph per row count
++    batch_graphs_on: bool = true, // TF_INKLING_BATCH_GRAPHS: shared multi-stream verifyBatch graph cache
+     graphing: bool = false, // capturing: ids and position come from the device
+     pos_dev: ?cuda.DeviceBuffer = null,
+     graphs: [st.max_streams][2][9][2]?Chain = @splat(@splat(@splat(@splat(null)))), // [slot][editing][rows][verifying]
++    batch_graphs: [32]BatchEntry = @splat(.{}),
++    batch_clock: u64 = 0,
+     chain: ?*Chain = null,
+     restore_table: [st.max_streams]?cuda.DeviceBuffer = @splat(null), // keep(): each slot's conv histories' segments in a draft snapshot row
+     restore_segments: usize = 0, // capturing: where the forward is cut into launchable pieces
+@@ -66,6 +69,10 @@ pub const Forward = struct {
+         if (f.verify_mod) |*m| m.unload();
+         if (f.audit) |*a| a.deinit();
+         for (0..f.graphs.len) |lane| f.dropGraphs(lane);
++        for (&f.batch_graphs) |*bg| if (bg.chain) |*c| {
++            c.deinit();
++            bg.chain = null;
++        };
+         for (&f.restore_table) |*t| if (t.*) |*b| b.free();
+         if (f.pos_dev) |*p| p.free();
+         if (f.side) |*sd| {
+@@ -81,6 +88,14 @@ pub const Forward = struct {
+             c.deinit();
+             g.* = null;
+         };
++        for (&f.batch_graphs) |*bg| if (bg.chain) |*c| {
++            for (bg.key.lanes[0..bg.key.count]) |l| if (l == lane) {
++                c.deinit();
++                bg.chain = null;
++                break;
++            };
++        };
++        if (f.drafter) |d| d.dropGraphs(lane);
+     }
+ 
+     /// Make slot `lane` the one passes run on.
+@@ -170,10 +185,14 @@ pub const Forward = struct {
+         }
+     }
+ 
+-    fn posp(f: *const Forward) u64 {
++    pub fn posp(f: *const Forward) u64 {
+         return if (f.graphing) f.pos_dev.?.ptr else 0;
+     }
+ 
++    fn pospLane(f: *const Forward, lane: usize) u64 {
++        return if (f.graphing) f.pos_dev.?.ptr + lane * 4 else 0;
++    }
++
+     pub fn product(f: *Forward, l: wt.Linear, x: u64, out: u64, rows: usize, kind: cuda.cublaslt.DataType) !void {
+         if (l.q) |q| {
+             const o: cuda.qmmf.Out = if (kind == .f32) .f32 else .bf16;
+@@ -674,7 +693,7 @@ pub const Forward = struct {
+         const mine = picks + f.w.share.rank * head_rows * 16;
+         // row r draws the token at start + r + 1 (a verify window) or the last row's at start + rows; a replayed graph
+         // reads start from pos_dev
+-        for (0..head_rows) |r| try f.k.go(.top1, f.stream, .{ .x = 1 }, 256, .{ logits + r * n * 4, mine + r * 16, int(@min(n, cfg.vocabulary - first)), int(first), s.draws + f.lane * 16, int(start), f.posp(), int(if (f.verifying) r + 1 else rows) });
++        for (0..head_rows) |r| try f.k.go(.top1, f.stream, .{ .x = 1 }, 1024, .{ logits + r * n * 4, mine + r * 16, int(@min(n, cfg.vocabulary - first)), int(first), s.draws + f.lane * 16, int(start), f.posp(), int(if (f.verifying) r + 1 else rows) });
+         try f.gather(mine, picks, head_rows * 16);
+     }
+ 
+@@ -685,11 +704,7 @@ pub const Forward = struct {
+         f.verifying = true;
+         defer f.verifying = false;
+         try f.run(ids, true);
+-        for (0..ids.len) |r| {
+-            try f.copy(f.s.top1, f.drafter.?.verify_picks + r * 16, 16);
+-            try f.copy(f.s.top1 + 16, f.drafter.?.verify_picks + (ids.len + r) * 16, 16);
+-            out[r] = try f.pick();
+-        }
++        try f.pickRows(f.drafter.?.verify_picks, ids.len, out);
+         if (f.verify_check) {
+             try f.audit.?.snapshot(f, ids.len);
+             try f.restoreHistory(0);
+@@ -742,9 +757,15 @@ pub const Forward = struct {
+         f.verifying = true;
+         f.batch = segs;
+         d.pass(ids.len);
+-        const done = f.bodyBatch(ids);
++        const done = if (f.graphs_on and f.batch_graphs_on and !f.verify_check)
++            f.replayBatch(segs, ids)
++        else
++            f.bodyBatch(ids);
+         f.verifying = false;
+         f.batch = &.{};
++        if (done) |_| {
++            for (segs) |g| s.slots[g.lane].pos += g.rows;
++        } else |_| {}
+         f.load(f.lane);
+         try done;
+         try f.pickRows(d.verify_picks, ids.len, out);
+@@ -836,6 +857,58 @@ pub const Forward = struct {
+             try f.k.go(.edit, f.stream, .{ .x = @intCast(g.rows) }, 512, .{ y + g.first * cfg.hidden * 2, @as(i32, cfg.hidden), e.e(), @as(i32, @intCast(e.rank)), scale });
+     }
+ 
++    fn replayBatch(f: *Forward, segs: []const Seg, ids: []const u32) !void {
++        const s = f.s;
++        if (f.pos_dev == null) f.pos_dev = try cuda.DeviceBuffer.alloc(f.d, 256);
++        var pos_all: [st.max_streams]i32 = @splat(0);
++        var key: BatchKey = .{ .count = @intCast(segs.len) };
++        for (segs, 0..) |g, i| {
++            pos_all[g.lane] = @intCast(s.slots[g.lane].pos);
++            key.lanes[i] = @intCast(g.lane);
++            key.rows[i] = @intCast(g.rows);
++            key.editing[i] = @intFromBool(s.slots[g.lane].editing);
++        }
++        try cuda.copy_source.enqueue(f.d, s.ids, std.mem.sliceAsBytes(ids), f.stream);
++        try cuda.copy_source.enqueue(f.d, f.pos_dev.?.ptr, std.mem.sliceAsBytes(&pos_all), f.stream);
++        f.batch_clock += 1;
++        var found: ?*BatchEntry = null;
++        var victim: *BatchEntry = &f.batch_graphs[0];
++        for (&f.batch_graphs) |*bg| {
++            if (bg.chain != null and std.meta.eql(bg.key, key)) {
++                found = bg;
++                break;
++            }
++            if (bg.chain == null) {
++                if (victim.chain != null) victim = bg;
++            } else if (victim.chain != null and bg.used < victim.used) {
++                victim = bg;
++            }
++        }
++        const entry = found orelse blk: {
++            if (victim.chain) |*old| {
++                old.deinit();
++                victim.chain = null;
++            }
++            f.graphing = true;
++            defer f.graphing = false;
++            var chain: Chain = .{};
++            errdefer chain.deinit();
++            f.chain = &chain;
++            defer f.chain = null;
++            try cuda.graph.beginCapture(f.stream, .thread_local);
++            const captured = f.bodyBatch(ids);
++            var g = try cuda.graph.endCapture(f.stream);
++            defer g.deinit();
++            try captured;
++            try chain.add(try g.instantiate());
++            victim.* = .{ .key = key, .chain = chain, .used = f.batch_clock };
++            std.log.info("inkling batch graph: {d} streams, {d} rows, captured in {d} pieces", .{ segs.len, ids.len, chain.count });
++            break :blk victim;
++        };
++        entry.used = f.batch_clock;
++        for (entry.chain.?.parts[0..entry.chain.?.count]) |e| try e.launchOn(f.stream);
++    }
++
+     /// A shared verify pass's forward (attend, afterAttention and tail with each stream's pieces on its own rows).
+     fn bodyBatch(f: *Forward, ids: []const u32) !void {
+         const rows = ids.len;
+@@ -859,8 +932,8 @@ pub const Forward = struct {
+             for (f.batch) |g| try f.convSeg(l.mlp_conv, g, i, 3, s.sums, 0, s.mlp);
+             const blocks = cfg.blocksBefore(i);
+             try f.k.go(.finish, f.stream, .{ .x = ceil(rows * h, 256) }, 256, .{ s.partial, s.blocks + blocks * s.rows * h * 2, s.attention, s.mlp, int(rows * h), @as(i32, @intFromBool(i % cfg.block_size == 0)) });
++            if (f.chain) |c| if (i + 1 == 2 or (i + 1) % 8 == 0 and i + 1 < f.w.layer.len) try c.cut(f.stream);
+         }
+-        for (f.batch) |g| s.slots[g.lane].pos += g.rows;
+         try f.k.go(.mix, f.stream, .{ .x = @intCast(rows) }, kern.mix_threads, .{kern.Mix{ .partial = s.partial, .blocks = s.blocks, .attention = 0, .query = f.w.output_query, .norm = f.w.norm, .out = s.normed, .rows = int(rows), .width = cfg.hidden, .block_stride = int(s.rows * cfg.hidden), .blocks_count = int(cfg.blocksBefore(f.w.layer.len)), .queries = 1, .mode = 0 }});
+         const d = f.drafter.?;
+         try d.tap(f, 7, s.normed, 0, rows);
+@@ -870,8 +943,8 @@ pub const Forward = struct {
+         try f.k.go(.logits, f.stream, .{ .x = ceil(rows * n, 256) }, 256, .{ d.verify_logits, int(rows * n) });
+         const mine = d.verify_picks + f.w.share.rank * rows * 16;
+         for (f.batch) |g| for (g.first..g.first + g.rows) |r| {
+-            const start = s.slots[g.lane].pos - g.rows; // the segment's row r - g.first draws the token one past it
+-            try f.k.go(.top1, f.stream, .{ .x = 1 }, 256, .{ d.verify_logits + r * n * 4, mine + r * 16, int(@min(n, cfg.vocabulary - first)), int(first), s.draws + g.lane * 16, int(start), @as(u64, 0), int(r - g.first + 1) });
++            const start = s.slots[g.lane].pos; // the segment's row r - g.first draws the token one past it
++            try f.k.go(.top1, f.stream, .{ .x = 1 }, 1024, .{ d.verify_logits + r * n * 4, mine + r * 16, int(@min(n, cfg.vocabulary - first)), int(first), s.draws + g.lane * 16, int(start), f.pospLane(g.lane), int(r - g.first + 1) });
+         };
+         try f.gather(mine, d.verify_picks, rows * 16);
+     }
+@@ -923,21 +996,22 @@ pub const Forward = struct {
+         for (f.batch) |g| {
+             const cache = s.slots[g.lane].cache[index];
+             const pos = s.slots[g.lane].pos;
++            const pp = f.pospLane(g.lane);
+             const n = g.rows;
+             const fp4: i32 = @intFromBool(cache.fp4);
+             const q = s.q + g.first * heads * 128 * 2;
+             const k = s.k + g.first * keys * 128 * 2;
+             const v = s.v + g.first * keys * 128 * 2;
+             const r = s.r + g.first * heads * 16 * 2;
+-            try f.k.go(.prep, stream, .{ .x = @intCast(heads), .y = @intCast(n) }, 128, .{ q, l.q_scale, q, @as(u64, 0), int(heads), @as(i32, 128), int(pos), int(cache.capacity), @as(i32, 0), @as(i32, @intFromBool(!local)), @as(u64, 0), @as(i32, 0) });
+-            try f.k.go(.prep, stream, .{ .x = @intCast(keys), .y = @intCast(n) }, 128, .{ k, @as(u64, 0), k, cache.k, int(keys), @as(i32, 128), int(pos), int(cache.capacity), @as(i32, 1), @as(i32, 0), @as(u64, 0), fp4 });
+-            try f.k.go(.prep, stream, .{ .x = @intCast(keys), .y = @intCast(n) }, 128, .{ v, @as(u64, 0), v, cache.v, int(keys), @as(i32, 128), int(pos), int(cache.capacity), @as(i32, 2), @as(i32, 0), @as(u64, 0), fp4 });
+-            try f.k.go(.prep, stream, .{ .x = @intCast(heads), .y = @intCast(n) }, 128, .{ r, l.r_scale, r, @as(u64, 0), int(heads), @as(i32, 16), int(pos), int(cache.capacity), @as(i32, 3), @as(i32, @intFromBool(!local)), @as(u64, 0), @as(i32, 0) });
++            try f.k.go(.prep, stream, .{ .x = @intCast(heads), .y = @intCast(n) }, 128, .{ q, l.q_scale, q, @as(u64, 0), int(heads), @as(i32, 128), int(pos), int(cache.capacity), @as(i32, 0), @as(i32, @intFromBool(!local)), pp, @as(i32, 0) });
++            try f.k.go(.prep, stream, .{ .x = @intCast(keys), .y = @intCast(n) }, 128, .{ k, @as(u64, 0), k, cache.k, int(keys), @as(i32, 128), int(pos), int(cache.capacity), @as(i32, 1), @as(i32, 0), pp, fp4 });
++            try f.k.go(.prep, stream, .{ .x = @intCast(keys), .y = @intCast(n) }, 128, .{ v, @as(u64, 0), v, cache.v, int(keys), @as(i32, 128), int(pos), int(cache.capacity), @as(i32, 2), @as(i32, 0), pp, fp4 });
++            try f.k.go(.prep, stream, .{ .x = @intCast(heads), .y = @intCast(n) }, 128, .{ r, l.r_scale, r, @as(u64, 0), int(heads), @as(i32, 16), int(pos), int(cache.capacity), @as(i32, 3), @as(i32, @intFromBool(!local)), pp, @as(i32, 0) });
+         }
+         try f.k.go(.relative, stream, .{ .x = @intCast(rows * heads) }, 128, .{ s.r, l.relative, s.relative, int(heads) });
+         for (f.batch) |g| {
+             const cache = s.slots[g.lane].cache[index];
+-            const attention: kern.Attention = .{ .q = s.q + g.first * heads * 128 * 2, .k = cache.k, .v = cache.v, .relative = s.relative + g.first * heads * 1024 * 2, .gate = s.gate + g.first * heads * 128 * 2, .sink = s.sink + g.first * heads * 2, .out = s.attn_heads + g.first * heads * 128 * 2, .rows = int(g.rows), .pos = int(s.slots[g.lane].pos), .hq = int(heads), .hk = int(keys), .capacity = int(cache.capacity), .window = if (local) 1023 else 0, .fp4 = @intFromBool(cache.fp4) };
++            const attention: kern.Attention = .{ .q = s.q + g.first * heads * 128 * 2, .k = cache.k, .v = cache.v, .relative = s.relative + g.first * heads * 1024 * 2, .gate = s.gate + g.first * heads * 128 * 2, .sink = s.sink + g.first * heads * 2, .out = s.attn_heads + g.first * heads * 128 * 2, .rows = int(g.rows), .pos = int(s.slots[g.lane].pos), .hq = int(heads), .hk = int(keys), .capacity = int(cache.capacity), .window = if (local) 1023 else 0, .posp = f.pospLane(g.lane), .fp4 = @intFromBool(cache.fp4) };
+             try f.runAttention(attention, heads);
+         }
+         try f.productRows(l.o, s.attn_heads, f.ownPart(.{ .first = 0, .count = rows }), rows, .f32);
+@@ -1116,6 +1190,19 @@ pub const Forward = struct {
+ /// it is submitted, so the pieces after the first are submitted while the device runs the earlier ones.
+ const Segment = extern struct { dst: u64, off: u32, len: u32 };
+ 
++const BatchKey = struct {
++    count: u8 = 0,
++    lanes: [st.max_streams]u8 = @splat(0),
++    rows: [st.max_streams]u8 = @splat(0),
++    editing: [st.max_streams]u8 = @splat(0),
++};
++
++const BatchEntry = struct {
++    key: BatchKey = .{},
++    chain: ?Chain = null,
++    used: u64 = 0,
++};
++
+ const Chain = struct {
+     parts: [8]cuda.graph.Exec = undefined,
+     count: usize = 0,
+diff --git a/zig/src/families/inkling2/native.zig b/zig/src/families/inkling2/native.zig
+index 0aa73f2c..5bc20c67 100644
+--- a/zig/src/families/inkling2/native.zig
++++ b/zig/src/families/inkling2/native.zig
+@@ -205,6 +205,7 @@ fn openPair(gpa: std.mem.Allocator, io: std.Io, ctx: *const cuda.Context, dir: [
+     own.f = .{ .gpa = gpa, .d = ctx.d, .stream = own.stream, .w = &own.w, .s = &own.s, .k = &own.k, .lt = &own.lt, .exchange = .{ .lib = &own.lib.?, .comm = own.comm, .group = &own.group.? } };
+     errdefer own.f.deinit();
+     own.f.graphs_on = try environment.read(bool, "TF_INKLING_GRAPHS", true);
++    own.f.batch_graphs_on = try environment.read(bool, "TF_INKLING_BATCH_GRAPHS", true);
+     if (try editDir()) |path| {
+         own.edit = try @import("edit.zig").Edit.load(gpa, io, ctx.d, path);
+         own.f.edit = &own.edit.?;
+@@ -226,6 +227,7 @@ fn openPair(gpa: std.mem.Allocator, io: std.Io, ctx: *const cuda.Context, dir: [
+     if (o.drafts) {
+         own.draft = try @import("draft.zig").Draft.init(gpa, io, ctx.d, dir, share, o.context, own.s.rows, if (quant) |*q| q else null, kv4, streams, true);
+         own.draft.?.floor = try draftFloor();
++        own.draft.?.graphs_on = try environment.read(bool, "TF_INKLING_DRAFT_GRAPHS", true);
+         own.f.drafter = &own.draft.?;
+         own.f.verify_check = try environment.read(bool, "TF_INKLING_VERIFY_CHECK", false);
+         try own.f.prepareVerify();
+diff --git a/zig/src/platform/environment.zig b/zig/src/platform/environment.zig
+index 81512977..912db785 100644
+--- a/zig/src/platform/environment.zig
++++ b/zig/src/platform/environment.zig
+@@ -37,6 +37,8 @@ pub const rules = [_]Rule{
+     .{ .name = "TF_INKLING_VISION_DUMP", .scope = .cuda, .kind = .path, .forms = "a folder without control characters (rank 0 writes each image's rows there, for checks)" },
+     .{ .name = "TF_INKLING_DRAFT_FLOOR", .scope = .cuda, .kind = .real, .max = 1, .forms = "a chained draft chance from 0 to 1 (default 0.6: drafts under it are not verified or drafted further; 0 keeps the acceptance-rate depth rule)" },
+     .{ .name = "TF_INKLING_GRAPHS", .scope = .cuda, .kind = .flag, .forms = "0 or 1 (default 1: one-token and verify steps replay CUDA graphs)" },
++    .{ .name = "TF_INKLING_BATCH_GRAPHS", .scope = .cuda, .kind = .flag, .forms = "0 or 1 (default 1: shared multi-stream verifyBatch replays CUDA graphs)" },
++    .{ .name = "TF_INKLING_DRAFT_GRAPHS", .scope = .cuda, .kind = .flag, .forms = "0 or 1 (default 1: draft.propose replays a captured CUDA graph)" },
+     .{ .name = "TF_INKLING_PROMPT_ROWS", .scope = .cuda, .kind = .u32, .min = 1, .max = 16384, .forms = "prompt rows a pass, 1 to 16384 (default 256; scratch grows about 0.55 MB a row)" },
+     .{ .name = "TF_INKLING_VERIFY_CHECK", .scope = .cuda, .kind = .flag, .forms = "0 or 1" },
+     .{ .name = "TF_INKLING_STREAMS", .scope = .cuda, .kind = .u32, .min = 1, .max = 4, .forms = "requests served at once, 1 to 4 (default 4: their global caches share one KV pool; 1: one request on whole-context caches)" },
 -- 
 2.56.1
 
