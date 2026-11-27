@@ -629,3 +629,215 @@ def test_first_exchange_skips_tool_preamble_and_stops_before_turn_two(title_env,
     assert "MH370 satellite video hoax" in seen_prompts[0]
     assert "let me pull up that link" not in seen_prompts[0]
     assert "Turn two answer" not in seen_prompts[0]
+
+
+@pytest.mark.parametrize(
+    ("title", "user_text", "expected"),
+    [
+        ("", "Hello world", True),
+        ("New chat", "Hello world", True),
+        ("New Chat", "Hello world", True),
+        ("Apple의 쿼런틴 제거 커맨드좀", "Apple의 쿼런틴 제거 커맨드좀", True),
+        (
+            "woaahhhh no way!! https://x.com/viviencheng__/st",
+            "woaahhhh no way!! https://x.com/viviencheng__/status/21256310503198314",
+            True,
+        ),
+        (
+            "https://x.com/theo/status/2125177503526588877\nco",
+            "https://x.com/theo/status/2125177503526588877\ncontext: extra text",
+            True,
+        ),
+        (
+            "Explain how KV cache prefix matching works in ll…",
+            "Explain how KV cache prefix matching works in llama.cpp when tools change",
+            True,
+        ),
+        (
+            "Explain how KV cache prefix matching works in ll...",
+            "Explain how KV cache prefix matching works in llama.cpp when tools change",
+            True,
+        ),
+        ("MIDI의 표준 정의와 역할", "midi가 무엇의 표준이라고 말할수 있을까?", False),
+        ("Custom User Title", "Explain how KV cache works", False),
+    ],
+)
+def test_is_ungenerated_title_detection(title, user_text, expected):
+    assert history_route._is_ungenerated_title(title, user_text) is expected
+
+
+def test_auto_model_resolution_falls_back_from_unloaded_local_model(title_env, monkeypatch):
+    store, _, mgr, client, headers = title_env
+    user_hash = auth.account_hash("user-1")
+
+    conv = store.create_conversation(
+        user_hash,
+        title="Old Title",
+        model="gemma-4-31B",  # local model not currently active
+        messages=[
+            {"role": "user", "content": "Help me debug systemd timers"},
+            {"role": "assistant", "content": "Check systemctl list-timers first."},
+        ],
+    )
+
+    seen_models = []
+
+    async def fake_completion(model_name, prompt_text, caller_hash):
+        seen_models.append(model_name)
+        return "Systemd Timer Debugging"
+
+    monkeypatch.setattr(history_route, "_call_title_completion", fake_completion)
+
+    # Without explicit body model, regenerate falls back to active completion model (Inkling-2-Small)
+    resp = client.post(f"/history/{conv['id']}/title", json={"force": True}, headers=headers)
+    assert resp.status_code == 200
+    assert resp.json() == {"conversation_id": conv["id"], "title": "Systemd Timer Debugging"}
+    assert seen_models == ["Inkling-2-Small"]
+    assert mgr.start_calls == []
+
+
+def test_run_title_backfill_once_backfills_ungenerated_only_and_preserves_order(title_env, monkeypatch):
+    store, _, _, _, _ = title_env
+    user_a = auth.account_hash("user-a")
+    user_b = auth.account_hash("user-b")
+    now_ms = 2_000_000_000_000
+    old_ms = now_ms - 600_000  # 10 minutes ago
+    fresh_ms = now_ms - 10_000  # 10 seconds ago (still active Turn 1)
+
+    # 1. Empty conversation (no messages) -> ignored by SQL filter
+    store.upsert_conversation_tree(
+        user_a, {"id": "c-empty", "name": "New chat", "lastModified": old_ms, "model": "Inkling-2-Small"}
+    )
+
+    # 2. Old conversation with 48-char raw prompt placeholder and unloaded local model -> backfilled
+    long_prompt = "do you have any idea why they decided to train with 384 experts instead of 128?"
+    store.upsert_conversation_tree(
+        user_a, {"id": "c-prefix", "name": long_prompt[:48], "lastModified": old_ms, "model": "gemma-4-31B"}
+    )
+    store.create_message_branch(
+        user_a, "c-prefix", {"id": "m-p-u", "parent": None, "role": "user", "content": long_prompt}
+    )
+    store.create_message_branch(
+        user_a, "c-prefix", {"id": "m-p-a", "parent": "m-p-u", "role": "assistant", "content": "Fine-grained MoE improves routing efficiency."}
+    )
+    store.patch_conversation_tree(user_a, "c-prefix", {"lastModified": old_ms})
+
+    # 3. Old conversation under another user with exact short prompt title -> backfilled
+    short_prompt = "Apple의 쿼런틴 제거 커맨드좀"
+    store.upsert_conversation_tree(
+        user_b, {"id": "c-exact", "name": short_prompt, "lastModified": old_ms - 1000, "model": "Inkling-2-Small"}
+    )
+    store.create_message_branch(
+        user_b, "c-exact", {"id": "m-e-u", "parent": None, "role": "user", "content": short_prompt}
+    )
+    store.create_message_branch(
+        user_b, "c-exact", {"id": "m-e-a", "parent": "m-e-u", "role": "assistant", "content": "xattr -dr com.apple.quarantine ..."}
+    )
+    store.patch_conversation_tree(user_b, "c-exact", {"lastModified": old_ms - 1000})
+
+    # 4. Old conversation already titled -> untouched
+    store.upsert_conversation_tree(
+        user_a, {"id": "c-titled", "name": "Custom Titled Chat", "lastModified": old_ms - 2000, "model": "Inkling-2-Small"}
+    )
+    store.create_message_branch(
+        user_a, "c-titled", {"id": "m-t-u", "parent": None, "role": "user", "content": "Completely different prompt"}
+    )
+    store.patch_conversation_tree(user_a, "c-titled", {"lastModified": old_ms - 2000})
+
+    # 5. Fresh conversation (< min_age_s) -> skipped so active Turn 1 is not raced
+    store.upsert_conversation_tree(
+        user_a, {"id": "c-fresh", "name": "New chat", "lastModified": fresh_ms, "model": "Inkling-2-Small"}
+    )
+    store.create_message_branch(
+        user_a, "c-fresh", {"id": "m-f-u", "parent": None, "role": "user", "content": "Streaming right now"}
+    )
+    store.patch_conversation_tree(user_a, "c-fresh", {"lastModified": fresh_ms})
+
+    # 6. Conversation renamed mid-flight during LLM call -> NOT overwritten
+    store.upsert_conversation_tree(
+        user_a, {"id": "c-race", "name": "New chat", "lastModified": old_ms - 3000, "model": "Inkling-2-Small"}
+    )
+    store.create_message_branch(
+        user_a, "c-race", {"id": "m-r-u", "parent": None, "role": "user", "content": "Race condition check"}
+    )
+    store.patch_conversation_tree(user_a, "c-race", {"lastModified": old_ms - 3000})
+
+    calls = []
+
+    async def fake_completion(model_name, prompt_text, caller_hash):
+        calls.append((model_name, prompt_text))
+        if "384 experts" in prompt_text:
+            return "MoE 384 Experts Architecture"
+        if "쿼런틴" in prompt_text:
+            return "macOS 쿼런틴 제거 명령어"
+        if "Race condition check" in prompt_text:
+            store.patch_conversation_tree(user_a, "c-race", {"name": "Manual Override"})
+            return "Should Not Overwrite"
+        return "Fallback Title"
+
+    monkeypatch.setattr(history_route, "_call_title_completion", fake_completion)
+
+    stats = asyncio.run(
+        history_route.run_title_backfill_once(
+            min_age_s=120,
+            max_per_run=10,
+            step_pause_s=0,
+            now_ms_fn=lambda: now_ms,
+        )
+    )
+
+    assert stats["updated"] == 2
+    assert stats["candidates"] == 3
+    assert stats["skipped"] == 1
+    assert stats["failed"] == 0
+    assert all(model == "Inkling-2-Small" for model, _ in calls)
+
+    saved_prefix = store.get_conversation_tree(user_a, "c-prefix")
+    assert saved_prefix["name"] == "MoE 384 Experts Architecture"
+    assert saved_prefix["lastModified"] == old_ms
+
+    saved_exact = store.get_conversation_tree(user_b, "c-exact")
+    assert saved_exact["name"] == "macOS 쿼런틴 제거 명령어"
+    assert saved_exact["lastModified"] == old_ms - 1000
+
+    assert store.get_conversation_tree(user_a, "c-titled")["name"] == "Custom Titled Chat"
+    assert store.get_conversation_tree(user_a, "c-fresh")["name"] == "New chat"
+    assert store.get_conversation_tree(user_a, "c-race")["name"] == "Manual Override"
+
+
+def test_run_title_backfill_once_caps_retries_on_repeated_failures(title_env, monkeypatch):
+    store, _, _, _, _ = title_env
+    user_a = auth.account_hash("user-a")
+    now_ms = 2_000_000_000_000
+    old_ms = now_ms - 600_000
+
+    store.upsert_conversation_tree(
+        user_a, {"id": "c-fail", "name": "New chat", "lastModified": old_ms, "model": "Inkling-2-Small"}
+    )
+    store.create_message_branch(
+        user_a, "c-fail", {"id": "m-fail", "parent": None, "role": "user", "content": "Unparseable title case"}
+    )
+    store.patch_conversation_tree(user_a, "c-fail", {"lastModified": old_ms})
+
+    attempts = 0
+
+    async def failing_completion(model_name, prompt_text, caller_hash):
+        nonlocal attempts
+        attempts += 1
+        return None
+
+    monkeypatch.setattr(history_route, "_call_title_completion", failing_completion)
+    failed_counts: dict[tuple[str, str], int] = {}
+
+    for _ in range(5):
+        asyncio.run(
+            history_route.run_title_backfill_once(
+                min_age_s=120,
+                max_per_run=10,
+                step_pause_s=0,
+                failed_counts=failed_counts,
+                now_ms_fn=lambda: now_ms,
+            )
+        )
+
+    assert attempts == history_route._TITLE_BACKFILL_MAX_RETRIES

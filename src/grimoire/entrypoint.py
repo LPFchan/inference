@@ -83,7 +83,7 @@ from grimoire.proxy.client import (
     get_proxy_client,
     send_while_connected,
 )
-from grimoire.routes.history import router as history_router
+from grimoire.routes.history import router as history_router, title_backfill_loop
 from grimoire.routes.dashboard import router as dashboard_router
 from grimoire.routes.models import router as models_router
 from grimoire.routes.registry import router as registry_router
@@ -200,14 +200,16 @@ async def lifespan(_app):
         logger.warning("Remote status probe on boot failed: %s", exc)
 
     sampler_task = asyncio.create_task(telemetry_sampler())
+    title_backfill_task = asyncio.create_task(title_backfill_loop())
     try:
         yield
     finally:
-        sampler_task.cancel()
-        try:
-            await sampler_task
-        except (asyncio.CancelledError, Exception):
-            pass
+        for bg_task in (title_backfill_task, sampler_task):
+            bg_task.cancel()
+            try:
+                await bg_task
+            except (asyncio.CancelledError, Exception):
+                pass
         await manager.shutdown(keep_remote=getattr(_app.state, "restarting", False))
         await close_proxy_client()
 
