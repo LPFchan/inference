@@ -339,6 +339,25 @@ class HistoryStore:
             ).fetchall()
             return [self._row_to_conv_dict(row) for row in rows]
 
+    def list_conversations_with_messages(self, limit=5000):
+        """List conversation headers across all users that contain at least one non-root message."""
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT c.user_hash, c.id, c.title, c.model, c.created_at, c.updated_at, c.last_modified_ms
+                FROM conversations c
+                WHERE EXISTS (
+                    SELECT 1 FROM messages m
+                    WHERE m.conversation_id = c.id
+                      AND COALESCE(m.type, m.role) != 'root'
+                )
+                ORDER BY COALESCE(c.last_modified_ms, 0) DESC, c.updated_at DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
     def get_conversation_tree(self, user_hash, conversation_id):
         """Return one conversation's metadata + all its messages with tree edges."""
         with self._lock, self._connect() as conn:

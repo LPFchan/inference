@@ -1,8 +1,12 @@
 """History route handlers (/history/*)."""
 
+import asyncio
+from datetime import datetime, timezone
 import json
 import logging
+import os
 import re
+import time
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request
@@ -17,9 +21,16 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 _DEFAULT_TITLE_PLACEHOLDERS = {"", "New chat", "New Chat"}
+_TITLE_PLACEHOLDER_PREFIX_CHARS = 48
 _TITLE_TEXT_CLAMP = 1200
 _TITLE_MAX_CHARS = 80
 _TITLE_TIMEOUT_S = 30.0
+_TITLE_BACKFILL_INTERVAL_S = int(os.environ.get("GRIMOIRE_TITLE_BACKFILL_INTERVAL_S", "3600"))
+_TITLE_BACKFILL_INITIAL_DELAY_S = int(os.environ.get("GRIMOIRE_TITLE_BACKFILL_INITIAL_DELAY_S", "60"))
+_TITLE_BACKFILL_MIN_AGE_S = int(os.environ.get("GRIMOIRE_TITLE_BACKFILL_MIN_AGE_S", "120"))
+_TITLE_BACKFILL_MAX_PER_RUN = int(os.environ.get("GRIMOIRE_TITLE_BACKFILL_MAX_PER_RUN", "20"))
+_TITLE_BACKFILL_MAX_RETRIES = 3
+_TITLE_BACKFILL_STEP_PAUSE_S = 0.25
 _THINK_BLOCK_RE = re.compile(r"<think>.*?</think>", re.IGNORECASE | re.DOTALL)
 _UNCLOSED_THINK_RE = re.compile(r"<think>.*$", re.IGNORECASE | re.DOTALL)
 _TITLE_PREFIX_RE = re.compile(r"^(?:title|subject|topic)\s*:\s*", re.IGNORECASE)
@@ -386,6 +397,18 @@ def _is_completion_model(model_name: str, reg=None) -> bool:
     return "completion" in caps
 
 
+def _is_title_model_runnable(model_name: str, reg=None, manager=None) -> bool:
+    """Return True when title completion can run without cold-loading a local GPU."""
+    reg = reg or _get_registry()
+    manager = manager or _get_manager()
+    if manager.get_active(model_name) is not None:
+        return True
+    cfg = reg.get(model_name) or {}
+    if cfg.get("backend", BACKEND_LLAMA) == BACKEND_VLLM_REMOTE:
+        return True
+    return bool(cfg.get("fallback"))
+
+
 def _resolve_title_model(body_model, conv: dict, path: list[dict]) -> str:
     """Resolve a completion-capable model for title generation."""
     reg = _get_registry()
@@ -410,10 +433,14 @@ def _resolve_title_model(body_model, conv: dict, path: list[dict]) -> str:
             candidates.append(msg["model"].strip())
             break
 
+    resolved_candidates: list[str] = []
     for candidate in candidates:
         resolved = reg.resolve(candidate)
         if resolved and _is_completion_model(resolved, reg):
-            return resolved
+            if _is_title_model_runnable(resolved, reg, manager):
+                return resolved
+            if resolved not in resolved_candidates:
+                resolved_candidates.append(resolved)
 
     active_completion = [
         name for name in manager.list_active()
@@ -424,6 +451,9 @@ def _resolve_title_model(body_model, conv: dict, path: list[dict]) -> str:
     fallback_candidates = non_fixed or active_completion
     if fallback_candidates:
         return fallback_candidates[0]
+
+    if resolved_candidates:
+        return resolved_candidates[0]
 
     raise HTTPException(status_code=400, detail="No completion model available for title generation")
 
@@ -632,3 +662,186 @@ async def generate_history_title(conversation_id: str, request: Request):
         return {"conversation_id": conversation_id, "title": None, "skipped": True}
 
     return {"conversation_id": conversation_id, "title": title}
+
+
+def _is_ungenerated_title(current_name: str, user_text: str) -> bool:
+    """Return True if current_name is still a placeholder or raw first-prompt snippet."""
+    stripped = (current_name or "").strip()
+    if stripped in _DEFAULT_TITLE_PLACEHOLDERS:
+        return True
+    prompt = (user_text or "").strip()
+    if not prompt:
+        return False
+    if stripped == prompt:
+        return True
+    if stripped.endswith("…"):
+        prefix = stripped[:-1]
+        if len(prefix) >= 20 and prompt.startswith(prefix):
+            return True
+    elif stripped.endswith("..."):
+        prefix = stripped[:-3]
+        if len(prefix) >= 20 and prompt.startswith(prefix):
+            return True
+    cp_prefix = prompt[:_TITLE_PLACEHOLDER_PREFIX_CHARS].strip()
+    if cp_prefix and stripped == cp_prefix:
+        return True
+    u16_prefix = (
+        prompt.encode("utf-16-le")[: _TITLE_PLACEHOLDER_PREFIX_CHARS * 2]
+        .decode("utf-16-le", errors="ignore")
+        .strip()
+    )
+    if u16_prefix and stripped == u16_prefix:
+        return True
+    return False
+
+
+def _header_last_modified_ms(header: dict) -> int:
+    raw_ms = header.get("last_modified_ms")
+    if isinstance(raw_ms, (int, float)) and raw_ms > 0:
+        return int(raw_ms)
+    updated_at = header.get("updated_at")
+    if isinstance(updated_at, str) and updated_at.strip():
+        try:
+            dt = datetime.fromisoformat(updated_at.replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return int(dt.timestamp() * 1000)
+        except ValueError:
+            return 0
+    return 0
+
+
+async def run_title_backfill_once(
+    *,
+    min_age_s: int | None = None,
+    max_per_run: int | None = None,
+    step_pause_s: float | None = None,
+    failed_counts: dict[tuple[str, str], int] | None = None,
+    now_ms_fn=None,
+) -> dict[str, int]:
+    """Scan conversations with ungenerated placeholder titles and backfill them."""
+    min_age = _TITLE_BACKFILL_MIN_AGE_S if min_age_s is None else min_age_s
+    limit = _TITLE_BACKFILL_MAX_PER_RUN if max_per_run is None else max_per_run
+    pause_s = _TITLE_BACKFILL_STEP_PAUSE_S if step_pause_s is None else step_pause_s
+    now_ms = int(now_ms_fn()) if now_ms_fn is not None else int(time.time() * 1000)
+    cutoff_ms = now_ms - max(0, min_age) * 1000
+    failures = failed_counts if failed_counts is not None else {}
+
+    store = _history_store()
+    headers = store.list_conversations_with_messages()
+    stats = {"scanned": len(headers), "candidates": 0, "updated": 0, "skipped": 0, "failed": 0}
+    if limit <= 0 or not headers:
+        return stats
+
+    attempted = 0
+    for header in headers:
+        if attempted >= limit:
+            break
+        if min_age > 0 and _header_last_modified_ms(header) > cutoff_ms:
+            continue
+
+        conv_id = header["id"]
+        user_hash = header["user_hash"]
+        header_title = header.get("title") or ""
+        retry_key = (conv_id, header_title)
+        if failures.get(retry_key, 0) >= _TITLE_BACKFILL_MAX_RETRIES:
+            stats["skipped"] += 1
+            continue
+
+        try:
+            conv = store.get_conversation_tree(user_hash, conv_id)
+        except KeyError:
+            continue
+
+        current_name = conv.get("name") or ""
+        path = _active_message_path(conv)
+        user_text, assistant_text = _extract_first_exchange(path)
+        if not user_text and not assistant_text:
+            continue
+        if not _is_ungenerated_title(current_name, user_text):
+            continue
+
+        stats["candidates"] += 1
+        try:
+            model_name = _resolve_title_model(None, conv, path)
+        except HTTPException:
+            stats["skipped"] += 1
+            continue
+
+        if not _is_title_model_runnable(model_name):
+            stats["skipped"] += 1
+            continue
+
+        attempted += 1
+        prompt_text = _build_title_prompt(user_text, assistant_text)
+        raw_title = await _call_title_completion(model_name, prompt_text, user_hash)
+        title = _clean_generated_title(raw_title)
+        if not title:
+            failures[(conv_id, current_name)] = failures.get((conv_id, current_name), 0) + 1
+            stats["failed"] += 1
+            continue
+
+        try:
+            latest = store.get_conversation_tree(user_hash, conv_id)
+        except KeyError:
+            stats["skipped"] += 1
+            continue
+        latest_name = latest.get("name") or ""
+        if latest_name != current_name:
+            stats["skipped"] += 1
+            continue
+
+        preserved_last_modified = latest.get("lastModified", conv.get("lastModified", 0))
+        try:
+            store.patch_conversation_tree(
+                user_hash,
+                conv_id,
+                {"name": title, "lastModified": preserved_last_modified},
+            )
+            failures.pop((conv_id, current_name), None)
+            stats["updated"] += 1
+        except KeyError:
+            stats["skipped"] += 1
+
+        if pause_s > 0 and attempted < limit:
+            await asyncio.sleep(pause_s)
+
+    return stats
+
+
+async def title_backfill_loop(
+    *,
+    interval_s: int | None = None,
+    initial_delay_s: int | None = None,
+) -> None:
+    """Periodic background task that generates titles for conversations missed at Turn 1."""
+    interval = _TITLE_BACKFILL_INTERVAL_S if interval_s is None else interval_s
+    delay = _TITLE_BACKFILL_INITIAL_DELAY_S if initial_delay_s is None else initial_delay_s
+    if interval <= 0:
+        logger.info("Periodic title backfill disabled (interval=%ss)", interval)
+        return
+
+    logger.info("Periodic title backfill enabled (every %ss, initial delay %ss)", interval, delay)
+    failed_counts: dict[tuple[str, str], int] = {}
+    try:
+        if delay > 0:
+            await asyncio.sleep(delay)
+        while True:
+            try:
+                stats = await run_title_backfill_once(failed_counts=failed_counts)
+                if stats["updated"] or stats["failed"]:
+                    logger.info(
+                        "Title backfill pass finished: updated=%d failed=%d candidates=%d scanned=%d",
+                        stats["updated"],
+                        stats["failed"],
+                        stats["candidates"],
+                        stats["scanned"],
+                    )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.exception("Title backfill pass failed: %s", exc)
+            await asyncio.sleep(interval)
+    except asyncio.CancelledError:
+        logger.debug("Periodic title backfill stopped")
+        raise
