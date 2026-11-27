@@ -765,11 +765,12 @@ async def run_title_backfill_once(
         try:
             model_name = _resolve_title_model(None, conv, path)
         except HTTPException:
-            # No completion model is available at all right now; stop early until next tick.
-            break
+            stats["skipped"] += 1
+            continue
 
         if not _is_title_model_runnable(model_name):
-            break
+            stats["skipped"] += 1
+            continue
 
         attempted += 1
         prompt_text = _build_title_prompt(user_text, assistant_text)

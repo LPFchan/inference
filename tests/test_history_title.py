@@ -841,3 +841,49 @@ def test_run_title_backfill_once_caps_retries_on_repeated_failures(title_env, mo
         )
 
     assert attempts == history_route._TITLE_BACKFILL_MAX_RETRIES
+
+
+def test_run_title_backfill_once_continues_past_unavailable_local_conv(title_env, monkeypatch):
+    store, _, mgr, _, _ = title_env
+    user_a = auth.account_hash("user-a")
+    now_ms = 2_000_000_000_000
+    old_ms = now_ms - 600_000
+
+    # No completion model active; local model cannot run without cold-load, but remote model can.
+    mgr._active.pop("Inkling-2-Small", None)
+
+    store.upsert_conversation_tree(
+        user_a, {"id": "c-local-unloaded", "name": "New chat", "lastModified": old_ms, "model": "gemma-4-31B"}
+    )
+    store.create_message_branch(
+        user_a, "c-local-unloaded", {"id": "m-lu", "parent": None, "role": "user", "content": "Unloaded local prompt"}
+    )
+    store.patch_conversation_tree(user_a, "c-local-unloaded", {"lastModified": old_ms})
+
+    store.upsert_conversation_tree(
+        user_a, {"id": "c-remote", "name": "New chat", "lastModified": old_ms - 5000, "model": "Inkling-2-Small"}
+    )
+    store.create_message_branch(
+        user_a, "c-remote", {"id": "m-ru", "parent": None, "role": "user", "content": "Remote model prompt"}
+    )
+    store.patch_conversation_tree(user_a, "c-remote", {"lastModified": old_ms - 5000})
+
+    async def fake_completion(model_name, prompt_text, caller_hash):
+        assert model_name == "Inkling-2-Small"
+        return "Remote Model Backfill"
+
+    monkeypatch.setattr(history_route, "_call_title_completion", fake_completion)
+
+    stats = asyncio.run(
+        history_route.run_title_backfill_once(
+            min_age_s=120,
+            max_per_run=10,
+            step_pause_s=0,
+            now_ms_fn=lambda: now_ms,
+        )
+    )
+
+    assert stats["updated"] == 1
+    assert stats["skipped"] == 1
+    assert store.get_conversation_tree(user_a, "c-local-unloaded")["name"] == "New chat"
+    assert store.get_conversation_tree(user_a, "c-remote")["name"] == "Remote Model Backfill"
