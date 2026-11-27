@@ -259,3 +259,49 @@ def test_detect_raster_image_format_covers_isobmff_and_standard_headers():
     heic_hdr = (24).to_bytes(4, "big") + b"ftypheic\x00\x00\x00\x00mif1heic"
     assert web_fetch.detect_raster_image_format(heic_hdr) == ("image/heic", "HEIC")
     assert web_fetch.detect_raster_image_format(b"<html>not an image</html>") is None
+
+
+def test_web_fetch_idna_encodes_unicode_hostname(monkeypatch):
+    seen = _patch_dns_and_http(
+        monkeypatch,
+        [
+            _FakeStreamResponse(
+                status_code=200,
+                headers={"content-type": "text/plain"},
+                chunks=[b"ok"],
+            )
+        ],
+        dns_map={"xn--bcher-kva.example": "93.184.216.34"},
+    )
+    resp = TestClient(entrypoint.app).post(
+        "/web-fetch",
+        json={"url": "https://bücher.example:8443/page"},
+        headers=AUTH,
+    )
+    assert resp.status_code == 200
+    assert seen[0]["headers"]["Host"] == "xn--bcher-kva.example:8443"
+    assert seen[0]["extensions"] == {"sni_hostname": "xn--bcher-kva.example"}
+
+
+def test_web_fetch_marks_truncated_when_byte_limit_cuts_off_html(monkeypatch):
+    monkeypatch.setattr(web_fetch, "MAX_TEXT_BYTES", 64)
+    html = b"<html><head><style>" + (b"a" * 100) + b"</style></head><body>Hello</body></html>"
+    _patch_dns_and_http(
+        monkeypatch,
+        [
+            _FakeStreamResponse(
+                status_code=200,
+                headers={"content-type": "text/html"},
+                chunks=[html],
+            )
+        ],
+    )
+    resp = TestClient(entrypoint.app).post(
+        "/web-fetch",
+        json={"url": "https://example.com/huge.html"},
+        headers=AUTH,
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["kind"] == "text"
+    assert data["truncated"] is True

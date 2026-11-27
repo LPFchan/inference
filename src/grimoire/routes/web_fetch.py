@@ -244,8 +244,8 @@ def html_to_text(html: str) -> str:
     return parser.get_text()
 
 
-async def validate_and_resolve_url(raw_url: str) -> tuple[urllib.parse.ParseResult, str, str]:
-    """Validate URL scheme/host/DNS against SSRF rules and return (parsed, pinned_url, sni_host)."""
+async def validate_and_resolve_url(raw_url: str) -> tuple[str, str, str]:
+    """Validate URL scheme/host/DNS against SSRF rules and return (host_header, pinned_url, sni_host)."""
     parsed = urllib.parse.urlparse(raw_url.strip())
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
         raise HTTPException(
@@ -259,31 +259,39 @@ async def validate_and_resolve_url(raw_url: str) -> tuple[urllib.parse.ParseResu
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="URL has an invalid port") from exc
 
-    hostname = parsed.hostname
-    if is_blocked_hostname(hostname):
+    raw_hostname = parsed.hostname
+    if ":" in raw_hostname:
+        ascii_hostname = raw_hostname
+    else:
+        try:
+            ascii_hostname = raw_hostname.encode("idna").decode("ascii")
+        except UnicodeError as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid hostname '{raw_hostname}'") from exc
+
+    if is_blocked_hostname(ascii_hostname):
         raise HTTPException(
             status_code=403,
-            detail=f"Blocked host '{hostname}' (loopback or internal hostname)",
+            detail=f"Blocked host '{ascii_hostname}' (loopback or internal hostname)",
         )
 
     resolve_port = port if port is not None else (443 if parsed.scheme == "https" else 80)
     try:
         addresses = await asyncio.to_thread(
             socket.getaddrinfo,
-            hostname,
+            ascii_hostname,
             resolve_port,
             type=socket.SOCK_STREAM,
         )
     except socket.gaierror as exc:
         raise HTTPException(
             status_code=502,
-            detail=f"DNS lookup failed for '{hostname}': {exc}",
+            detail=f"DNS lookup failed for '{ascii_hostname}': {exc}",
         ) from exc
 
     if not addresses:
         raise HTTPException(
             status_code=502,
-            detail=f"DNS lookup returned no addresses for '{hostname}'",
+            detail=f"DNS lookup returned no addresses for '{ascii_hostname}'",
         )
 
     for item in addresses:
@@ -291,29 +299,33 @@ async def validate_and_resolve_url(raw_url: str) -> tuple[urllib.parse.ParseResu
         if is_blocked_ip(resolved_ip):
             raise HTTPException(
                 status_code=403,
-                detail=f"Blocked resolved IP {resolved_ip} for host '{hostname}'",
+                detail=f"Blocked resolved IP {resolved_ip} for host '{ascii_hostname}'",
             )
 
     selected_ip = addresses[0][4][0]
     pinned_host = f"[{selected_ip}]" if ":" in selected_ip else selected_ip
     pinned_netloc = f"{pinned_host}:{port}" if port is not None else pinned_host
     pinned_url = urllib.parse.urlunparse(parsed._replace(netloc=pinned_netloc))
-    return parsed, pinned_url, hostname
+    header_host = f"[{ascii_hostname}]" if ":" in ascii_hostname else ascii_hostname
+    host_header = f"{header_host}:{port}" if port is not None else header_host
+    return host_header, pinned_url, ascii_hostname
 
 
-async def _fetch_public_url(raw_url: str) -> tuple[bytes, str, str, tuple[str, str] | None]:
+async def _fetch_public_url(
+    raw_url: str,
+) -> tuple[bytes, str, str, tuple[str, str] | None, bool]:
     """Fetch a public HTTP/HTTPS URL following validated redirects with size & timeout caps."""
     current_url = raw_url.strip()
     deadline = time.monotonic() + WEB_TIMEOUT_S
 
     for _hop in range(MAX_REDIRECTS + 1):
-        parsed, pinned_url, sni_host = await validate_and_resolve_url(current_url)
+        host_header, pinned_url, sni_host = await validate_and_resolve_url(current_url)
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise HTTPException(status_code=504, detail="Web request timed out")
 
         req_headers = {
-            "Host": parsed.netloc,
+            "Host": host_header,
             "User-Agent": DEFAULT_USER_AGENT,
             "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
         }
@@ -357,6 +369,7 @@ async def _fetch_public_url(raw_url: str) -> tuple[bytes, str, str, tuple[str, s
                     is_image = is_raster_image_content_type(content_type)
                     sniffed: tuple[str, str] | None = None
                     sniff_done = is_text_ct
+                    bytes_truncated = False
                     header_probe = bytearray()
                     buf = bytearray()
 
@@ -387,11 +400,13 @@ async def _fetch_public_url(raw_url: str) -> tuple[bytes, str, str, tuple[str, s
                             )
                         room = max_bytes - len(buf)
                         if room <= 0:
+                            bytes_truncated = True
                             break
                         if len(chunk) <= room:
                             buf.extend(chunk)
                         else:
                             buf.extend(chunk[:room])
+                            bytes_truncated = True
                             break
 
                     if not sniff_done and len(header_probe) > 0:
@@ -400,7 +415,13 @@ async def _fetch_public_url(raw_url: str) -> tuple[bytes, str, str, tuple[str, s
                             sniffed = detected
                             is_image = True
 
-                    return bytes(buf), content_type, current_url, sniffed if is_image else None
+                    return (
+                        bytes(buf),
+                        content_type,
+                        current_url,
+                        sniffed if is_image else None,
+                        bytes_truncated,
+                    )
             except httpx.TimeoutException as exc:
                 raise HTTPException(status_code=504, detail=f"Web request timed out: {exc}") from exc
             except httpx.RequestError as exc:
@@ -439,7 +460,7 @@ async def web_fetch_endpoint(request: Request):
         raise HTTPException(status_code=400, detail="Missing 'url' field")
 
     max_chars = _clamp_max_chars(payload.get("max_chars"))
-    body, content_type, final_url, sniffed = await _fetch_public_url(raw_url)
+    body, content_type, final_url, sniffed, bytes_truncated = await _fetch_public_url(raw_url)
     headers = {
         "Cache-Control": "no-store",
         "X-Content-Type-Options": "nosniff",
@@ -481,8 +502,8 @@ async def web_fetch_endpoint(request: Request):
     else:
         extracted = html_to_text(raw_text)
 
-    truncated = len(extracted) > max_chars
-    text = extracted[:max_chars] if truncated else extracted
+    truncated = bytes_truncated or len(extracted) > max_chars
+    text = extracted[:max_chars] if len(extracted) > max_chars else extracted
 
     return JSONResponse(
         content={
